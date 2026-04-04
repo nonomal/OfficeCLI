@@ -192,7 +192,7 @@ static partial class CommandBuilder
                 }
                 else
                 {
-                    var setNode = handler.Get(path, 1);
+                    var setNode = handler.Get(path, 0);
                     Console.WriteLine(OutputFormatter.WrapEnvelopeWithData(outputMsg, setNode, allWarnings.Count > 0 ? allWarnings : null, findMatchCount));
                 }
             }

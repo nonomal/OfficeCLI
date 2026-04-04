@@ -172,7 +172,7 @@ static partial class CommandBuilder
                 }
                 if (json)
                 {
-                    var addedNode = handler.Get(resultPath, 1);
+                    var addedNode = handler.Get(resultPath, 0);
                     Console.WriteLine(OutputFormatter.WrapEnvelopeWithData(
                         spatialLine != null ? $"{message}\n  {spatialLine}" : message,
                         addedNode,

@@ -101,7 +101,7 @@ public partial class ExcelHandler
     // ==================== Sheet Rendering ====================
 
     private void RenderSheetTable(StringBuilder sb, string sheetName, WorksheetPart worksheetPart, Stylesheet? stylesheet,
-        List<(int fromRow, int toRow, string html)>? charts = null)
+        List<(int fromRow, int toRow, int fromCol, int toCol, string html)>? charts = null)
     {
         var ws = GetSheet(worksheetPart);
         var sheetData = ws.GetFirstChild<SheetData>();
@@ -135,6 +135,8 @@ public partial class ExcelHandler
 
         // Build conditional formatting CSS overrides
         var cfMap = BuildConditionalFormatMap(ws, stylesheet, sheetData, _doc.WorkbookPart);
+        var dataBarMap = BuildDataBarMap(ws, sheetData);
+        var iconSetMap = BuildIconSetMap(ws, sheetData);
 
         // Collect column widths
         var colWidths = GetColumnWidths(ws);
@@ -185,15 +187,18 @@ public partial class ExcelHandler
                 return;
             }
             // Charts exist but no cell data — just render charts
-            foreach (var (_, _, html) in charts)
+            foreach (var (_, _, _, _, html) in charts)
                 sb.Append(html);
             return;
         }
 
-        // Extend maxRow to include chart anchor ranges so charts render at their position
+        // Extend maxRow/maxCol to include chart anchor ranges
         if (charts != null)
-            foreach (var (_, toRow, _) in charts)
+            foreach (var (_, toRow, fromCol, toCol, _) in charts)
+            {
+                if (toCol > maxCol) maxCol = toCol;
                 if (toRow > maxRow) maxRow = toRow;
+            }
 
         // Limit rendering to reasonable size
         var actualRow = maxRow;
@@ -273,6 +278,12 @@ public partial class ExcelHandler
             if (widthPx <= 0) hiddenCols.Add(colIdx);
         }
 
+        // Build chart lookup: fromRow → chart info for inline insertion
+        var chartAtRow = new Dictionary<int, (int toRow, int fromCol, int toCol, string html)>();
+        if (charts != null)
+            foreach (var (fromRow, toRow, fromCol, toCol, html) in charts)
+                chartAtRow[fromRow] = (toRow, fromCol, toCol, html);
+
         // Start table
         sb.AppendLine("<div class=\"table-wrapper\">");
         sb.AppendLine("<table>");
@@ -316,11 +327,7 @@ public partial class ExcelHandler
         }
         sb.AppendLine("</tr></thead>");
 
-        // Build chart lookup: fromRow → (toRow, html) for inline insertion
-        var chartAtRow = new Dictionary<int, (int toRow, string html)>();
-        if (charts != null)
-            foreach (var (fromRow, toRow, html) in charts)
-                chartAtRow[fromRow] = (toRow, html);
+        // chartAtRow and sideCharts already built above
 
         // Visible column count for chart colspan
         var visibleColCount = Enumerable.Range(1, maxCol).Count(c => !hiddenCols.Contains(c));
@@ -332,13 +339,61 @@ public partial class ExcelHandler
             // Insert chart at its anchor row position
             if (chartAtRow.TryGetValue(r, out var chartEntry))
             {
-                sb.AppendLine($"<tr><td colspan=\"{visibleColCount + 1}\" style=\"padding:0;border:none\">");
-                sb.Append(chartEntry.html);
-                sb.AppendLine("</td></tr>");
-                r = chartEntry.toRow - 1;
+                // Chart fromCol is 0-based; columns in table are 1-based
+                var chartFromCol1 = chartEntry.fromCol + 1; // convert to 1-based
+                var chartToCol1 = chartEntry.toCol; // toCol is exclusive in anchor
+                // Count visible columns before and within chart range
+                var colsBefore = Enumerable.Range(1, Math.Min(chartFromCol1 - 1, maxCol))
+                    .Count(c => !hiddenCols.Contains(c));
+                var chartColSpan = Enumerable.Range(chartFromCol1, Math.Min(chartToCol1, maxCol) - chartFromCol1 + 1)
+                    .Count(c => !hiddenCols.Contains(c));
+                var rowSpan = chartEntry.toRow - r;
+
+                sb.Append("<tr>");
+                sb.Append($"<th class=\"row-header\">{r}</th>");
+                // Empty cells before the chart
+                for (int c = 1; c < chartFromCol1 && c <= maxCol; c++)
+                {
+                    if (hiddenCols.Contains(c)) continue;
+                    var cellRef = $"{IndexToColumnName(c)}{r}";
+                    var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
+                    sb.Append($"<td{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
+                }
+                // Chart cell spanning multiple rows and columns
+                if (chartColSpan > 0)
+                    sb.Append($"<td colspan=\"{chartColSpan}\" rowspan=\"{rowSpan}\" style=\"padding:0;border:none;vertical-align:top\">{chartEntry.html}</td>");
+                // Empty cells after the chart
+                for (int c = chartToCol1 + 1; c <= maxCol; c++)
+                {
+                    if (hiddenCols.Contains(c)) continue;
+                    sb.Append("<td></td>");
+                }
+                sb.AppendLine("</tr>");
                 continue;
             }
-            if (charts != null && charts.Any(ch => r > ch.fromRow && r < ch.toRow)) continue;
+            // Skip rows that are within a chart's rowspan (but still render non-chart columns)
+            if (charts != null && charts.Any(ch => r > ch.fromRow && r < ch.toRow))
+            {
+                sb.Append("<tr>");
+                sb.Append($"<th class=\"row-header\">{r}</th>");
+                var activeChart = charts.First(ch => r > ch.fromRow && r < ch.toRow);
+                var acFromCol1 = activeChart.fromCol + 1;
+                var acToCol1 = activeChart.toCol;
+                for (int c = 1; c <= maxCol; c++)
+                {
+                    if (hiddenCols.Contains(c)) continue;
+                    if (c >= acFromCol1 && c <= acToCol1) continue; // spanned by chart rowspan
+                    var cellRef = $"{IndexToColumnName(c)}{r}";
+                    var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
+                    sb.Append($"<td{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
+                }
+                sb.AppendLine("</tr>");
+                continue;
+            }
 
             if (hiddenRows.Contains(r)) { sb.AppendLine("<tr style=\"display:none\"></tr>"); continue; }
             bool isRowFrozen = frozenRows > 0 && r <= frozenRows;
@@ -369,7 +424,7 @@ public partial class ExcelHandler
                     if (!mergeInfo.IsAnchor) continue; // skip non-anchor cells
 
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
                     // Adjust colspan to exclude hidden columns within the merge range
                     var adjColSpan = mergeInfo.ColSpan;
@@ -382,14 +437,14 @@ public partial class ExcelHandler
                     if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
                     if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
 
-                    sb.Append($"<td{spanAttrs}{style}>{CellHtml(value)}</td>");
+                    sb.Append($"<td{spanAttrs}{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
                 }
                 else
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
-                    sb.Append($"<td{style}>{CellHtml(value)}</td>");
+                    sb.Append($"<td{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
                 }
             }
             sb.AppendLine("</tr>");
@@ -399,7 +454,7 @@ public partial class ExcelHandler
         // Truncation warning
         if (truncated)
             sb.AppendLine($"<div class=\"truncation-warning\">Showing {maxRow} of {actualRow} rows, {maxCol} of {actualCol} columns</div>");
-        sb.AppendLine("</div>");
+        sb.AppendLine("</div>"); // close table-wrapper
     }
 
     // ==================== Merge Map ====================
@@ -555,6 +610,200 @@ public partial class ExcelHandler
         return result;
     }
 
+    /// <summary>
+    /// Build data bar info per cell: returns HTML for the bar overlay.
+    /// </summary>
+    private Dictionary<string, string> BuildDataBarMap(Worksheet ws, SheetData sheetData)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cf in ws.Elements<ConditionalFormatting>())
+        {
+            foreach (var rule in cf.Elements<ConditionalFormattingRule>())
+            {
+                var dataBar = rule.GetFirstChild<DataBar>();
+                if (dataBar == null) continue;
+
+                var sqref = cf.SequenceOfReferences?.Items?.ToList();
+                if (sqref == null || sqref.Count == 0) continue;
+
+                // Get bar color
+                var barColorEl = dataBar.GetFirstChild<Color>();
+                var barColor = barColorEl?.Rgb?.Value ?? "FF4472C4";
+                if (barColor.Length > 6) barColor = barColor[^6..];
+
+                // Collect all cell values in range
+                var cells = new List<(string cellRef, double value)>();
+                foreach (var rangeStr in sqref)
+                {
+                    foreach (var (cellRef, row, col) in ExpandSqref(rangeStr.Value ?? ""))
+                    {
+                        var cell = sheetData.Descendants<Cell>()
+                            .FirstOrDefault(c => string.Equals(c.CellReference?.Value, cellRef, StringComparison.OrdinalIgnoreCase));
+                        if (cell?.CellValue != null && double.TryParse(cell.CellValue.Text,
+                            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                            cells.Add((cellRef, v));
+                    }
+                }
+                if (cells.Count == 0) continue;
+
+                // Determine min/max from cfvo elements or from data
+                var cfvos = dataBar.Elements<ConditionalFormatValueObject>().ToList();
+                double minVal, maxVal;
+                if (cfvos.Count >= 2 && cfvos[0].Type?.Value == ConditionalFormatValueObjectValues.Number
+                    && double.TryParse(cfvos[0].Val?.Value, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var explicitMin))
+                    minVal = explicitMin;
+                else
+                    minVal = 0; // Excel default: bars start from 0
+
+                if (cfvos.Count >= 2 && cfvos[1].Type?.Value == ConditionalFormatValueObjectValues.Number
+                    && double.TryParse(cfvos[1].Val?.Value, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var explicitMax))
+                    maxVal = explicitMax;
+                else
+                    maxVal = cells.Max(c => c.value);
+
+                if (maxVal <= minVal) maxVal = minVal + 1;
+
+                // Read bar length bounds (Excel defaults: min=10%, max=90%)
+                var minLength = dataBar.MinLength?.Value ?? 10U;
+                var maxLength = dataBar.MaxLength?.Value ?? 90U;
+                var showValue = dataBar.ShowValue?.Value ?? true;
+
+                foreach (var (cellRef, value) in cells)
+                {
+                    var rawPct = (value - minVal) / (maxVal - minVal) * 100;
+                    // Scale to minLength..maxLength range
+                    var pct = Math.Max(0, Math.Min(100, minLength + rawPct / 100 * (maxLength - minLength)));
+                    // Store bar HTML + showValue flag (prefixed with "0|" or "1|")
+                    result[cellRef] = $"{(showValue ? "1" : "0")}|<div style=\"position:absolute;left:0;top:1px;bottom:1px;width:{pct:0.#}%;background:linear-gradient(to right,#{barColor},#{barColor}40);border-radius:1px\"></div>";
+                }
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Build icon set info per cell: returns HTML for the icon.
+    /// </summary>
+    private Dictionary<string, string> BuildIconSetMap(Worksheet ws, SheetData sheetData)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var cf in ws.Elements<ConditionalFormatting>())
+        {
+            foreach (var rule in cf.Elements<ConditionalFormattingRule>())
+            {
+                var iconSet = rule.GetFirstChild<IconSet>();
+                if (iconSet == null) continue;
+
+                var sqref = cf.SequenceOfReferences?.Items?.ToList();
+                if (sqref == null || sqref.Count == 0) continue;
+
+                var iconSetName = iconSet.IconSetValue?.Value ?? IconSetValues.ThreeTrafficLights1;
+                var showValue = iconSet.ShowValue?.Value ?? true;
+                var reverse = iconSet.Reverse?.Value ?? false;
+
+                // Collect all cell values in range
+                var cells = new List<(string cellRef, double value)>();
+                foreach (var rangeStr in sqref)
+                {
+                    foreach (var (cellRef, row, col) in ExpandSqref(rangeStr.Value ?? ""))
+                    {
+                        var cell = sheetData.Descendants<Cell>()
+                            .FirstOrDefault(c => string.Equals(c.CellReference?.Value, cellRef, StringComparison.OrdinalIgnoreCase));
+                        if (cell?.CellValue != null && double.TryParse(cell.CellValue.Text,
+                            System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var v))
+                            cells.Add((cellRef, v));
+                    }
+                }
+                if (cells.Count == 0) continue;
+
+                // Parse cfvo thresholds
+                var cfvos = iconSet.Elements<ConditionalFormatValueObject>().ToList();
+                var allValues = cells.Select(c => c.value).OrderBy(v => v).ToList();
+                double minVal = allValues.First(), maxVal = allValues.Last();
+                var range = maxVal - minVal;
+                if (range == 0) range = 1;
+
+                // Resolve thresholds (skip first cfvo which is the base)
+                var thresholds = new List<double>();
+                for (int i = 1; i < cfvos.Count; i++)
+                {
+                    var cfvo = cfvos[i];
+                    var type = cfvo.Type?.Value ?? ConditionalFormatValueObjectValues.Percent;
+                    double.TryParse(cfvo.Val?.Value, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var tv);
+                    if (type == ConditionalFormatValueObjectValues.Number)
+                        thresholds.Add(tv);
+                    else if (type == ConditionalFormatValueObjectValues.Percent)
+                        thresholds.Add(minVal + range * tv / 100);
+                    else if (type == ConditionalFormatValueObjectValues.Percentile)
+                    {
+                        var idx = (int)Math.Round(tv / 100.0 * (allValues.Count - 1));
+                        thresholds.Add(allValues[Math.Clamp(idx, 0, allValues.Count - 1)]);
+                    }
+                    else
+                        thresholds.Add(minVal + range * tv / 100);
+                }
+
+                foreach (var (cellRef, value) in cells)
+                {
+                    // Determine which bucket the value falls into
+                    int bucket = 0;
+                    for (int i = 0; i < thresholds.Count; i++)
+                    {
+                        if (value >= thresholds[i]) bucket = i + 1;
+                    }
+                    if (reverse) bucket = cfvos.Count - 1 - bucket;
+                    var icon = GetIconHtml(iconSetName, bucket, cfvos.Count);
+                    // Prefix with showValue flag: "0|" = hide value, "1|" = show value
+                    result[cellRef] = $"{(showValue ? "1" : "0")}|{icon}";
+                }
+            }
+        }
+        return result;
+    }
+
+    private static string GetIconHtml(IconSetValues iconSetName, int bucket, int totalBuckets)
+    {
+        // Traffic lights: red=0, yellow=1, green=2
+        if (iconSetName == IconSetValues.ThreeTrafficLights1 || iconSetName == IconSetValues.ThreeTrafficLights2)
+        {
+            var color = bucket switch { 0 => "#C00000", 1 => "#FFC000", _ => "#00B050" };
+            return $"<span style=\"display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};margin-right:4px;vertical-align:middle\"></span>";
+        }
+        // Arrows
+        if (iconSetName == IconSetValues.ThreeArrows || iconSetName == IconSetValues.ThreeArrowsGray)
+        {
+            return bucket switch
+            {
+                0 => "<span style=\"color:#C00000;margin-right:4px;vertical-align:middle\">&#x25BC;</span>",
+                1 => "<span style=\"color:#FFC000;margin-right:4px;vertical-align:middle\">&#x25B6;</span>",
+                _ => "<span style=\"color:#00B050;margin-right:4px;vertical-align:middle\">&#x25B2;</span>",
+            };
+        }
+        // 4-icon traffic lights
+        if (iconSetName == IconSetValues.FourTrafficLights)
+        {
+            var color = bucket switch { 0 => "#C00000", 1 => "#FFC000", 2 => "#92D050", _ => "#00B050" };
+            return $"<span style=\"display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};margin-right:4px;vertical-align:middle\"></span>";
+        }
+        // Default: colored circles
+        if (totalBuckets <= 3)
+        {
+            var color = bucket switch { 0 => "#C00000", 1 => "#FFC000", _ => "#00B050" };
+            return $"<span style=\"display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};margin-right:4px;vertical-align:middle\"></span>";
+        }
+        else
+        {
+            var pct = totalBuckets > 1 ? (double)bucket / (totalBuckets - 1) : 1;
+            var r = (int)(0xC0 * (1 - pct));
+            var g = (int)(0xB0 * pct);
+            var color = $"#{r:X2}{g:X2}00";
+            return $"<span style=\"display:inline-block;width:10px;height:10px;border-radius:50%;background:{color};margin-right:4px;vertical-align:middle\"></span>";
+        }
+    }
+
     /// <summary>Evaluate whether a conditional formatting rule matches a specific cell.</summary>
     private bool EvaluateCfRule(ConditionalFormattingRule rule, string cellRef, int row, int col,
         SheetData sheetData, Core.FormulaEvaluator evaluator)
@@ -670,7 +919,8 @@ public partial class ExcelHandler
 
     private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col,
         Dictionary<int, double>? frozenLeftOffsets = null, Dictionary<int, double>? frozenTopOffsets = null,
-        Dictionary<string, string>? cfMap = null)
+        Dictionary<string, string>? cfMap = null, Dictionary<string, string>? dataBarMap = null,
+        Dictionary<string, string>? iconSetMap = null)
     {
         var styles = new List<string>();
 
@@ -704,7 +954,7 @@ public partial class ExcelHandler
                 BuildFontCss(xf, stylesheet, styles);
                 BuildFillCss(xf, stylesheet, styles);
                 BuildBorderCss(xf, stylesheet, styles);
-                BuildAlignmentCss(xf, styles);
+                BuildAlignmentCss(xf, styles, cell);
             }
         }
 
@@ -719,6 +969,13 @@ public partial class ExcelHandler
                 styles.RemoveAll(s => s.StartsWith(prop + ":"));
             }
             styles.Add(cfCss);
+        }
+
+        // Data bar or icon set: add position:relative so inner elements can be absolutely positioned
+        if ((dataBarMap != null && dataBarMap.ContainsKey(cfCellRef)) ||
+            (iconSetMap != null && iconSetMap.ContainsKey(cfCellRef)))
+        {
+            styles.Add("position:relative");
         }
 
         // Frozen rows need opaque background so scrolling content doesn't show through
@@ -841,14 +1098,14 @@ public partial class ExcelHandler
         styles.Add($"border-{side}:{width} {cssStyle} {color}");
     }
 
-    private static void BuildAlignmentCss(CellFormat xf, List<string> styles)
+    private static void BuildAlignmentCss(CellFormat xf, List<string> styles, Cell? cell = null)
     {
         var alignment = xf.Alignment;
-        if (alignment == null) return;
+        bool hasExplicitHAlign = alignment?.Horizontal?.HasValue == true;
 
-        if (alignment.Horizontal?.HasValue == true)
+        if (hasExplicitHAlign)
         {
-            var h = alignment.Horizontal.InnerText;
+            var h = alignment!.Horizontal!.InnerText;
             var cssAlign = h switch
             {
                 "center" => "center",
@@ -856,10 +1113,23 @@ public partial class ExcelHandler
                 "left" => "left",
                 "justify" => "justify",
                 "fill" => "left",
+                "general" => (string?)null, // fall through to auto-detect
                 _ => null
             };
-            if (cssAlign != null) styles.Add($"text-align:{cssAlign}");
+            if (cssAlign != null) { styles.Add($"text-align:{cssAlign}"); hasExplicitHAlign = true; }
+            else hasExplicitHAlign = false;
         }
+
+        // Excel default: numbers right-aligned, text left-aligned (General alignment)
+        if (!hasExplicitHAlign && cell != null)
+        {
+            var dt = cell.DataType?.Value;
+            bool isText = dt == CellValues.SharedString || dt == CellValues.InlineString || dt == CellValues.String;
+            if (!isText && cell.CellValue != null)
+                styles.Add("text-align:right");
+        }
+
+        if (alignment == null) return;
 
         if (alignment.Vertical?.HasValue == true)
         {
@@ -1166,6 +1436,9 @@ public partial class ExcelHandler
         { prefix += "-"; cleanFmt = cleanFmt[1..]; }
 
         var formatted = ApplyNumberFormatCore(value, cleanFmt.Trim());
+        // For single-section formats with currency prefix, negative sign goes before the prefix
+        if (value < 0 && prefix.Length > 0 && formatted.StartsWith('-'))
+            return "-" + prefix + formatted[1..] + suffix;
         return prefix + formatted + suffix;
     }
 
@@ -1474,6 +1747,40 @@ public partial class ExcelHandler
     {
         var encoded = HtmlEncode(text);
         return encoded.Contains('\n') ? encoded.Replace("\n", "<br>") : encoded;
+    }
+
+    private static string BuildCellContent(string cellRef, string value,
+        Dictionary<string, string> dataBarMap, Dictionary<string, string> iconSetMap)
+    {
+        var hasBar = dataBarMap.TryGetValue(cellRef, out var barEntry);
+        var hasIcon = iconSetMap.TryGetValue(cellRef, out var iconEntry);
+        if (!hasBar && !hasIcon) return CellHtml(value);
+
+        // Parse "showValue|html" format
+        var barShowValue = true;
+        var barHtml = "";
+        if (hasBar && barEntry != null)
+        {
+            var sep = barEntry.IndexOf('|');
+            barShowValue = sep < 0 || barEntry[0] != '0';
+            barHtml = sep >= 0 ? barEntry[(sep + 1)..] : barEntry;
+        }
+        var iconShowValue = true;
+        var iconHtml = "";
+        if (hasIcon && iconEntry != null)
+        {
+            var sep = iconEntry.IndexOf('|');
+            iconShowValue = sep < 0 || iconEntry[0] != '0';
+            iconHtml = sep >= 0 ? iconEntry[(sep + 1)..] : iconEntry;
+        }
+        var showValue = barShowValue && iconShowValue;
+
+        var sb = new StringBuilder();
+        if (hasBar) sb.Append(barHtml);
+        if (hasIcon) sb.Append($"<span style=\"position:absolute;left:4px;top:50%;transform:translateY(-50%);z-index:1\">{iconHtml}</span>");
+        if (showValue)
+            sb.Append($"<span style=\"position:relative;z-index:1\">{CellHtml(value)}</span>");
+        return sb.ToString();
     }
 
     private static string CssSanitize(string value)

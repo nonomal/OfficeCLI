@@ -22,21 +22,20 @@ public partial class ExcelHandler
     private void RenderSheetCharts(StringBuilder sb, WorksheetPart worksheetPart)
     {
         var charts = CollectSheetCharts(worksheetPart);
-        foreach (var (_, _, html) in charts)
+        foreach (var (_, _, _, _, html) in charts)
             sb.Append(html);
     }
 
     /// <summary>
-    /// Pre-render all charts and return them with their anchor row positions.
+    /// Pre-render all charts and return them with their anchor row/col positions.
     /// Charts with overlapping row ranges are grouped into flex rows.
     /// </summary>
-    private List<(int fromRow, int toRow, string html)> CollectSheetCharts(WorksheetPart worksheetPart)
+    private List<(int fromRow, int toRow, int fromCol, int toCol, string html)> CollectSheetCharts(WorksheetPart worksheetPart)
     {
-        var result = new List<(int fromRow, int toRow, string html)>();
+        var result = new List<(int fromRow, int toRow, int fromCol, int toCol, string html)>();
         var drawingsPart = worksheetPart.DrawingsPart;
         if (drawingsPart?.WorksheetDrawing == null) return result;
 
-        // Find all graphic frames that contain chart references
         var chartFrames = drawingsPart.WorksheetDrawing
             .Descendants<XDR.GraphicFrame>()
             .Where(gf => gf.Descendants<C.ChartReference>().Any())
@@ -44,44 +43,46 @@ public partial class ExcelHandler
 
         if (chartFrames.Count == 0) return result;
 
-        // Read anchor positions and group charts into rows (overlapping row ranges = same row)
         var chartAnchors = chartFrames.Select(gf =>
         {
             var anchor = gf.Parent as XDR.TwoCellAnchor;
-            int fromRow = 0, toRow = 0, fromCol = 0;
+            int fromRow = 0, toRow = 0, fromCol = 0, toCol = 0;
             if (anchor?.FromMarker != null && anchor?.ToMarker != null)
             {
                 int.TryParse(anchor.FromMarker.RowId?.Text, out fromRow);
                 int.TryParse(anchor.ToMarker.RowId?.Text, out toRow);
                 int.TryParse(anchor.FromMarker.ColumnId?.Text, out fromCol);
+                int.TryParse(anchor.ToMarker.ColumnId?.Text, out toCol);
             }
-            return (gf, fromRow, toRow, fromCol);
+            return (gf, fromRow, toRow, fromCol, toCol);
         }).OrderBy(x => x.fromRow).ThenBy(x => x.fromCol).ToList();
 
         // Group into rows: charts whose row ranges overlap go in the same flex row
-        var groups = new List<(int fromRow, int toRow, List<XDR.GraphicFrame> frames)>();
+        var groups = new List<(int fromRow, int toRow, int minFromCol, int maxToCol, List<XDR.GraphicFrame> frames)>();
         int currentRowEnd = -1;
         List<XDR.GraphicFrame>? currentGroup = null;
-        int currentFromRow = 0;
-        foreach (var (gf, fromRow, toRow, _) in chartAnchors)
+        int currentMinFromCol = 0, currentMaxToCol = 0;
+        foreach (var (gf, fromRow, toRow, fromCol, toCol) in chartAnchors)
         {
             if (currentGroup == null || fromRow >= currentRowEnd)
             {
                 currentGroup = new List<XDR.GraphicFrame>();
-                currentFromRow = fromRow;
+                currentMinFromCol = fromCol;
+                currentMaxToCol = toCol;
                 currentRowEnd = toRow;
-                groups.Add((fromRow, toRow, currentGroup));
+                groups.Add((fromRow, toRow, fromCol, toCol, currentGroup));
             }
             else
             {
                 currentRowEnd = Math.Max(currentRowEnd, toRow);
-                // Update toRow in the group
-                groups[^1] = (groups[^1].fromRow, currentRowEnd, currentGroup);
+                currentMinFromCol = Math.Min(currentMinFromCol, fromCol);
+                currentMaxToCol = Math.Max(currentMaxToCol, toCol);
+                groups[^1] = (groups[^1].fromRow, currentRowEnd, currentMinFromCol, currentMaxToCol, currentGroup);
             }
             currentGroup.Add(gf);
         }
 
-        foreach (var (fromRow, toRow, frames) in groups)
+        foreach (var (fromRow, toRow, minFromCol, maxToCol, frames) in groups)
         {
             var chartSb = new StringBuilder();
             if (frames.Count > 1)
@@ -95,7 +96,7 @@ public partial class ExcelHandler
             {
                 RenderExcelChart(chartSb, frames[0], drawingsPart, worksheetPart);
             }
-            result.Add((fromRow, toRow, chartSb.ToString()));
+            result.Add((fromRow, toRow, minFromCol, maxToCol, chartSb.ToString()));
         }
 
         return result;

@@ -1795,6 +1795,7 @@ public partial class WordHandler
     /// </summary>
     private int NextSdtId()
     {
+        const int overflowReset = 872011;
         int maxId = 0;
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body != null)
@@ -1805,7 +1806,8 @@ public partial class WordHandler
                     maxId = sdtId.Val.Value;
             }
         }
-        return maxId + 1;
+        var next = maxId + 1;
+        return next > int.MaxValue - 1 ? overflowReset : next;
     }
 
     // ==================== DocPr IDs (pictures, charts) ====================

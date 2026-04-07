@@ -200,7 +200,8 @@ done
 - **Selection survives file edits.** Paths use the stable `@id=` form (e.g. `/slide[1]/shape[@id=10000]`), so editing other shapes — or even the selected one — does not lose the selection.
 - **All connected browsers share one selection.** Opening the watch URL in two tabs gives a shared cursor; clicking in one updates highlights in the other. Last-write-wins.
 - **Same-file single-watch.** A given file can have only one watch process at a time; the second `watch <file>` errors.
-- **PPT only in v1.** Word/Excel HtmlPreview do not yet emit `data-path`; selection currently works on shapes/pictures/tables/charts/connectors in `.pptx` watches only.
+- **Group shapes select as a whole.** Clicking any shape inside a `<group>` selects the group container, not the inner shape. The CLI sees `/slide[1]/group[@id=N]`. Drilling into individual children of a group is not supported in v1.
+- **PPT only in v1.** Word/Excel HtmlPreview do not yet emit `data-path`; selection currently works on shapes/pictures/tables/charts/connectors/groups in `.pptx` watches only. Inherited layout/master decorations (footers, logos) are also not selectable.
 
 ---
 

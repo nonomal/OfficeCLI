@@ -28,6 +28,12 @@ public class WatchServer : IDisposable
     private DateTime _lastActivityTime = DateTime.UtcNow;
     private readonly TimeSpan _idleTimeout;
 
+    // Current selection — paths of elements selected in any connected browser.
+    // Single shared list (last-write-wins): all browsers viewing the same file see
+    // the same selection. CLI reads this via the named pipe "get-selection" command.
+    private List<string> _currentSelection = new();
+    private readonly object _selectionLock = new();
+
     private const string WaitingHtml = """
         <html><head><meta charset="utf-8"><title>Watching...</title>
         <style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f5;color:#666;}
@@ -495,6 +501,15 @@ public class WatchServer : IDisposable
                     // Return port so callers can find the existing watch URL
                     await writer.WriteLineAsync(_port.ToString().AsMemory(), token);
                 }
+                else if (message == "get-selection")
+                {
+                    // Return current selection as a JSON array of paths.
+                    // Empty selection → "[]". Never null.
+                    string[] snapshot;
+                    lock (_selectionLock) { snapshot = _currentSelection.ToArray(); }
+                    var json = JsonSerializer.Serialize(snapshot, WatchSelectionJsonContext.Default.StringArray);
+                    await writer.WriteLineAsync(json.AsMemory(), token);
+                }
                 else if (message != null)
                 {
                     await writer.WriteLineAsync("ok".AsMemory(), token);
@@ -827,7 +842,7 @@ public class WatchServer : IDisposable
         try
         {
             var stream = client.GetStream();
-            var requestLine = await ReadHttpRequestAsync(stream, token);
+            var (requestLine, headers, bodyPrefix) = await ReadHttpRequestHeaderAsync(stream, token);
 
             if (requestLine.Contains("GET /events"))
             {
@@ -839,19 +854,26 @@ public class WatchServer : IDisposable
                 {
                     client.Close();
                 }
+                return;
             }
-            else
+
+            if (requestLine.StartsWith("POST /api/selection", StringComparison.Ordinal))
             {
-                var html = string.IsNullOrEmpty(_currentHtml)
-                    ? InjectSseScript(WaitingHtml)
-                    : InjectSseScript(_currentHtml);
-                var body = Encoding.UTF8.GetBytes(html);
-                var header = Encoding.UTF8.GetBytes(
-                    $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
-                await stream.WriteAsync(header, token);
-                await stream.WriteAsync(body, token);
+                await HandlePostSelectionAsync(stream, headers, bodyPrefix, token);
                 client.Close();
+                return;
             }
+
+            // Default: serve current HTML (GET / and everything else)
+            var html = string.IsNullOrEmpty(_currentHtml)
+                ? InjectSseScript(WaitingHtml)
+                : InjectSseScript(_currentHtml);
+            var bodyBytes = Encoding.UTF8.GetBytes(html);
+            var header = Encoding.UTF8.GetBytes(
+                $"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {bodyBytes.Length}\r\nConnection: close\r\n\r\n");
+            await stream.WriteAsync(header, token);
+            await stream.WriteAsync(bodyBytes, token);
+            client.Close();
         }
         catch
         {
@@ -859,13 +881,108 @@ public class WatchServer : IDisposable
         }
     }
 
-    private static async Task<string> ReadHttpRequestAsync(NetworkStream stream, CancellationToken token)
+    /// <summary>
+    /// Read the HTTP request line and headers, plus any body bytes that arrived in the
+    /// same TCP read. Returns (requestLine, headers, bodyPrefix). Caller is responsible
+    /// for reading the rest of the body using Content-Length if needed.
+    /// </summary>
+    private static async Task<(string requestLine, Dictionary<string, string> headers, string bodyPrefix)>
+        ReadHttpRequestHeaderAsync(NetworkStream stream, CancellationToken token)
     {
-        var buffer = new byte[4096];
-        var read = await stream.ReadAsync(buffer, token);
-        var request = Encoding.UTF8.GetString(buffer, 0, read);
-        var idx = request.IndexOf('\r');
-        return idx >= 0 ? request[..idx] : request;
+        var buffer = new byte[8192];
+        var sb = new StringBuilder();
+        int headerEnd = -1;
+        while (headerEnd < 0)
+        {
+            var n = await stream.ReadAsync(buffer.AsMemory(), token);
+            if (n == 0) break;
+            sb.Append(Encoding.UTF8.GetString(buffer, 0, n));
+            headerEnd = sb.ToString().IndexOf("\r\n\r\n", StringComparison.Ordinal);
+            if (sb.Length > 32 * 1024) break; // safety cap
+        }
+
+        var raw = sb.ToString();
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (headerEnd < 0)
+        {
+            // No header terminator — treat the whole thing as a single line
+            var firstLine = raw;
+            var crlf = raw.IndexOf("\r\n", StringComparison.Ordinal);
+            if (crlf >= 0) firstLine = raw[..crlf];
+            return (firstLine, headers, "");
+        }
+
+        var headerSection = raw[..headerEnd];
+        var bodyPrefix = raw[(headerEnd + 4)..];
+        var lines = headerSection.Split("\r\n");
+        var requestLine = lines.Length > 0 ? lines[0] : "";
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var colon = lines[i].IndexOf(':');
+            if (colon > 0)
+                headers[lines[i][..colon].Trim()] = lines[i][(colon + 1)..].Trim();
+        }
+        return (requestLine, headers, bodyPrefix);
+    }
+
+    private async Task HandlePostSelectionAsync(NetworkStream stream, Dictionary<string, string> headers, string bodyPrefix, CancellationToken token)
+    {
+        // Read remaining body bytes per Content-Length, if any
+        var body = bodyPrefix;
+        if (headers.TryGetValue("Content-Length", out var clStr) && int.TryParse(clStr, out var contentLength))
+        {
+            var have = Encoding.UTF8.GetByteCount(body);
+            if (have < contentLength)
+            {
+                var buf = new byte[Math.Min(8192, contentLength - have)];
+                while (have < contentLength)
+                {
+                    var n = await stream.ReadAsync(buf.AsMemory(0, Math.Min(buf.Length, contentLength - have)), token);
+                    if (n == 0) break;
+                    body += Encoding.UTF8.GetString(buf, 0, n);
+                    have += n;
+                }
+            }
+        }
+
+        int statusCode = 204;
+        string statusText = "No Content";
+        try
+        {
+            // Expected JSON: {"paths": ["/slide[1]/shape[2]", ...]}
+            var req = JsonSerializer.Deserialize(body, WatchSelectionJsonContext.Default.SelectionRequest);
+            var newSelection = req?.Paths ?? new List<string>();
+            // Strip empty/null entries defensively
+            newSelection = newSelection.Where(p => !string.IsNullOrEmpty(p)).ToList();
+
+            lock (_selectionLock) { _currentSelection = newSelection; }
+            _lastActivityTime = DateTime.UtcNow;
+
+            // Broadcast to all SSE clients so other browsers can highlight in sync
+            BroadcastSelectionUpdate(newSelection);
+        }
+        catch
+        {
+            statusCode = 400;
+            statusText = "Bad Request";
+        }
+
+        var resp = Encoding.UTF8.GetBytes(
+            $"HTTP/1.1 {statusCode} {statusText}\r\nContent-Length: 0\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\n\r\n");
+        await stream.WriteAsync(resp, token);
+    }
+
+    private void BroadcastSelectionUpdate(List<string> paths)
+    {
+        var sb = new StringBuilder();
+        sb.Append("{\"action\":\"selection-update\",\"paths\":[");
+        for (int i = 0; i < paths.Count; i++)
+        {
+            if (i > 0) sb.Append(',');
+            AppendJsonString(sb, paths[i]);
+        }
+        sb.Append("]}");
+        BroadcastSse(sb.ToString());
     }
 
     private async Task HandleSseAsync(NetworkStream stream, CancellationToken token)

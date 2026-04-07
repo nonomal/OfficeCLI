@@ -28,6 +28,13 @@ static partial class CommandBuilder
             var path = result.GetValue(pathArg)!;
             var depth = result.GetValue(depthOpt);
 
+            // Special pseudo-path "selected" — query the running watch process
+            // for the currently-selected element paths and resolve them to nodes.
+            if (string.Equals(path, "selected", StringComparison.OrdinalIgnoreCase))
+            {
+                return GetSelectedAction(file.FullName, depth, json);
+            }
+
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "get";
@@ -47,6 +54,51 @@ static partial class CommandBuilder
         }, json); });
 
         return getCommand;
+    }
+
+    private static int GetSelectedAction(string filePath, int depth, bool json)
+    {
+        var paths = WatchNotifier.QuerySelection(filePath);
+        if (paths == null)
+        {
+            var msg = $"no watch running for {Path.GetFileName(filePath)}. Start one with: officecli watch \"{filePath}\"";
+            if (json)
+                Console.WriteLine(OutputFormatter.WrapEnvelopeError(msg));
+            else
+                Console.Error.WriteLine($"Error: {msg}");
+            return 1;
+        }
+
+        // Resolve each path to a DocumentNode. Skip paths that no longer exist
+        // (e.g. element removed since selection was made) — silently drop them.
+        var nodes = new List<OfficeCli.Core.DocumentNode>();
+        if (paths.Length > 0)
+        {
+            using var handler = DocumentHandlerFactory.Open(filePath);
+            foreach (var p in paths)
+            {
+                try
+                {
+                    var n = handler.Get(p, depth);
+                    if (n != null) nodes.Add(n);
+                }
+                catch
+                {
+                    // path no longer resolves — drop
+                }
+            }
+        }
+
+        if (json)
+        {
+            Console.WriteLine(OutputFormatter.WrapEnvelope(
+                OutputFormatter.FormatNodes(nodes, OutputFormat.Json)));
+        }
+        else
+        {
+            Console.WriteLine(OutputFormatter.FormatNodes(nodes, OutputFormat.Text));
+        }
+        return 0;
     }
 
     private static Command BuildQueryCommand(Option<bool> jsonOption)

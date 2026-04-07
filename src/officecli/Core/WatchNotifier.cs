@@ -49,6 +49,43 @@ public static class WatchNotifier
     }
 
     /// <summary>
+    /// Query the running watch process for the current selection.
+    /// Returns:
+    ///   null  → no watch running for this file (or pipe failure)
+    ///   []    → watch is running but nothing is selected
+    ///   [...] → list of currently-selected element paths
+    /// </summary>
+    public static string[]? QuerySelection(string filePath)
+    {
+        try
+        {
+            string[]? result = null;
+            RunWithTimeout(() =>
+            {
+                var pipeName = WatchServer.GetWatchPipeName(filePath);
+                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+                client.Connect(200);
+
+                var noBom = new UTF8Encoding(false);
+                using var writer = new StreamWriter(client, noBom, leaveOpen: true) { AutoFlush = true };
+                writer.WriteLine("get-selection");
+                writer.Flush();
+
+                using var reader = new StreamReader(client, noBom, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+                var json = reader.ReadLine();
+                if (json == null) { result = Array.Empty<string>(); return; }
+                result = JsonSerializer.Deserialize(json, WatchSelectionJsonContext.Default.StringArray)
+                         ?? Array.Empty<string>();
+            }, PipeTimeout);
+            return result;
+        }
+        catch
+        {
+            return null; // no watch running, or timed out
+        }
+    }
+
+    /// <summary>
     /// Send a close command to a running watch process.
     /// Returns true if the watch was successfully closed.
     /// </summary>
@@ -169,3 +206,16 @@ public class WordPatch
 [System.Text.Json.Serialization.JsonSerializable(typeof(WatchMessage))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(WordPatch))]
 internal partial class WatchMessageJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }
+
+/// <summary>
+/// Request body for POST /api/selection — list of currently selected element paths.
+/// </summary>
+public class SelectionRequest
+{
+    [System.Text.Json.Serialization.JsonPropertyName("paths")]
+    public List<string>? Paths { get; set; }
+}
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(SelectionRequest))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+internal partial class WatchSelectionJsonContext : System.Text.Json.Serialization.JsonSerializerContext { }

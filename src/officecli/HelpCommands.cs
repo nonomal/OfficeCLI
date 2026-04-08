@@ -767,7 +767,8 @@ Paths:
   /Sheet1/validation[N] Data validation (sqref, type, formula1, ...)
   /Sheet1/cf[N]        Conditional formatting
   /Sheet1/autofilter   AutoFilter range
-  /Sheet1/pivottable[N] Pivot table (name, location, rows, cols, filters, dataField{N}, style)
+  /Sheet1/pivottable[N] Pivot table (rows, cols, values, filters, aggregate,
+                         showDataAs, style, sort, grandTotals, name)
   /namedrange[N]       Named range by index or name
 
 PivotTable attributes (Get readback keys — canonical):
@@ -988,6 +989,18 @@ Chart (/SheetName/chart[N]):
 PivotTable (/SheetName/pivottable[N]):
   name         Pivot table name
   style        Style name (e.g. "PivotStyleMedium9")
+  rows         Row fields (comma list; e.g. "Region,Product")
+  cols         Column fields (comma list)
+  filters      Page/filter fields (comma list)
+  values       Value fields with optional aggregate/showDataAs
+                 syntax: Field[:func[:showAs]]  (e.g. "Sales:sum:percent_of_row")
+                 funcs: sum, count, average, max, min, product, stddev, var
+  aggregate    Positional override of func list (e.g. "sum,count")
+  showDataAs   Positional override of showAs list
+                 values: normal, percent_of_total, percent_of_row,
+                         percent_of_col, running_total
+  sort         Axis sort: asc | desc | locale | locale-desc
+  grandTotals  Row/column grand totals: both | rows | cols | none
 
 Workbook properties (via set / path):
   workbook.date1904          Use 1904 date system (true/false)

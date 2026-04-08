@@ -4673,8 +4673,23 @@ internal static class PivotTableHelper
                 var dfFunc = df.Subtotal?.InnerText ?? "sum";
                 var dfField = df.Field?.Value ?? 0;
                 node.Format[$"dataField{i + 1}"] = $"{dfName}:{dfFunc}:{dfField}";
+                // CONSISTENCY(canonical-format-key): showDataAs round-trips
+                // through its own structured Format key rather than being
+                // packed into the dataField{N} colon string. Existing
+                // dataField{N} schema (name:func:fieldIdx) stays untouched.
+                // 'normal' is the absent/default value, omitted from output.
+                if (df.ShowDataAs != null && df.ShowDataAs.Value != ShowDataAsValues.Normal)
+                {
+                    node.Format[$"dataField{i + 1}.showAs"] = ShowDataAsToCanonicalToken(df.ShowDataAs.Value);
+                }
             }
         }
+        // NOTE: sort=asc|desc round-trip is not implemented because the
+        // current pivot writer applies sort positionally during render but
+        // does not persist it as a per-PivotField AutoSort element. Adding
+        // a Format key here without a corresponding XML write site would
+        // produce a round-trip mismatch. See CONSISTENCY(pivot-sort-store)
+        // — v2 candidate: write/read AutoSort + AutoSortScope on PivotField.
 
         // Style
         var styleInfo = pivotDef.PivotTableStyle;
@@ -5228,6 +5243,26 @@ internal static class PivotTableHelper
     /// Accepts both snake_case and camelCase forms so users don't get punished
     /// by the convention split between CLI params (snake) and XML schema (camel).
     /// </summary>
+    /// <summary>
+    /// Inverse of ParseShowDataAs: map a stored OOXML ShowDataAsValues enum
+    /// back to the canonical snake_case token used in CLI input/output.
+    /// Used by ReadPivotTableProperties to surface dataField{N}.showAs in
+    /// Get readback. Defaults to "normal" for unmapped enum values so the
+    /// caller can suppress them via the Normal short-circuit.
+    /// </summary>
+    private static string ShowDataAsToCanonicalToken(ShowDataAsValues v)
+    {
+        if (v == ShowDataAsValues.Normal) return "normal";
+        if (v == ShowDataAsValues.PercentOfTotal) return "percent_of_total";
+        if (v == ShowDataAsValues.PercentOfRaw) return "percent_of_row";
+        if (v == ShowDataAsValues.PercentOfColumn) return "percent_of_col";
+        if (v == ShowDataAsValues.RunTotal) return "running_total";
+        if (v == ShowDataAsValues.Difference) return "difference";
+        if (v == ShowDataAsValues.PercentageDifference) return "percent_diff";
+        if (v == ShowDataAsValues.Index) return "index";
+        return v.ToString().ToLowerInvariant();
+    }
+
     private static ShowDataAsValues? ParseShowDataAs(string showAs)
     {
         return showAs.ToLowerInvariant() switch

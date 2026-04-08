@@ -3587,8 +3587,14 @@ internal static class PivotTableHelper
         var startSentinel = spec.MinDate.HasValue
             ? "<" + spec.MinDate.Value.ToString("yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture)
             : "<start";
+        // Guard against DateTime.MaxValue overflow: if MaxDate is already the
+        // last representable day, clamp AddDays(1) to DateTime.MaxValue itself
+        // so the sentinel label and OOXML EndDate remain well-formed.
         var endSentinel = spec.MaxDate.HasValue
-            ? ">" + spec.MaxDate.Value.AddDays(1).ToString("yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture)
+            ? ">" + (spec.MaxDate.Value < DateTime.MaxValue.Date
+                ? spec.MaxDate.Value.AddDays(1)
+                : spec.MaxDate.Value)
+                .ToString("yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture)
             : ">end";
 
         var allItems = new List<string>(buckets.Count + 2);
@@ -3617,7 +3623,10 @@ internal static class PivotTableHelper
             },
         };
         if (spec.MinDate.HasValue) rangePr.StartDate = spec.MinDate.Value;
-        if (spec.MaxDate.HasValue) rangePr.EndDate = spec.MaxDate.Value.AddDays(1);
+        // CONSISTENCY(date-boundary-clamp): same AddDays(1) guard as endSentinel above.
+        if (spec.MaxDate.HasValue) rangePr.EndDate = spec.MaxDate.Value < DateTime.MaxValue.Date
+            ? spec.MaxDate.Value.AddDays(1)
+            : spec.MaxDate.Value;
         fieldGroup.AppendChild(rangePr);
 
         var groupItems = new GroupItems { Count = (uint)allItems.Count };

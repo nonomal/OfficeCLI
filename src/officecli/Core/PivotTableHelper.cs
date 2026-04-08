@@ -187,12 +187,26 @@ internal static class PivotTableHelper
         int rowUnique = ProductOfUniqueValues(rowFieldIndices, columnData);
         int colUnique = ProductOfUniqueValues(colFieldIndices, columnData);
         int rowLabelCols = Math.Max(1, rowFieldIndices.Count);
-        int valueCols = Math.Max(1, colUnique) * Math.Max(1, valueFields.Count);
-        int totalCol = colFieldIndices.Count > 0 ? 1 : 0;
-        int width = rowLabelCols + valueCols + totalCol;
-        int height = (colFieldIndices.Count > 0 ? 2 : 1)
-                   + Math.Max(1, rowUnique)
-                   + 1;
+        int dataFieldCount = Math.Max(1, valueFields.Count);
+
+        // Width for K data fields × L col label values:
+        //   1 (row labels) + L*K (data area) + K (grand total area when col field exists)
+        // For K=1, this collapses to the original 1 + L + 1 = 2+L formula.
+        int valueCols = Math.Max(1, colUnique) * dataFieldCount;
+        int totalCols = colFieldIndices.Count > 0 ? dataFieldCount : 0;
+        int width = rowLabelCols + valueCols + totalCols;
+
+        // Height: K=1 → 2 header rows (col field caption + col labels). K>1 → 3 header
+        // rows (extra row for data field names repeated under each col label group).
+        // This matches the firstDataRow = 2 (K=1) vs 3 (K>1) shift verified against
+        // multi_data_authored.xlsx (location ref="A3:G9" firstDataRow=3 for 1×1×2).
+        int headerRows;
+        if (colFieldIndices.Count > 0)
+            headerRows = dataFieldCount > 1 ? 3 : 2;
+        else
+            headerRows = dataFieldCount > 1 ? 2 : 1;
+
+        int height = headerRows + Math.Max(1, rowUnique) + 1;
 
         var (anchorCol, anchorRow) = ParseCellRef(position);
         var anchorColIdx = ColToIndex(anchorCol);
@@ -339,13 +353,13 @@ internal static class PivotTableHelper
         List<(int idx, string func, string name)> valueFields,
         List<int>? filterFieldIndices = null)
     {
-        // v1 limit: exactly one of each. Anything more advanced gets the empty
-        // skeleton fallback. Document the limitation in a stderr warning so the
-        // user knows why their multi-field pivot looks empty.
-        if (rowFieldIndices.Count != 1 || colFieldIndices.Count != 1 || valueFields.Count != 1)
+        // v2 limit: exactly 1 row field × 1 col field, but ANY number of data fields.
+        // Multi-row / multi-col / page-filter-only configurations still fall back
+        // to writing the empty skeleton with a stderr warning.
+        if (rowFieldIndices.Count != 1 || colFieldIndices.Count != 1 || valueFields.Count < 1)
         {
             Console.Error.WriteLine(
-                "WARNING: pivot rendering currently supports only 1 row × 1 col × 1 data field. " +
+                "WARNING: pivot rendering currently supports only 1 row × 1 col × 1+ data fields. " +
                 "The file will open but the pivot will appear empty. " +
                 "Use Excel's Refresh button to populate it manually.");
             return;
@@ -353,52 +367,57 @@ internal static class PivotTableHelper
 
         var rowFieldIdx = rowFieldIndices[0];
         var colFieldIdx = colFieldIndices[0];
-        var (dataFieldIdx, func, dataFieldName) = valueFields[0];
+        var rowFieldName = headers[rowFieldIdx];
+        var colFieldName = headers[colFieldIdx];
+        int K = valueFields.Count;
 
         var rowValues = columnData[rowFieldIdx];
         var colValues = columnData[colFieldIdx];
-        var dataValues = columnData[dataFieldIdx];
-        var rowFieldName = headers[rowFieldIdx];
-        var colFieldName = headers[colFieldIdx];
 
-        // Unique row/col labels in cache order (alphabetical ordinal). Excel uses
-        // its own column/row sort but the order doesn't affect correctness — only
-        // the visual presentation. Match the cache field order so labels and
-        // pivotField items list stay consistent.
+        // Unique row/col labels in cache order (alphabetical ordinal).
         var uniqueRows = rowValues.Where(v => !string.IsNullOrEmpty(v)).Distinct()
             .OrderBy(v => v, StringComparer.Ordinal).ToList();
         var uniqueCols = colValues.Where(v => !string.IsNullOrEmpty(v)).Distinct()
             .OrderBy(v => v, StringComparer.Ordinal).ToList();
 
-        // Bucket source values into (rowLabel, colLabel) cells. We collect all
-        // raw values into lists so the aggregator can be applied uniformly per
-        // cell, per row total, per col total, and over the full set for the grand
-        // total. This matches LibreOffice's "average over all values, not avg of
-        // avgs" semantics (dptabres.cxx ScDPAggData::Update).
-        var buckets = new Dictionary<(string r, string c), List<double>>();
-        var allValues = new List<double>();
-        for (int i = 0; i < dataValues.Length; i++)
+        // Bucket source values per (rowLabel, colLabel, dataFieldIdx) so each data
+        // field is aggregated independently. The aggregator function differs per
+        // data field (sum/count/avg/...) so each bucket carries its own reducer.
+        // Two data fields on the same source column are common (e.g. sum + count
+        // of 金额) and produce two independent buckets keyed by their dataFieldIdx
+        // in valueFields.
+        var perBucket = new Dictionary<(string r, string c, int d), List<double>>();
+        var perDataField = new List<List<double>>();
+        for (int d = 0; d < K; d++) perDataField.Add(new List<double>());
+
+        for (int i = 0; i < rowValues.Length; i++)
         {
             var rv = rowValues.Length > i ? rowValues[i] : null;
             var cv = colValues.Length > i ? colValues[i] : null;
             if (string.IsNullOrEmpty(rv) || string.IsNullOrEmpty(cv)) continue;
-            if (!double.TryParse(dataValues[i], System.Globalization.NumberStyles.Float,
-                System.Globalization.CultureInfo.InvariantCulture, out var num)) continue;
 
-            var key = (rv, cv);
-            if (!buckets.TryGetValue(key, out var list))
+            for (int d = 0; d < K; d++)
             {
-                list = new List<double>();
-                buckets[key] = list;
+                var dataIdx = valueFields[d].idx;
+                var dataValues = columnData[dataIdx];
+                if (i >= dataValues.Length) continue;
+                if (!double.TryParse(dataValues[i], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var num)) continue;
+
+                var key = (rv, cv, d);
+                if (!perBucket.TryGetValue(key, out var list))
+                {
+                    list = new List<double>();
+                    perBucket[key] = list;
+                }
+                list.Add(num);
+                perDataField[d].Add(num);
             }
-            list.Add(num);
-            allValues.Add(num);
         }
 
-        double Reduce(IEnumerable<double> values)
+        double Reduce(IEnumerable<double> values, string func)
         {
             // Match LibreOffice's ScDPAggData (dptabres.cxx) aggregator semantics.
-            // Empty input returns 0 for sum/count, else the first available value.
             var arr = values as double[] ?? values.ToArray();
             if (arr.Length == 0) return 0;
             return func.ToLowerInvariant() switch
@@ -412,46 +431,51 @@ internal static class PivotTableHelper
             };
         }
 
-        // Build the matrix of cell values + row/col/grand totals.
-        var matrix = new double?[uniqueRows.Count, uniqueCols.Count];
-        var rowTotals = new double[uniqueRows.Count];
-        var colTotals = new double[uniqueCols.Count];
-        for (int r = 0; r < uniqueRows.Count; r++)
+        // Compute the K-deep cell matrix + row/col/grand totals per data field.
+        // matrix[r, c, d] = reduce(values for row r, col c, data field d)
+        // rowTotals[r, d], colTotals[c, d], grandTotals[d] follow the same shape.
+        var matrix = new double?[uniqueRows.Count, uniqueCols.Count, K];
+        var rowTotals = new double[uniqueRows.Count, K];
+        var colTotals = new double[uniqueCols.Count, K];
+        var grandTotals = new double[K];
+        for (int d = 0; d < K; d++)
         {
-            var rowAll = new List<double>();
-            for (int c = 0; c < uniqueCols.Count; c++)
-            {
-                if (buckets.TryGetValue((uniqueRows[r], uniqueCols[c]), out var bucket) && bucket.Count > 0)
-                {
-                    matrix[r, c] = Reduce(bucket);
-                    rowAll.AddRange(bucket);
-                }
-            }
-            rowTotals[r] = Reduce(rowAll);
-        }
-        for (int c = 0; c < uniqueCols.Count; c++)
-        {
-            var colAll = new List<double>();
+            var func = valueFields[d].func;
             for (int r = 0; r < uniqueRows.Count; r++)
             {
-                if (buckets.TryGetValue((uniqueRows[r], uniqueCols[c]), out var bucket))
-                    colAll.AddRange(bucket);
+                var rowAll = new List<double>();
+                for (int c = 0; c < uniqueCols.Count; c++)
+                {
+                    if (perBucket.TryGetValue((uniqueRows[r], uniqueCols[c], d), out var bucket) && bucket.Count > 0)
+                    {
+                        matrix[r, c, d] = Reduce(bucket, func);
+                        rowAll.AddRange(bucket);
+                    }
+                }
+                rowTotals[r, d] = Reduce(rowAll, func);
             }
-            colTotals[c] = Reduce(colAll);
+            for (int c = 0; c < uniqueCols.Count; c++)
+            {
+                var colAll = new List<double>();
+                for (int r = 0; r < uniqueRows.Count; r++)
+                {
+                    if (perBucket.TryGetValue((uniqueRows[r], uniqueCols[c], d), out var bucket))
+                        colAll.AddRange(bucket);
+                }
+                colTotals[c, d] = Reduce(colAll, func);
+            }
+            grandTotals[d] = Reduce(perDataField[d], func);
         }
-        var grandTotal = Reduce(allValues);
 
         // ===== Write cells =====
-        // Anchor + grid layout. The pivot occupies (1 + cols + 1) columns wide
-        // (row labels + data cols + grand total) and (2 + rows + 1) rows tall
-        // (caption row + header row + data rows + grand total row).
+        // For K=1, layout is 2 header rows: caption + col labels.
+        // For K>1, layout is 3 header rows: caption + col labels + per-data-field
+        // names repeated under each col label group. This matches the Excel sample
+        // multi_data_authored.xlsx exactly.
         var (anchorCol, anchorRow) = ParseCellRef(position);
         var anchorColIdx = ColToIndex(anchorCol);
         var totalColLabel = "总计";
 
-        // Make sure the worksheet has a SheetData container we can mutate. New
-        // sheets created via officecli already have an empty <sheetData/>, but
-        // be defensive in case a future caller hands us a barebones part.
         var ws = targetSheet.Worksheet
             ?? throw new InvalidOperationException("Target worksheet has no Worksheet element");
         var sheetData = ws.GetFirstChild<SheetData>();
@@ -461,48 +485,109 @@ internal static class PivotTableHelper
             ws.AppendChild(sheetData);
         }
 
-        // Row 0 (caption row): data field name in row-label column,
-        //                       col field name in first data column.
+        // ----- Row 0 (caption row) -----
+        // Single data field: data field name in row-label col, col field name in first data col.
+        // Multi data field: empty in row-label col, col field name (or "Values" placeholder) in first data col.
         var captionRow = new Row { RowIndex = (uint)anchorRow };
-        captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, dataFieldName));
+        if (K == 1)
+            captionRow.AppendChild(MakeStringCell(anchorColIdx, anchorRow, valueFields[0].name));
         captionRow.AppendChild(MakeStringCell(anchorColIdx + 1, anchorRow, colFieldName));
         sheetData.AppendChild(captionRow);
 
-        // Row 1 (header row): row field caption + col labels + 总计.
-        var headerRowIdx = anchorRow + 1;
-        var headerRow = new Row { RowIndex = (uint)headerRowIdx };
-        headerRow.AppendChild(MakeStringCell(anchorColIdx, headerRowIdx, rowFieldName));
-        for (int c = 0; c < uniqueCols.Count; c++)
-            headerRow.AppendChild(MakeStringCell(anchorColIdx + 1 + c, headerRowIdx, uniqueCols[c]));
-        headerRow.AppendChild(MakeStringCell(anchorColIdx + 1 + uniqueCols.Count, headerRowIdx, totalColLabel));
-        sheetData.AppendChild(headerRow);
+        // ----- Row 1 (col label row) -----
+        // K=1: row field caption + col labels + grand total label
+        // K>1: empty row-label cell + col labels at first col of each K-group + grand total labels
+        var colLabelRowIdx = anchorRow + 1;
+        var colLabelRow = new Row { RowIndex = (uint)colLabelRowIdx };
+        if (K == 1)
+        {
+            colLabelRow.AppendChild(MakeStringCell(anchorColIdx, colLabelRowIdx, rowFieldName));
+            for (int c = 0; c < uniqueCols.Count; c++)
+                colLabelRow.AppendChild(MakeStringCell(anchorColIdx + 1 + c, colLabelRowIdx, uniqueCols[c]));
+            colLabelRow.AppendChild(MakeStringCell(anchorColIdx + 1 + uniqueCols.Count, colLabelRowIdx, totalColLabel));
+        }
+        else
+        {
+            // First col of each K-group gets the col label; the K-1 cells after are
+            // visually spanned in Excel's renderer but we leave them empty in
+            // sheetData (Excel handles the visual span via colItems metadata).
+            for (int c = 0; c < uniqueCols.Count; c++)
+            {
+                int colStart = anchorColIdx + 1 + c * K;
+                colLabelRow.AppendChild(MakeStringCell(colStart, colLabelRowIdx, uniqueCols[c]));
+            }
+            // Grand total area: K cells, one per data field, labeled "Total <name>"
+            int totalStart = anchorColIdx + 1 + uniqueCols.Count * K;
+            for (int d = 0; d < K; d++)
+                colLabelRow.AppendChild(MakeStringCell(totalStart + d, colLabelRowIdx, "Total " + valueFields[d].name));
+        }
+        sheetData.AppendChild(colLabelRow);
 
-        // Data rows: row label + per-col values + row total.
+        // ----- Row 2 (data field name row, only when K>1) -----
+        int firstDataRow;
+        if (K > 1)
+        {
+            var dfNameRowIdx = anchorRow + 2;
+            var dfNameRow = new Row { RowIndex = (uint)dfNameRowIdx };
+            // row label column gets the row field name
+            dfNameRow.AppendChild(MakeStringCell(anchorColIdx, dfNameRowIdx, rowFieldName));
+            // Repeat data field names under each col label group
+            for (int c = 0; c < uniqueCols.Count; c++)
+            {
+                for (int d = 0; d < K; d++)
+                {
+                    int colIdx = anchorColIdx + 1 + c * K + d;
+                    dfNameRow.AppendChild(MakeStringCell(colIdx, dfNameRowIdx, valueFields[d].name));
+                }
+            }
+            // No data field names under the grand total cols — row 1 already
+            // labeled them with "Total <name>" so they are self-describing.
+            sheetData.AppendChild(dfNameRow);
+            firstDataRow = anchorRow + 3;
+        }
+        else
+        {
+            firstDataRow = anchorRow + 2;
+        }
+
+        // ----- Data rows -----
         for (int r = 0; r < uniqueRows.Count; r++)
         {
-            var rowIdx = anchorRow + 2 + r;
+            var rowIdx = firstDataRow + r;
             var dataRow = new Row { RowIndex = (uint)rowIdx };
             dataRow.AppendChild(MakeStringCell(anchorColIdx, rowIdx, uniqueRows[r]));
             for (int c = 0; c < uniqueCols.Count; c++)
             {
-                var v = matrix[r, c];
-                // Empty cells: skip rather than writing <c/> with no value, so
-                // Excel renders a blank cell (matching its own behavior on
-                // missing pivot intersections).
-                if (v.HasValue)
-                    dataRow.AppendChild(MakeNumericCell(anchorColIdx + 1 + c, rowIdx, v.Value));
+                for (int d = 0; d < K; d++)
+                {
+                    int colIdx = anchorColIdx + 1 + c * K + d;
+                    var v = matrix[r, c, d];
+                    if (v.HasValue)
+                        dataRow.AppendChild(MakeNumericCell(colIdx, rowIdx, v.Value));
+                }
             }
-            dataRow.AppendChild(MakeNumericCell(anchorColIdx + 1 + uniqueCols.Count, rowIdx, rowTotals[r]));
+            // Row totals — K cells (one per data field).
+            int rowTotalStart = anchorColIdx + 1 + uniqueCols.Count * K;
+            for (int d = 0; d < K; d++)
+                dataRow.AppendChild(MakeNumericCell(rowTotalStart + d, rowIdx, rowTotals[r, d]));
             sheetData.AppendChild(dataRow);
         }
 
-        // Grand total row.
-        var grandRowIdx = anchorRow + 2 + uniqueRows.Count;
+        // ----- Grand total row -----
+        var grandRowIdx = firstDataRow + uniqueRows.Count;
         var grandRow = new Row { RowIndex = (uint)grandRowIdx };
         grandRow.AppendChild(MakeStringCell(anchorColIdx, grandRowIdx, totalColLabel));
         for (int c = 0; c < uniqueCols.Count; c++)
-            grandRow.AppendChild(MakeNumericCell(anchorColIdx + 1 + c, grandRowIdx, colTotals[c]));
-        grandRow.AppendChild(MakeNumericCell(anchorColIdx + 1 + uniqueCols.Count, grandRowIdx, grandTotal));
+        {
+            for (int d = 0; d < K; d++)
+            {
+                int colIdx = anchorColIdx + 1 + c * K + d;
+                grandRow.AppendChild(MakeNumericCell(colIdx, grandRowIdx, colTotals[c, d]));
+            }
+        }
+        int grandTotalStart = anchorColIdx + 1 + uniqueCols.Count * K;
+        for (int d = 0; d < K; d++)
+            grandRow.AppendChild(MakeNumericCell(grandTotalStart + d, grandRowIdx, grandTotals[d]));
         sheetData.AppendChild(grandRow);
 
         // Page filter cells: rendered ABOVE the table at rows
@@ -889,7 +974,7 @@ internal static class PivotTableHelper
         {
             Reference = geom.RangeRef,
             FirstHeaderRow = 1u,
-            FirstDataRow = 2u,
+            FirstDataRow = valueFields.Count > 1 ? 3u : 2u,
             FirstDataColumn = (uint)geom.RowLabelCols
         };
 
@@ -935,14 +1020,20 @@ internal static class PivotTableHelper
         }
         pivotDef.PivotFields = pivotFields;
 
-        // RowFields
+        // RowFields — the synthetic <field x="-2"/> sentinel for multiple data
+        // fields belongs to whichever axis (rows or columns) actually displays
+        // the data field labels. The default is dataOnRows=false, so multi-data
+        // labels go in COLUMNS — meaning the sentinel appears in colFields, NOT
+        // rowFields. Only add the sentinel here when there are no col fields and
+        // therefore data must flow in the row dimension.
         if (rowFieldIndices.Count > 0)
         {
-            var rf = new RowFields { Count = (uint)rowFieldIndices.Count };
+            var rf = new RowFields();
             foreach (var idx in rowFieldIndices)
                 rf.AppendChild(new Field { Index = idx });
-            if (valueFields.Count > 1)
+            if (valueFields.Count > 1 && colFieldIndices.Count == 0)
                 rf.AppendChild(new Field { Index = -2 });
+            rf.Count = (uint)rf.Elements<Field>().Count();
             pivotDef.RowFields = rf;
         }
 
@@ -959,14 +1050,24 @@ internal static class PivotTableHelper
         // which we already populate via AppendFieldItems in BuildPivotTableDefinition above.
         // Single row field only: multi-row-field cartesian-product layout is a v2 concern.
         if (rowFieldIndices.Count > 0)
-            pivotDef.RowItems = (RowItems)BuildAxisItems(rowFieldIndices, columnData, isRow: true);
+            pivotDef.RowItems = (RowItems)BuildAxisItems(rowFieldIndices, columnData, isRow: true, dataFieldCount: 1);
 
-        // ColumnFields
-        if (colFieldIndices.Count > 0)
+        // ColumnFields — when there are 2+ data fields, append the synthetic
+        // <field x="-2"/> sentinel that tells Excel "data field labels go in
+        // the column dimension here". Verified against multi_data_authored.xlsx:
+        // a 1-row × 1-col × 2-data pivot writes <colFields count="2">
+        // <field x="1"/><field x="-2"/></colFields>. Without this sentinel
+        // Excel still opens the file but renders the K data fields stacked
+        // incorrectly. RebuildFieldAreas already handles this; the initial
+        // build path was missing the sentinel.
+        if (colFieldIndices.Count > 0 || valueFields.Count > 1)
         {
-            var cf = new ColumnFields { Count = (uint)colFieldIndices.Count };
+            var cf = new ColumnFields();
             foreach (var idx in colFieldIndices)
                 cf.AppendChild(new Field { Index = idx });
+            if (valueFields.Count > 1)
+                cf.AppendChild(new Field { Index = -2 });
+            cf.Count = (uint)cf.Elements<Field>().Count();
             pivotDef.ColumnFields = cf;
         }
 
@@ -974,7 +1075,8 @@ internal static class PivotTableHelper
         // Even when there are NO column fields, ECMA-376 requires a <colItems> with one
         // empty <i/> placeholder; LibreOffice's writeRowColumnItems empty-case branch
         // (xepivotxml.cxx:1008-1014) writes exactly that.
-        pivotDef.ColumnItems = (ColumnItems)BuildAxisItems(colFieldIndices, columnData, isRow: false);
+        pivotDef.ColumnItems = (ColumnItems)BuildAxisItems(
+            colFieldIndices, columnData, isRow: false, dataFieldCount: valueFields.Count);
 
         // PageFields (filters)
         if (filterFieldIndices.Count > 0)
@@ -1024,35 +1126,65 @@ internal static class PivotTableHelper
     }
 
     /// <summary>
-    /// Build the &lt;rowItems&gt; or &lt;colItems&gt; layout block. This describes how Excel
-    /// should expand row/column labels in the rendered pivot — without it, Excel shows
-    /// only the pivot's drop-down chrome and no data cells.
+    /// Build the &lt;rowItems&gt; or &lt;colItems&gt; layout block. Excel uses this to
+    /// know how to expand row/column labels in the rendered pivot.
     ///
-    /// Pattern (verified against LibreOffice's pivot_dark1.xlsx):
-    ///   • One axis field with K unique values → K + 1 entries (K data + 1 grand total)
-    ///   • Each entry is &lt;i&gt; + &lt;x v="N"/&gt; where N indexes the pivotField's items
-    ///   • &lt;x/&gt; with no v attribute is shorthand for index 0
-    ///   • Grand total entry: &lt;i t="grand"&gt;&lt;x/&gt;&lt;/i&gt;
-    ///   • Empty axis (no fields) → single empty &lt;i/&gt; placeholder (LibreOffice's
-    ///     writeRowColumnItems empty-case branch in xepivotxml.cxx:1008-1014)
+    /// Single data field (K=1):
+    ///   <rowItems count="K+1">
+    ///     <i><x/></i>            <-- index 0 (shorthand: omit v)
+    ///     <i><x v="1"/></i>
+    ///     ...
+    ///     <i t="grand"><x/></i>
+    ///   </rowItems>
     ///
-    /// Limitation: only single-axis-field cases are correct. Multi-row-field
-    /// cartesian-product layouts (e.g. row=region+product) need a more involved
-    /// expansion that LibreOffice does at render time. Tracked as v2.
+    /// Multi-data field on the column axis (K>1, only used for ColumnItems):
+    ///   <colItems count="(L+1)*K">
+    ///     <i><x/><x/></i>                     <-- col label 0, data field 0
+    ///     <i r="1" i="1"><x v="1"/></i>       <-- col label 0, data field 1 (r=1 = repeat prev x)
+    ///     <i><x v="1"/><x/></i>               <-- col label 1, data field 0
+    ///     <i r="1" i="1"><x v="1"/></i>       <-- col label 1, data field 1
+    ///     ...
+    ///     <i t="grand"><x/></i>               <-- grand total, data field 0
+    ///     <i t="grand" i="1"><x/></i>         <-- grand total, data field 1
+    ///   </colItems>
+    /// Verified against multi_data_authored.xlsx (a 1×1×2 pivot from real Excel).
+    ///
+    /// Empty axis: single &lt;i/&gt; placeholder (LibreOffice writeRowColumnItems
+    /// empty-case branch in xepivotxml.cxx:1008-1014).
+    ///
+    /// Limitation: still only single-axis-field cases are correct. Multi-row-field
+    /// cartesian-product layouts need a deeper expansion tracked as v2.
     /// </summary>
     private static OpenXmlElement BuildAxisItems(
-        List<int> fieldIndices, List<string[]> columnData, bool isRow)
+        List<int> fieldIndices, List<string[]> columnData, bool isRow, int dataFieldCount = 1)
     {
         OpenXmlCompositeElement container = isRow
             ? new RowItems()
             : new ColumnItems();
 
         // Empty axis: write a single empty <i/>. LibreOffice does this unconditionally
-        // when there's nothing to render — Excel needs the placeholder.
+        // when there's nothing to render — Excel needs the placeholder. When there are
+        // multiple data fields on the column axis but no col field, we still need
+        // K entries (one per data field) instead of just one — handled below.
         if (fieldIndices.Count == 0)
         {
-            container.AppendChild(new RowItem());
-            SetAxisCount(container, 1);
+            if (!isRow && dataFieldCount > 1)
+            {
+                // Data-only column axis: K entries, each marked with i="d".
+                for (int d = 0; d < dataFieldCount; d++)
+                {
+                    var item = new RowItem();
+                    if (d > 0) item.Index = (uint)d;
+                    item.AppendChild(new MemberPropertyIndex());
+                    container.AppendChild(item);
+                }
+                SetAxisCount(container, dataFieldCount);
+            }
+            else
+            {
+                container.AppendChild(new RowItem());
+                SetAxisCount(container, 1);
+            }
             return container;
         }
 
@@ -1072,11 +1204,56 @@ internal static class PivotTableHelper
             .Distinct()
             .Count();
 
+        // Multi-data on column axis: each col label gets K entries, then K grand totals.
+        // The first entry per col label has TWO <x> children (col index + data field 0);
+        // subsequent entries use r="1" to repeat the col index and bump i to the data
+        // field number.
+        if (!isRow && dataFieldCount > 1)
+        {
+            for (int i = 0; i < uniqueCount; i++)
+            {
+                // Entry for data field 0: <i><x v="i"/><x v="0"/></i>
+                var first = new RowItem();
+                if (i == 0)
+                    first.AppendChild(new MemberPropertyIndex());
+                else
+                    first.AppendChild(new MemberPropertyIndex { Val = i });
+                first.AppendChild(new MemberPropertyIndex());
+                container.AppendChild(first);
+
+                // Entries for data fields 1..K-1: <i r="1" i="d"><x v="d"/></i>
+                for (int d = 1; d < dataFieldCount; d++)
+                {
+                    var rep = new RowItem
+                    {
+                        RepeatedItemCount = 1u,
+                        Index = (uint)d
+                    };
+                    if (d == 0)
+                        rep.AppendChild(new MemberPropertyIndex());
+                    else
+                        rep.AppendChild(new MemberPropertyIndex { Val = d });
+                    container.AppendChild(rep);
+                }
+            }
+
+            // Grand totals: K entries marked t="grand", with i=d for d>0.
+            for (int d = 0; d < dataFieldCount; d++)
+            {
+                var gt = new RowItem { ItemType = ItemValues.Grand };
+                if (d > 0) gt.Index = (uint)d;
+                gt.AppendChild(new MemberPropertyIndex());
+                container.AppendChild(gt);
+            }
+
+            SetAxisCount(container, uniqueCount * dataFieldCount + dataFieldCount);
+            return container;
+        }
+
+        // Single-data layout (original path): K data rows + 1 grand total.
         for (int i = 0; i < uniqueCount; i++)
         {
             var item = new RowItem();
-            // <x/> with no v attribute = index 0 (shorthand). LibreOffice uses this
-            // shorthand whenever the index is 0; we mirror that for byte-level fidelity.
             if (i == 0)
                 item.AppendChild(new MemberPropertyIndex());
             else
@@ -1408,10 +1585,11 @@ internal static class PivotTableHelper
         // configuration's row/col layout no longer matches; without these the rendered
         // skeleton would still describe the old shape.
         if (rowFieldIndices.Count > 0)
-            pivotDef.RowItems = (RowItems)BuildAxisItems(rowFieldIndices, cacheColumnData, isRow: true);
+            pivotDef.RowItems = (RowItems)BuildAxisItems(rowFieldIndices, cacheColumnData, isRow: true, dataFieldCount: 1);
         else
             pivotDef.RowItems = null;
-        pivotDef.ColumnItems = (ColumnItems)BuildAxisItems(colFieldIndices, cacheColumnData, isRow: false);
+        pivotDef.ColumnItems = (ColumnItems)BuildAxisItems(
+            colFieldIndices, cacheColumnData, isRow: false, dataFieldCount: valueFields.Count);
 
         // Refresh caption attributes — they pin to the row/col field's header name,
         // so reassigning fields means the visible caption changes too.

@@ -5525,7 +5525,19 @@ internal static class PivotTableHelper
                 func = aggregateOverrides[specIndex];
 
             int fieldIdx = -1;
-            if (int.TryParse(fieldName, out var idx)) fieldIdx = idx;
+            if (int.TryParse(fieldName, out var idx))
+            {
+                // CONSISTENCY(strict-enums / R8-6): a numeric token is a
+                // column index. Out-of-range indices used to silently drop
+                // the value-field, producing an empty pivot with no error.
+                // Reject up front with the available-index range so users
+                // catch the typo immediately (mirrors the throw used for
+                // unknown field names).
+                if (idx < 0 || idx >= headers.Length)
+                    throw new ArgumentException(
+                        $"field index {idx} out of range (0..{headers.Length - 1})");
+                fieldIdx = idx;
+            }
             else
             {
                 for (int i = 0; i < headers.Length; i++)

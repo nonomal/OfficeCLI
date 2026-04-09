@@ -5665,18 +5665,18 @@ internal static class PivotTableHelper
                 // packed into the dataField{N} colon string. Existing
                 // dataField{N} schema (name:func:fieldIdx) stays untouched.
                 // 'normal' is the absent/default value, omitted from output.
-                if (df.ShowDataAs != null && df.ShowDataAs.Value != ShowDataAsValues.Normal)
+                if (df.ShowDataAs != null && df.ShowDataAs.InnerText != "normal" && !string.IsNullOrEmpty(df.ShowDataAs.InnerText))
                 {
-                    node.Format[$"dataField{i + 1}.showAs"] = ShowDataAsToCanonicalToken(df.ShowDataAs.Value);
+                    node.Format[$"dataField{i + 1}.showAs"] = ShowDataAsToCanonicalToken(df.ShowDataAs);
                 }
             }
         }
-        // NOTE: sort=asc|desc round-trip is not implemented because the
-        // current pivot writer applies sort positionally during render but
-        // does not persist it as a per-PivotField AutoSort element. Adding
-        // a Format key here without a corresponding XML write site would
-        // produce a round-trip mismatch. See CONSISTENCY(pivot-sort-store)
-        // — v2 candidate: write/read AutoSort + AutoSortScope on PivotField.
+        // CONSISTENCY(pivot-sort-readonly): the 'sortByField' Format key
+        // (emitted below after the subtotals block) surfaces per-pivotField
+        // SortType from real-world files (e.g. Excel-authored pivots). The
+        // writer still applies 'sort=' globally and does not persist per-field
+        // AutoSort — so Set can't round-trip 'sortByField'. See
+        // CONSISTENCY(pivot-sort-store) v2 candidate for full AutoSort support.
 
         // Style
         var styleInfo = pivotDef.PivotTableStyle;
@@ -5730,6 +5730,83 @@ internal static class PivotTableHelper
                     node.Format["subtotals"] = "on";
                 // mixed: omit key (v2 per-field subtotals feature)
             }
+
+            // R27-1: three per-pivotField readback surfaces, each emitted as
+            // a csv of field-name or field-name:value pairs. All three keys
+            // are read-only — officecli's writer doesn't yet round-trip any
+            // of them, and Add/Set inputs remain untouched (see
+            // CONSISTENCY(pivot-sort-readonly), CONSISTENCY(collapsed-items-readonly),
+            // CONSISTENCY(axis-datafield-readonly) below). The purpose is to
+            // surface real-world OOXML pivot features during query/get so
+            // users inspecting files authored in Excel (or ClosedXML) don't
+            // see silent information loss.
+            //
+            // Key names intentionally distinct from the Add/Set input form
+            // ('sort=asc' is a global writer flag; 'sortByField: Name:asc'
+            // is the per-field readback). Mirrors how 'rows'/'cols'/'filters'
+            // emit name csvs while Add/Set takes 'rows=' etc.
+            var pivotFieldList = pivotFields.Elements<PivotField>().ToList();
+            var sortParts = new List<string>();
+            var collapsedFieldNames = new List<string>();
+            var axisAsDataFieldNames = new List<string>();
+            for (int pfIdx = 0; pfIdx < pivotFieldList.Count; pfIdx++)
+            {
+                var pf = pivotFieldList[pfIdx];
+                // CONSISTENCY(enum-innertext): SortType uses InnerText, not
+                // enum equality, for the same reason as ShowDataAsToCanonicalToken.
+                var sortRaw = pf.SortType?.InnerText ?? "";
+                if (sortRaw == "ascending" || sortRaw == "descending")
+                {
+                    var name = ResolveFieldName((uint)pfIdx);
+                    sortParts.Add($"{name}:{(sortRaw == "ascending" ? "asc" : "desc")}");
+                }
+
+                // CONSISTENCY(collapsed-items-readonly): item-level sd="0"
+                // (showDetail=false) is the OOXML encoding for a collapsed
+                // pivot row. Add/Set does not yet write these, so readback
+                // is purely informational. Emitted as a csv of field names
+                // that have at least one collapsed item. NOTE: the OpenXML
+                // SDK exposes this attribute as Item.HideDetails (named after
+                // the "hide" semantic while the XML attribute is 'sd' which
+                // is "showDetail") — so we read the raw attribute value via
+                // GetAttribute to avoid depending on the SDK's potentially
+                // surprising property-name translation.
+                var items = pf.Items;
+                if (items != null)
+                {
+                    bool hasCollapsed = false;
+                    foreach (var it in items.Elements<Item>())
+                    {
+                        string sdVal;
+                        try { sdVal = it.GetAttribute("sd", "").Value ?? ""; }
+                        catch (KeyNotFoundException) { sdVal = ""; }
+                        if (sdVal == "0" || sdVal.Equals("false", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasCollapsed = true;
+                            break;
+                        }
+                    }
+                    if (hasCollapsed)
+                        collapsedFieldNames.Add(ResolveFieldName((uint)pfIdx));
+                }
+
+                // CONSISTENCY(axis-datafield-readonly): pivotField's
+                // dataField="1" attribute by itself is the standard marker
+                // for any field referenced in <dataFields>, so it alone is
+                // NOT interesting. The dual-role case — the one worth
+                // surfacing — is when the same pivotField is ALSO on an
+                // axis (rows/cols), meaning it's used both as a row/col
+                // label AND as a data aggregate. ECMA-376 § 18.10.1.69.
+                // Pure readback; writer does not currently set this flag.
+                if (pf.Axis != null && pf.DataField?.Value == true)
+                    axisAsDataFieldNames.Add(ResolveFieldName((uint)pfIdx));
+            }
+            if (sortParts.Count > 0)
+                node.Format["sortByField"] = string.Join(",", sortParts);
+            if (collapsedFieldNames.Count > 0)
+                node.Format["collapsedFields"] = string.Join(",", collapsedFieldNames);
+            if (axisAsDataFieldNames.Count > 0)
+                node.Format["axisAsDataField"] = string.Join(",", axisAsDataFieldNames);
         }
     }
 
@@ -6893,17 +6970,35 @@ internal static class PivotTableHelper
     /// Get readback. Defaults to "normal" for unmapped enum values so the
     /// caller can suppress them via the Normal short-circuit.
     /// </summary>
-    private static string ShowDataAsToCanonicalToken(ShowDataAsValues v)
+    // CONSISTENCY(enum-innertext): switch over EnumValue<T>.InnerText (the
+    // OOXML attribute literal), not over C# enum-value equality. OpenXML SDK
+    // v3 exposes ShowDataAsValues.Percent AND ShowDataAsValues.PercentOfTotal
+    // as distinct values; XML "percent" deserializes to .Percent, and
+    // EnumValue<T>.ToString() yields garbage like "showdataasvalues { }"
+    // (same class of bug as LineSpacingRuleValues.Auto.ToString() documented
+    // in CLAUDE.md "Known API Quirks"). Reading InnerText sidesteps both
+    // traps — no silent enum-fall-through, no SDK ToString() footguns.
+    private static string ShowDataAsToCanonicalToken(EnumValue<ShowDataAsValues>? showDataAs)
     {
-        if (v == ShowDataAsValues.Normal) return "normal";
-        if (v == ShowDataAsValues.PercentOfTotal) return "percent_of_total";
-        if (v == ShowDataAsValues.PercentOfRaw) return "percent_of_row";
-        if (v == ShowDataAsValues.PercentOfColumn) return "percent_of_col";
-        if (v == ShowDataAsValues.RunTotal) return "running_total";
-        if (v == ShowDataAsValues.Difference) return "difference";
-        if (v == ShowDataAsValues.PercentageDifference) return "percent_diff";
-        if (v == ShowDataAsValues.Index) return "index";
-        return v.ToString().ToLowerInvariant();
+        var raw = showDataAs?.InnerText ?? "";
+        return raw switch
+        {
+            "" or "normal" => "normal",
+            // OOXML has two distinct ShowDataAs enum values ("percent" and
+            // "percentOfTotal") that share the same canonical snake_case
+            // output — matching ParseShowDataAs which already accepts both
+            // input aliases for .PercentOfTotal. Keep the longer-form
+            // canonical so pre-existing round-trip assertions (which expect
+            // "percent_of_total") stay green.
+            "percent" or "percentOfTotal" => "percent_of_total",
+            "percentOfRow" => "percent_of_row",
+            "percentOfCol" => "percent_of_col",
+            "runTotal" => "running_total",
+            "difference" => "difference",
+            "percentDiff" => "percent_diff",
+            "index" => "index",
+            _ => raw,
+        };
     }
 
     /// <summary>

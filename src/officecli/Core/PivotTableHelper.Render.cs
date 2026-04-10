@@ -2080,63 +2080,37 @@ internal static partial class PivotTableHelper
                 // rowNode.Depth is 1-based; the label goes at column (anchor + depth - 1).
                 int labelCol = anchorColIdx + rowNode.Depth - 1;
                 row.AppendChild(MakeStringCell(labelCol, rowIdx, rowNode.Label));
-                // Tabular layout: subtotals appear AFTER leaves, so the first
-                // leaf of each group must also write ancestor labels (otherwise
-                // the outer group name would only appear on the subtotal row
-                // below). Also applies when repeatLabels is on — every leaf
-                // row gets all ancestor labels.
-                //
-                // Outline layout with subtotals OFF: internal/subtotal positions
-                // are filtered out (see emitSubtotals branch above), so leaves
-                // are alone with no parent context unless we write ancestor
-                // labels here. Excel's outline+no-subtotals behavior puts the
-                // parent label on the first leaf row of each group exactly the
-                // same way tabular's first-of-group logic does — so reuse it.
-                // (Outline + subtotals ON does NOT need this: internal nodes
-                // are placed BEFORE their leaves and carry the parent label.)
+                // Ancestor labels for non-compact leaf rows. Two modes:
+                //   - repeatLabels=true: write every ancestor on every leaf,
+                //     unconditionally (Excel's "Repeat All Item Labels" toggle).
+                //   - default: per-level diff against the previous row's path.
+                //     A given ancestor level is written only if its value
+                //     changed from the previous row. The previous row may be
+                //     a subtotal (path shorter than leaf) or another leaf —
+                //     either way the diff gives the correct answer:
+                //       * outline+subtotals=on: prev subtotal already carries
+                //         the outer label, so its path matches → diff skips it
+                //       * outline+subtotals=off: parent labels appear on first
+                //         leaf of each group; intermediate transitions stay
+                //         visible
+                //       * tabular+subtotals=on: after an inner subtotal at
+                //         depth L, the next leaf only re-writes ancestors that
+                //         actually changed (NOT the still-same outer ones)
+                //       * tabular+subtotals=off: same as outline+subtotals=off
+                // CONSISTENCY(first-of-group-ancestors): one rule for every
+                // non-compact leaf — per-level diff is what Excel does.
                 if (rowNode.Depth >= 2)
                 {
-                    // Determine which ancestor levels need to be written.
-                    // - repeatLabels: always write every ancestor on every leaf
-                    // - tabular first-of-group: previous row was a subtotal or
-                    //   the outer path changed → write ALL ancestors (so the
-                    //   leaf precedes its subtotal row with full context)
-                    // - outline + subtotals off: write per-level only when the
-                    //   value at that ancestor level differs from the previous
-                    //   leaf row (Excel's outline behavior — labels only appear
-                    //   where they change). No subtotal row exists to anchor
-                    //   the parent label, so leaves must carry it themselves.
-                    // CONSISTENCY(first-of-group-ancestors): tabular keeps the
-                    // legacy "all-or-none" rule; outline-no-subtotals uses the
-                    // finer per-level diff so intermediate groups stay visible.
                     bool repeatAll = ActiveRepeatItemLabels;
-                    bool tabularFirstOfGroup = false;
-                    if (!repeatAll && rIsLeaf && ActiveLayoutMode == "tabular")
-                    {
-                        if (rp == 0)
-                            tabularFirstOfGroup = true;
-                        else
-                        {
-                            var (prevNode, _, prevIsSub) = rowPositions[rp - 1];
-                            tabularFirstOfGroup = prevIsSub
-                                || prevNode.Path.Length < rowNode.Path.Length
-                                || prevNode.Path[0] != rowNode.Path[0];
-                        }
-                    }
-                    bool outlineNoSubtotals = rIsLeaf
-                        && ActiveLayoutMode == "outline" && !emitSubtotals;
-
-                    if (repeatAll || tabularFirstOfGroup)
+                    if (repeatAll)
                     {
                         for (int anc = 0; anc < rowNode.Depth - 1; anc++)
                             row.InsertBefore(
                                 MakeStringCell(anchorColIdx + anc, rowIdx, rowNode.Path[anc]),
                                 row.FirstChild);
                     }
-                    else if (outlineNoSubtotals)
+                    else if (rIsLeaf)
                     {
-                        // Per-level diff against previous leaf. The first leaf
-                        // (rp == 0) writes every ancestor.
                         string[]? prevPath = null;
                         if (rp > 0)
                         {

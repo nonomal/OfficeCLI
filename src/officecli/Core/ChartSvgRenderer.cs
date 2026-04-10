@@ -146,6 +146,12 @@ internal class ChartSvgRenderer
                         var bx = plotOx + (stackX / niceMax) * plotPw;
                         var by = oy + c * groupH + gap;
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        // Label at segment center — skip if segment narrower than ~2 chars to avoid overflow
+                        if (showDataLabels && barW > DataLabelFontPx * 1.6)
+                        {
+                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                        }
                         stackX += val;
                     }
                     else
@@ -201,6 +207,12 @@ internal class ChartSvgRenderer
                         var bx = ox + c * groupW + gap;
                         var by = oy + ph - (stackY / niceMax) * ph - barH;
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
+                        // Label at segment center — skip if segment shorter than one font line to avoid overflow
+                        if (showDataLabels && barH > DataLabelFontPx + 2)
+                        {
+                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            sb.AppendLine($"        <text x=\"{bx + barW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
+                        }
                         stackY += val;
                     }
                     else

@@ -327,13 +327,14 @@ public partial class WordHandler
     // ==================== List / Numbering ====================
 
     /// <summary>
-    /// Resolve numbering properties (numId, ilvl) from the paragraph's style chain.
-    /// Checks direct paragraph numPr first, then walks the style hierarchy.
-    /// Used to detect heading auto-numbering defined in styles.
+    /// Resolve (numId, ilvl) from a paragraph by first checking its direct
+    /// numPr and then walking up the linked paragraph style chain. Used by
+    /// heading auto-numbering, which must honour style-defined numPr even
+    /// when the paragraph itself has no NumberingProperties.
     /// </summary>
-    private (int numId, int ilvl)? ResolveNumPrFromStyle(Paragraph para)
+    private (int NumId, int Ilvl)? ResolveNumPrFromStyle(Paragraph para)
     {
-        // 1. Direct numPr on the paragraph
+        // 1. Direct numPr on the paragraph wins.
         var numProps = para.ParagraphProperties?.NumberingProperties;
         if (numProps != null)
         {
@@ -342,7 +343,7 @@ public partial class WordHandler
                 return (nid.Value, numProps.NumberingLevelReference?.Val?.Value ?? 0);
         }
 
-        // 2. Walk the style chain
+        // 2. Walk the style chain through BasedOn references.
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
         if (styleId == null) return null;
 

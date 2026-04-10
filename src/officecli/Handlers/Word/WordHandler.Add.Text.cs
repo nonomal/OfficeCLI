@@ -235,8 +235,10 @@ public partial class WordHandler
             para.AppendChild(run);
         }
 
-        // Use ChildElements for index lookup to match ResolveAnchorPosition
-        // which computes indices against ChildElements (not just Paragraphs)
+        // Use ChildElements for index lookup so that tables and sectPr
+        // siblings do not shift the effective insertion position. This
+        // matches ResolveAnchorPosition, which computes anchor indices
+        // against ChildElements.
         var allChildren = parent.ChildElements.ToList();
         if (index.HasValue && index.Value < allChildren.Count)
         {

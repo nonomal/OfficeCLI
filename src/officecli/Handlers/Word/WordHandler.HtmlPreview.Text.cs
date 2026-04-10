@@ -171,11 +171,12 @@ public partial class WordHandler
             return;
         }
 
-        // Check for OLE object with preview image (e.g., embedded Visio diagrams)
-        var oleObj = run.Descendants().FirstOrDefault(e => e.LocalName == "object");
-        if (oleObj != null)
+        // OLE embedded objects (Visio, Excel, etc.) carry a v:imagedata
+        // preview image that we can render for a read-only snapshot.
+        var oleObject = run.GetFirstChild<EmbeddedObject>();
+        if (oleObject != null)
         {
-            RenderOlePreviewHtml(sb, oleObj);
+            RenderOlePreviewHtml(sb, oleObject);
             return;
         }
 
@@ -288,19 +289,21 @@ public partial class WordHandler
             sb.Append("</span>");
     }
 
-    // ==================== OLE Object Rendering ====================
+    // ==================== OLE Object Preview Rendering ====================
 
     /// <summary>
-    /// Render an OLE object's preview image (v:imagedata inside w:object).
-    /// Handles embedded objects like Visio diagrams that use VML instead of DrawingML.
+    /// Render the VML preview image that accompanies an embedded OLE object
+    /// (e.g. a Visio diagram). Web-compatible formats (PNG/JPEG/GIF/SVG/WebP/BMP)
+    /// render as a data-URI &lt;img&gt;; browser-unrenderable formats (EMF/WMF/TIFF)
+    /// fall back to a sized placeholder &lt;div&gt;. Pure OpenXML — no GDI and no
+    /// System.Drawing dependency.
     /// </summary>
     private void RenderOlePreviewHtml(StringBuilder sb, OpenXmlElement oleObj)
     {
-        var imageData = oleObj.Descendants()
-            .FirstOrDefault(e => e.LocalName == "imagedata");
+        var imageData = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "imagedata");
         if (imageData == null) return;
 
-        // Get r:id (relationship ID to the preview image part)
+        // The r:id attribute lives in the relationships namespace.
         string? relId = null;
         foreach (var attr in imageData.GetAttributes())
         {
@@ -315,28 +318,28 @@ public partial class WordHandler
         var dataUri = LoadImageAsDataUri(relId);
         if (dataUri == null) return;
 
-        // Get dimensions from v:shape style="width:Xpt;height:Ypt"
+        // Display size comes from the companion v:shape style
+        // ("width:Xpt;height:Ypt"), falling back to the w:object
+        // dxaOrig/dyaOrig twip attributes if the shape style is missing.
         double widthPt = 0, heightPt = 0;
-        var shape = oleObj.Descendants()
-            .FirstOrDefault(e => e.LocalName == "shape");
+        var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
         if (shape != null)
         {
-            var styleAttr = shape.GetAttributes()
-                .FirstOrDefault(a => a.LocalName == "style").Value;
-            if (styleAttr != null)
+            var styleAttr = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
+            if (!string.IsNullOrEmpty(styleAttr))
             {
                 var wMatch = Regex.Match(styleAttr, @"width:([\d.]+)pt");
                 var hMatch = Regex.Match(styleAttr, @"height:([\d.]+)pt");
-                if (wMatch.Success) double.TryParse(wMatch.Groups[1].Value,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out widthPt);
-                if (hMatch.Success) double.TryParse(hMatch.Groups[1].Value,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out heightPt);
+                if (wMatch.Success)
+                    double.TryParse(wMatch.Groups[1].Value,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out widthPt);
+                if (hMatch.Success)
+                    double.TryParse(hMatch.Groups[1].Value,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out heightPt);
             }
         }
-
-        // Fallback to dxaOrig/dyaOrig (twips → pt)
         if (widthPt == 0 || heightPt == 0)
         {
             foreach (var attr in oleObj.GetAttributes())
@@ -351,26 +354,31 @@ public partial class WordHandler
         var widthPx = widthPt > 0 ? (long)(widthPt * 96 / 72) : 0;
         var heightPx = heightPt > 0 ? (long)(heightPt * 96 / 72) : 0;
 
-        // Check if the image format is browser-renderable
-        bool isWebCompatible = dataUri.Contains("image/png") || dataUri.Contains("image/jpeg")
-            || dataUri.Contains("image/gif") || dataUri.Contains("image/svg")
-            || dataUri.Contains("image/webp") || dataUri.Contains("image/bmp");
+        bool isWebCompatible = dataUri.Contains("image/png")
+            || dataUri.Contains("image/jpeg")
+            || dataUri.Contains("image/gif")
+            || dataUri.Contains("image/svg")
+            || dataUri.Contains("image/webp")
+            || dataUri.Contains("image/bmp");
 
         if (isWebCompatible)
         {
             var widthAttr = widthPx > 0 ? $" width=\"{widthPx}\"" : "";
             var heightAttr = heightPx > 0 ? $" height=\"{heightPx}\"" : "";
-            var sizeStyle = widthPx > 0 ? $"max-width:100%;width:{widthPx}px;height:auto" : "max-width:100%";
+            var sizeStyle = widthPx > 0
+                ? $"max-width:100%;width:{widthPx}px;height:auto"
+                : "max-width:100%";
             sb.Append($"<img src=\"{dataUri}\" alt=\"Embedded object\"{widthAttr}{heightAttr} style=\"{sizeStyle}\">");
         }
         else
         {
-            // EMF/WMF/TIFF — browsers can't render natively, show placeholder with dimensions
+            // EMF / WMF / TIFF — browsers cannot render these natively.
+            // Emit a sized placeholder so the layout keeps its footprint.
             var ph = widthPx > 0 && heightPx > 0
                 ? $"width:{widthPx}px;height:{heightPx}px;max-width:100%"
                 : "min-width:200px;min-height:100px";
-            sb.Append($"<div style=\"{ph};border:1px dashed #bbb;background:#f5f5f5;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;margin:8px 0\">");
-            sb.Append("\U0001F4CE Embedded Object (preview not supported in browser)");
+            sb.Append($"<div class=\"ole-placeholder\" style=\"{ph};border:1px dashed #bbb;background:#f5f5f5;display:flex;align-items:center;justify-content:center;color:#888;font-size:13px;margin:8px 0\">");
+            sb.Append("Embedded Object (preview not supported in browser)");
             sb.Append("</div>");
         }
     }

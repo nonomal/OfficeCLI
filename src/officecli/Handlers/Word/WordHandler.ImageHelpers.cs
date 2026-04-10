@@ -1,7 +1,6 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
-using System.Runtime.Versioning;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
 using OfficeCli.Core;
@@ -204,7 +203,9 @@ public partial class WordHandler
         if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / 360000.0:F1}cm";
         if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;
 
-        // Detect wrap type and position from inline/anchor
+        // Distinguish inline from floating (anchor) and, for anchors, expose
+        // the wrap mode, position offsets, and behind-text flag so callers
+        // can inspect how the image is laid out.
         var inlineEl = drawing.GetFirstChild<DW.Inline>();
         var anchorEl = drawing.GetFirstChild<DW.Anchor>();
         if (inlineEl != null)
@@ -253,7 +254,7 @@ public partial class WordHandler
 
     private static void ReplaceWrapElement(DW.Anchor anchor, string wrapType)
     {
-        // Remove existing wrap element
+        // Remove any existing wrap element first — at most one is allowed.
         anchor.GetFirstChild<DW.WrapNone>()?.Remove();
         anchor.GetFirstChild<DW.WrapSquare>()?.Remove();
         anchor.GetFirstChild<DW.WrapTight>()?.Remove();
@@ -279,10 +280,13 @@ public partial class WordHandler
             ) { Edited = false }),
             "topandbottom" or "topbottom" => new DW.WrapTopBottom(),
             "none" => new DW.WrapNone(),
-            _ => throw new ArgumentException($"Invalid wrap value: '{wrapType}'. Valid values: none, square, tight, through, topandbottom.")
+            _ => throw new ArgumentException(
+                $"Invalid wrap value: '{wrapType}'. Valid values: none, square, tight, through, topandbottom.")
         };
 
-        // Insert wrap after EffectExtent (standard OOXML order)
+        // Insert after EffectExtent (standard OOXML child order for
+        // CT_Anchor — PowerPoint and Word silently drop wrap elements
+        // placed out of schema order).
         var effectExtent = anchor.GetFirstChild<DW.EffectExtent>();
         if (effectExtent != null)
             effectExtent.InsertAfterSelf(newWrap);
@@ -290,7 +294,28 @@ public partial class WordHandler
             anchor.PrependChild(newWrap);
     }
 
-    private DocumentNode CreateOleNode(EmbeddedObject oleObj, Run run, string path)
+    /// <summary>
+    /// Resolve a run to its top-level Drawing + Anchor, if the run wraps a
+    /// floating picture. Used by Set.cs wrap/position cases so the six
+    /// wrap/position properties share one lookup instead of each case
+    /// re-running the same GetFirstChild chain.
+    /// </summary>
+    private static DW.Anchor? ResolveRunAnchor(Run run)
+    {
+        var drawing = run.GetFirstChild<Drawing>();
+        return drawing?.GetFirstChild<DW.Anchor>();
+    }
+
+    // ==================== OLE Object Reading ====================
+    //
+    // Embedded OLE objects live inside <w:object> (EmbeddedObject). A VML
+    // <v:shape> child carries the display box ("style=width:Xpt;height:Ypt")
+    // and an <o:OLEObject> child carries the ProgID. These elements come
+    // through as OpenXmlUnknownElement because they are not strongly typed
+    // in the core wordprocessing namespace, so we walk descendants by
+    // LocalName rather than by CLR type.
+
+    private static DocumentNode CreateOleNode(EmbeddedObject oleObj, Run run, string path)
     {
         var node = new DocumentNode
         {
@@ -300,101 +325,28 @@ public partial class WordHandler
         };
         node.Format["objectType"] = "ole";
 
-        // Extract ProgID from o:OLEObject
+        // ProgID lives on the nested o:OLEObject element.
         var oleElement = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "OLEObject");
         if (oleElement != null)
         {
-            var progId = oleElement.GetAttributes().FirstOrDefault(a => a.LocalName == "ProgID").Value;
-            if (progId != null)
+            var progIdAttr = oleElement.GetAttributes().FirstOrDefault(a => a.LocalName == "ProgID");
+            if (!string.IsNullOrEmpty(progIdAttr.Value))
             {
-                node.Format["progId"] = progId;
-                node.Text = progId;
+                node.Format["progId"] = progIdAttr.Value;
+                node.Text = progIdAttr.Value;
             }
         }
 
-        // Extract dimensions from v:shape style
+        // Display size lives on the VML v:shape element's style string.
         var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
         if (shape != null)
         {
-            var style = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style").Value;
-            if (style != null)
-                ParseVmlStyle(style, node);
-        }
-
-        // Extract preview image from v:imagedata (Windows only — requires GDI+)
-        var (previewPath, previewContentType) = OperatingSystem.IsWindowsVersionAtLeast(6, 1)
-            ? ExtractOlePreviewImage(oleObj, path)
-            : (null, null);
-        if (previewPath != null)
-        {
-            node.Format["previewImage"] = previewPath;
-            if (previewContentType != null)
-                node.Format["previewContentType"] = previewContentType;
+            var styleAttr = shape.GetAttributes().FirstOrDefault(a => a.LocalName == "style");
+            if (!string.IsNullOrEmpty(styleAttr.Value))
+                ParseVmlStyle(styleAttr.Value, node);
         }
 
         return node;
-    }
-
-    /// <summary>
-    /// Extract the OLE preview image (EMF/WMF) from v:imagedata, convert to PNG,
-    /// and save to temp directory. Returns (pngPath, originalContentType) or (null, null).
-    /// </summary>
-    [SupportedOSPlatform("windows6.1")]
-    private (string? path, string? contentType) ExtractOlePreviewImage(EmbeddedObject oleObj, string nodePath)
-    {
-        var mainPart = _doc.MainDocumentPart;
-        if (mainPart == null) return (null, null);
-
-        // Find v:imagedata element and its r:id
-        var shape = oleObj.Descendants().FirstOrDefault(e => e.LocalName == "shape");
-        if (shape == null) return (null, null);
-
-        var imageData = shape.Descendants().FirstOrDefault(e => e.LocalName == "imagedata");
-        if (imageData == null) return (null, null);
-
-        var rId = imageData.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
-        if (string.IsNullOrEmpty(rId)) return (null, null);
-
-        try
-        {
-            var imgPart = mainPart.GetPartById(rId);
-            using var stream = imgPart.GetStream();
-            using var ms = new MemoryStream();
-            stream.CopyTo(ms);
-            ms.Position = 0;
-
-            var contentType = imgPart.ContentType ?? "";
-            var isMetafile = contentType.Contains("emf") || contentType.Contains("wmf")
-                          || contentType.Contains("metafile");
-
-            // Build a stable file name from the node path
-            var safeId = nodePath.Replace("/", "_").Replace("[", "").Replace("]", "").TrimStart('_');
-            var pngPath = Path.Combine(Path.GetTempPath(), $"officecli_ole_{safeId}.png");
-
-            if (isMetafile)
-            {
-                // Convert EMF/WMF to PNG using System.Drawing (Windows GDI+)
-                using var img = System.Drawing.Image.FromStream(ms);
-                img.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
-            }
-            else if (contentType.Contains("png"))
-            {
-                using var fs = new FileStream(pngPath, FileMode.Create);
-                ms.CopyTo(fs);
-            }
-            else
-            {
-                // JPEG or other raster — convert to PNG for consistency
-                using var img = System.Drawing.Image.FromStream(ms);
-                img.Save(pngPath, System.Drawing.Imaging.ImageFormat.Png);
-            }
-
-            return (pngPath, contentType);
-        }
-        catch
-        {
-            return (null, null);
-        }
     }
 
     private static void ParseVmlStyle(string style, DocumentNode node)
@@ -405,23 +357,43 @@ public partial class WordHandler
             if (kv.Length != 2) continue;
             var k = kv[0].Trim().ToLowerInvariant();
             var v = kv[1].Trim();
-            if (k == "width") node.Format["width"] = ConvertPtToCm(v);
-            else if (k == "height") node.Format["height"] = ConvertPtToCm(v);
+            if (k == "width") node.Format["width"] = ConvertVmlLengthToCm(v);
+            else if (k == "height") node.Format["height"] = ConvertVmlLengthToCm(v);
         }
     }
 
-    private static string ConvertPtToCm(string ptValue)
+    private static readonly System.Text.RegularExpressions.Regex _vmlLengthRegex =
+        new(@"^\s*([+-]?\d+(?:\.\d+)?)\s*(pt|in|cm|mm|px)?\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Convert a VML length literal (e.g. "385.45pt", "2in", "5cm") into
+    /// a "Xcm" string matching the picture width/height format. Uses a
+    /// regex to split number from unit so that values containing the
+    /// substring "in" (like "line:") inside larger tokens can never be
+    /// mangled by naive string.Replace calls.
+    /// </summary>
+    private static string ConvertVmlLengthToCm(string length)
     {
-        // Handle values like "385.45pt"
-        var num = ptValue.Replace("pt", "").Replace("in", "").Trim();
-        if (double.TryParse(num, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out var val))
+        var m = _vmlLengthRegex.Match(length);
+        if (!m.Success) return length;
+
+        if (!double.TryParse(m.Groups[1].Value,
+            System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out var value))
+            return length;
+
+        var unit = m.Groups[2].Success ? m.Groups[2].Value.ToLowerInvariant() : "pt";
+        double cm = unit switch
         {
-            if (ptValue.EndsWith("pt", StringComparison.OrdinalIgnoreCase))
-                return $"{val * 2.54 / 72.0:F1}cm";
-            if (ptValue.EndsWith("in", StringComparison.OrdinalIgnoreCase))
-                return $"{val * 2.54:F1}cm";
-        }
-        return ptValue; // return as-is if unparseable
+            "pt" => value * 2.54 / 72.0,
+            "in" => value * 2.54,
+            "cm" => value,
+            "mm" => value / 10.0,
+            "px" => value * 2.54 / 96.0,
+            _ => value * 2.54 / 72.0,
+        };
+        return $"{cm:F1}cm";
     }
 }

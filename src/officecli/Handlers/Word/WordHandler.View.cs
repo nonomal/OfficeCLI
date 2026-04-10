@@ -534,7 +534,7 @@ public partial class WordHandler
         var formFieldCount = FindFormFields().Count;
         var contentControlCount = body.Descendants<SdtBlock>().Count() + body.Descendants<SdtRun>().Count();
         var statsLine = $"File: {Path.GetFileName(_filePath)} | {paragraphs.Count} paragraphs | {tables.Count} tables | {imageCount} images";
-        if (oleCount > 0) statsLine += $" | {oleCount} OLE objects";
+        if (oleCount > 0) statsLine += $" | {oleCount} OLE object{(oleCount == 1 ? "" : "s")}";
         if (equationCount > 0) statsLine += $" | {equationCount} equations";
         if (formFieldCount > 0) statsLine += $" | {formFieldCount} formfields";
         if (contentControlCount > 0) statsLine += $" | {contentControlCount} content controls";

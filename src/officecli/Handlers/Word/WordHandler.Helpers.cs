@@ -1006,7 +1006,9 @@ public partial class WordHandler
 
         var (pattern, isRegex) = ParseFindPattern(findValue);
 
-        // Resolve parent to a paragraph — supports both paragraph-level and container-level (body/cell/sdt)
+        // Resolve to a paragraph — either the parent itself, or the first
+        // descendant paragraph of a container (body/cell/sdt) whose text
+        // matches the pattern.
         Paragraph para;
         string paraPath;
         if (parent is Paragraph p)
@@ -1016,9 +1018,11 @@ public partial class WordHandler
         }
         else
         {
-            // Search across all child paragraphs in the container
-            (para, paraPath) = FindParagraphContainingText(parent, parentPath, pattern, isRegex)
-                ?? throw new ArgumentException($"Text '{findValue}' not found in any paragraph under {parentPath}.");
+            var hit = FindParagraphContainingText(parent, parentPath, pattern, isRegex)
+                ?? throw new ArgumentException(
+                    $"Text '{findValue}' not found in any paragraph under {parentPath}.");
+            para = hit.Para;
+            paraPath = hit.Path;
         }
 
         var runTexts = BuildRunTexts(para);
@@ -1047,8 +1051,10 @@ public partial class WordHandler
     }
 
     /// <summary>
-    /// Search child paragraphs of a container for text matching the given pattern.
-    /// Returns the first matching paragraph and its constructed path.
+    /// Walk the child paragraphs of a container and return the first paragraph
+    /// (plus its constructed path) whose text matches the given pattern.
+    /// Used to let body-level find: anchors resolve without requiring the
+    /// caller to spell out a specific paragraph path.
     /// </summary>
     private (Paragraph Para, string Path)? FindParagraphContainingText(
         OpenXmlElement container, string containerPath, string pattern, bool isRegex)
@@ -1061,8 +1067,7 @@ public partial class WordHandler
             if (runTexts.Count == 0) continue;
 
             var fullText = string.Concat(runTexts.Select(rt => rt.TextElement.Text));
-            var matches = FindMatchRanges(fullText, pattern, isRegex);
-            if (matches.Count > 0)
+            if (FindMatchRanges(fullText, pattern, isRegex).Count > 0)
             {
                 var paraPath = $"{containerPath}/{BuildParaPathSegment(candidate, i + 1)}";
                 return (candidate, paraPath);

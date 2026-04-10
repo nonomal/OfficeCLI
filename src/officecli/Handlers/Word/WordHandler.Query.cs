@@ -830,14 +830,14 @@ public partial class WordHandler
             (parsed.Element == "r" || parsed.Element == "run");
         bool isPictureSelector = parsed.ChildSelector == null &&
             (parsed.Element == "picture" || parsed.Element == "image" || parsed.Element == "img");
+        bool isOleSelector = parsed.ChildSelector == null &&
+            (parsed.Element is "ole" or "object" or "embed");
         bool isEquationSelector = parsed.ChildSelector == null &&
             (parsed.Element == "equation" || parsed.Element == "math" || parsed.Element == "formula");
         bool isBookmarkSelector = parsed.ChildSelector == null &&
             parsed.Element == "bookmark";
         bool isSdtSelector = parsed.ChildSelector == null &&
             (parsed.Element == "sdt" || parsed.Element == "contentcontrol");
-        bool isOleSelector = parsed.ChildSelector == null &&
-            (parsed.Element is "ole" or "object" or "embed");
 
         // Scheme B: generic XML fallback for unrecognized element types
         // Use GenericXmlQuery.ParseSelector which properly handles namespace prefixes (e.g., "a:ln")
@@ -1438,7 +1438,10 @@ public partial class WordHandler
                             }
                         }
 
-                        // Also detect OLE embedded objects (Visio, Excel, etc.)
+                        // Embedded OLE objects (Visio, Excel, etc.) also
+                        // appear in the picture listing so that a single
+                        // "what images are in this document" query does
+                        // not miss them.
                         var oleObject = run.GetFirstChild<EmbeddedObject>();
                         if (oleObject != null)
                         {

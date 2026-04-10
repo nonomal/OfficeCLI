@@ -170,39 +170,44 @@ internal static class ImageSource
     }
 
     /// <summary>
-    /// Try to read pixel dimensions from an image stream by parsing file headers.
-    /// Cross-platform: supports PNG, JPEG, GIF, BMP without System.Drawing.
-    /// Resets stream position after reading. Returns null if dimensions cannot be determined.
+    /// Try to read pixel (width, height) by parsing image file headers.
+    /// Cross-platform — pure byte parsing, no System.Drawing / GDI dependency.
+    /// Supports PNG, JPEG, GIF, BMP. Returns null for any unrecognized or
+    /// malformed header. The stream position is restored on return.
     /// </summary>
     public static (int Width, int Height)? TryGetDimensions(Stream stream)
     {
-        if (!stream.CanSeek || stream.Length < 24) return null;
+        if (stream is null || !stream.CanSeek || stream.Length < 24) return null;
+
         var startPos = stream.Position;
         try
         {
-            var header = new byte[30];
             stream.Position = 0;
-            int read = stream.Read(header, 0, header.Length);
+            var header = new byte[30];
+            var read = stream.Read(header, 0, header.Length);
             if (read < 24) return null;
 
-            // PNG: signature 89 50 4E 47, IHDR width/height at offset 16/20 (big-endian)
+            // PNG: signature 89 50 4E 47 0D 0A 1A 0A, IHDR width/height at
+            // big-endian offsets 16..19 and 20..23.
             if (header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47)
             {
-                int w = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
-                int h = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                int w = ReadBE32(header, 16);
+                int h = ReadBE32(header, 20);
                 return (w > 0 && h > 0) ? (w, h) : null;
             }
 
-            // BMP: signature 42 4D, width at offset 18 (int32 LE), height at offset 22 (int32 LE)
+            // BMP: signature 42 4D, width little-endian at offset 18, height at 22.
+            // Height may be negative for top-down bitmaps; take the absolute value.
             if (header[0] == 0x42 && header[1] == 0x4D && read >= 26)
             {
-                int w = header[18] | (header[19] << 8) | (header[20] << 16) | (header[21] << 24);
-                int h = header[22] | (header[23] << 8) | (header[24] << 16) | (header[25] << 24);
-                if (h < 0) h = -h; // BMP can have negative height (top-down)
+                int w = ReadLE32(header, 18);
+                int h = ReadLE32(header, 22);
+                if (h < 0) h = -h;
                 return (w > 0 && h > 0) ? (w, h) : null;
             }
 
-            // GIF: signature 47 49 46 38, width at offset 6 (uint16 LE), height at offset 8 (uint16 LE)
+            // GIF: signature 47 49 46 38, logical screen width/height are
+            // little-endian uint16 at offsets 6 and 8.
             if (header[0] == 0x47 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x38)
             {
                 int w = header[6] | (header[7] << 8);
@@ -210,38 +215,54 @@ internal static class ImageSource
                 return (w > 0 && h > 0) ? (w, h) : null;
             }
 
-            // JPEG: signature FF D8, need to find SOFn marker for dimensions
+            // JPEG: signature FF D8 — walk markers to find a Start-of-Frame.
             if (header[0] == 0xFF && header[1] == 0xD8)
                 return TryGetJpegDimensions(stream);
 
             return null;
         }
-        catch
+        catch (IOException)
         {
             return null;
         }
         finally
         {
-            try { stream.Position = startPos; } catch { }
+            try { stream.Position = startPos; } catch (IOException) { /* best effort */ }
         }
     }
 
+    private static int ReadBE32(byte[] buf, int offset) =>
+        (buf[offset] << 24) | (buf[offset + 1] << 16) | (buf[offset + 2] << 8) | buf[offset + 3];
+
+    private static int ReadLE32(byte[] buf, int offset) =>
+        buf[offset] | (buf[offset + 1] << 8) | (buf[offset + 2] << 16) | (buf[offset + 3] << 24);
+
     private static (int Width, int Height)? TryGetJpegDimensions(Stream stream)
     {
-        stream.Position = 2; // skip SOI marker (FF D8)
-        var buf = new byte[9];
+        // Skip the SOI marker (FF D8) and walk segment markers looking for
+        // a Start-of-Frame (SOFn) marker, which holds the true pixel size.
+        stream.Position = 2;
+        var buf = new byte[7];
+
         while (stream.Position < stream.Length - 2)
         {
             int b1 = stream.ReadByte();
             if (b1 != 0xFF) return null;
 
             int b2;
-            do { b2 = stream.ReadByte(); } while (b2 == 0xFF && stream.Position < stream.Length);
+            do
+            {
+                b2 = stream.ReadByte();
+            } while (b2 == 0xFF && stream.Position < stream.Length);
             if (b2 < 0) return null;
 
-            // SOFn markers: C0-C3, C5-C7, C9-CB, CD-CF
-            if ((b2 >= 0xC0 && b2 <= 0xC3) || (b2 >= 0xC5 && b2 <= 0xC7) ||
-                (b2 >= 0xC9 && b2 <= 0xCB) || (b2 >= 0xCD && b2 <= 0xCF))
+            // SOFn markers: C0..C3, C5..C7, C9..CB, CD..CF. These all carry
+            // the frame header (height then width, each big-endian uint16).
+            bool isSof = (b2 >= 0xC0 && b2 <= 0xC3)
+                      || (b2 >= 0xC5 && b2 <= 0xC7)
+                      || (b2 >= 0xC9 && b2 <= 0xCB)
+                      || (b2 >= 0xCD && b2 <= 0xCF);
+            if (isSof)
             {
                 if (stream.Read(buf, 0, 7) < 7) return null;
                 int h = (buf[3] << 8) | buf[4];
@@ -249,10 +270,10 @@ internal static class ImageSource
                 return (w > 0 && h > 0) ? (w, h) : null;
             }
 
-            // SOS marker (DA) — image data starts, no more metadata
+            // Start-of-Scan: image data begins, no more metadata.
             if (b2 == 0xDA) return null;
 
-            // Skip this marker's data segment
+            // Any other segment: skip over its declared length.
             if (stream.Read(buf, 0, 2) < 2) return null;
             int len = (buf[0] << 8) | buf[1];
             if (len < 2) return null;

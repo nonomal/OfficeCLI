@@ -145,33 +145,41 @@ public partial class WordHandler
         if (!properties.TryGetValue("path", out var imgPath) && !properties.TryGetValue("src", out imgPath))
             throw new ArgumentException("'path' (or 'src') property is required for picture type");
 
-        var (imgStream, imgPartType) = OfficeCli.Core.ImageSource.Resolve(imgPath);
-        using var imgStreamDispose = imgStream;
+        // Buffer the image bytes so we can both feed the image part and sniff
+        // the native pixel dimensions for auto aspect-ratio calculations.
+        var (rawStream, imgPartType) = OfficeCli.Core.ImageSource.Resolve(imgPath);
+        using var rawStreamDispose = rawStream;
+        using var imgStream = new MemoryStream();
+        rawStream.CopyTo(imgStream);
+        imgStream.Position = 0;
 
         var mainPart = _doc.MainDocumentPart!;
         var imagePart = mainPart.AddImagePart(imgPartType);
         imagePart.FeedData(imgStream);
+        imgStream.Position = 0;
         var relId = mainPart.GetIdOfPart(imagePart);
 
-        // Determine dimensions with auto aspect ratio
-        bool hasExplicitWidth = properties.TryGetValue("width", out var widthStr);
-        bool hasExplicitHeight = properties.TryGetValue("height", out var heightStr);
-        long cxEmu = hasExplicitWidth ? ParseEmu(widthStr!) : 5486400; // default: 6 inches
-        long cyEmu = hasExplicitHeight ? ParseEmu(heightStr!) : 3657600; // default: 4 inches
+        // Determine dimensions. When only one axis is supplied, compute the
+        // other from the image's native pixel aspect ratio. When neither is
+        // supplied, width defaults to 6 inches and height follows the aspect
+        // ratio (or a 4 inch fallback when the image header cannot be read).
+        bool hasWidth = properties.TryGetValue("width", out var widthStr);
+        bool hasHeight = properties.TryGetValue("height", out var heightStr);
+        long cxEmu = hasWidth ? ParseEmu(widthStr!) : 5486400;  // 6 inches fallback
+        long cyEmu = hasHeight ? ParseEmu(heightStr!) : 3657600; // 4 inches fallback
 
-        // Auto-calculate missing dimension from image pixel aspect ratio
-        if (!hasExplicitWidth || !hasExplicitHeight)
+        if (!hasWidth || !hasHeight)
         {
             var dims = OfficeCli.Core.ImageSource.TryGetDimensions(imgStream);
-            if (dims is { Width: > 0, Height: > 0 })
+            if (dims is { Width: > 0, Height: > 0 } d)
             {
-                var (pixW, pixH) = dims.Value;
-                if (hasExplicitWidth)
-                    cyEmu = (long)(cxEmu * (double)pixH / pixW);
-                else if (hasExplicitHeight)
-                    cxEmu = (long)(cyEmu * (double)pixW / pixH);
+                double ratio = (double)d.Height / d.Width;
+                if (hasWidth && !hasHeight)
+                    cyEmu = (long)(cxEmu * ratio);
+                else if (!hasWidth && hasHeight)
+                    cxEmu = (long)(cyEmu / ratio);
                 else
-                    cyEmu = (long)(cxEmu * (double)pixH / pixW);
+                    cyEmu = (long)(cxEmu * ratio);
             }
         }
 
@@ -202,6 +210,8 @@ public partial class WordHandler
         Paragraph imgPara;
         if (parent is Paragraph existingPara)
         {
+            // When --index N is supplied, insert before the Nth existing run
+            // instead of always appending. Matches AddRun's index semantics.
             var runCount = existingPara.Elements<Run>().Count();
             if (index.HasValue && index.Value < runCount)
             {
@@ -229,6 +239,8 @@ public partial class WordHandler
             {
                 imgPara = new Paragraph(imgRun);
                 AssignParaId(imgPara);
+                // Prevent fixed line spacing (inherited from Normal style) from
+                // clipping the image to the text line height.
                 imgPara.PrependChild(new ParagraphProperties(
                     new SpacingBetweenLines { Line = "240", LineRule = LineSpacingRuleValues.Auto }));
                 imgCell.AppendChild(imgPara);
@@ -240,11 +252,15 @@ public partial class WordHandler
         {
             imgPara = new Paragraph(imgRun);
             AssignParaId(imgPara);
-            // Prevent fixed line spacing (inherited from Normal style) from clipping the image
+            // Prevent fixed line spacing (inherited from Normal style) from
+            // clipping the image to the text line height.
             imgPara.PrependChild(new ParagraphProperties(
                 new SpacingBetweenLines { Line = "240", LineRule = LineSpacingRuleValues.Auto }));
-            // Use ChildElements for index lookup to match ResolveAnchorPosition
-            // which computes indices against ChildElements (not just Paragraphs)
+
+            // Use ChildElements for index lookup so that tables and sectPr
+            // siblings do not shift the effective insertion position. This
+            // matches ResolveAnchorPosition, which computes anchor indices
+            // against ChildElements.
             var allChildren = parent.ChildElements.ToList();
             if (index.HasValue && index.Value < allChildren.Count)
             {

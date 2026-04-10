@@ -268,14 +268,19 @@ public partial class WordHandler
         if(bot>availH){splitIdx=ci;break;}
       }
       if(splitIdx<0)continue;
-      // When the first child itself exceeds page height, keep it and split after
+      // When the first child itself exceeds page height, keep it on this
+      // page and split after, so the oversized element is not silently
+      // dropped by being moved to a new (still-oversized) page.
       if(splitIdx===0)splitIdx=1;
-      // Collect movable children from splitIdx onward
+      // Collect movable children from splitIdx onward (skip footnotes — they
+      // stay on the reference page). If nothing is movable, the page is
+      // irreducibly oversized and we let it overflow gracefully instead of
+      // producing an empty follow-up page.
       var toMove=[];
       for(var mi=splitIdx;mi<children.length;mi++){
         if(!children[mi].classList.contains('footnotes'))toMove.push(children[mi]);
       }
-      if(toMove.length===0)continue; // irreducibly oversized single element
+      if(toMove.length===0)continue;
       // Create new page wrapped in page-wrapper
       var nw=document.createElement('div');
       nw.className='page-wrapper';
@@ -312,7 +317,9 @@ public partial class WordHandler
         });
       }
     });
-    // Recurse in case new pages also overflow
+    // Recurse in case new pages also overflow. A page is only eligible for
+    // another split when it has more than one visible child — otherwise the
+    // single element is irreducible and we would recurse forever.
     var again=false;
     document.querySelectorAll('.page').forEach(function(p){
       var b=p.querySelector('.page-body');
@@ -327,7 +334,6 @@ public partial class WordHandler
         if(bt>ch)ch=bt;
         if(c.offsetHeight>0)visibleCount++;
       });
-      // Only re-paginate if overflow AND more than one visible child to split
       if(ch>maxBodyH-fh+2 && visibleCount>1)again=true;
     });
     if(again)setTimeout(paginate,0);
@@ -768,7 +774,7 @@ public partial class WordHandler
         var numIdLevelOffset = new Dictionary<int, int>(); // numId → effective ilvl offset for cross-numId nesting
         var olCountPerLevel = new Dictionary<int, int>(); // ilvl → running <ol> item count for `start` attribute
         var multiLevelCounters = new Dictionary<int, int>(); // ilvl → counter for multi-level numbering
-        var headingCounters = new Dictionary<int, int>(); // ilvl → counter for heading auto-numbering (from style numPr)
+        var headingCounters = new Dictionary<int, int>(); // ilvl → counter for heading auto-numbering from style numPr
         bool pendingLiClose = false; // defer </li> to allow nested lists inside
         bool inMultiColumn = false; // track whether we're inside a multi-column div
 
@@ -1064,24 +1070,30 @@ public partial class WordHandler
                         sb.Append($" style=\"{hStyle}\"");
                     sb.Append(">");
 
-                    // Heading auto-numbering from style (e.g., "1", "1.1", "1.2.1")
+                    // Heading auto-numbering: if the heading's style chain
+                    // carries a numPr, expand the level's lvlText ("%1.%2")
+                    // against the running heading counters and prepend the
+                    // result as a <span class="heading-num">.
                     var hNumPr = ResolveNumPrFromStyle(para);
-                    if (hNumPr != null)
+                    if (hNumPr is { } hn)
                     {
-                        var (hNumId, hIlvl) = hNumPr.Value;
-                        headingCounters[hIlvl] = headingCounters.GetValueOrDefault(hIlvl, 0) + 1;
-                        // Reset deeper level counters
-                        for (int lk = hIlvl + 1; lk <= 8; lk++)
+                        headingCounters[hn.Ilvl] = headingCounters.GetValueOrDefault(hn.Ilvl, 0) + 1;
+                        // Reset deeper level counters whenever a shallower heading ticks.
+                        for (int lk = hn.Ilvl + 1; lk <= 8; lk++)
                             if (headingCounters.ContainsKey(lk)) headingCounters[lk] = 0;
 
-                        var lvlText = GetLevelText(hNumId, hIlvl);
-                        if (lvlText != null)
+                        var lvlText = GetLevelText(hn.NumId, hn.Ilvl);
+                        if (!string.IsNullOrEmpty(lvlText))
                         {
                             var numStr = lvlText;
-                            for (int lk = 0; lk <= hIlvl; lk++)
-                                numStr = numStr.Replace($"%{lk + 1}",
+                            for (int lk = 0; lk <= hn.Ilvl; lk++)
+                                numStr = numStr.Replace(
+                                    $"%{lk + 1}",
                                     headingCounters.GetValueOrDefault(lk, 0).ToString());
-                            // Skip if paragraph text already starts with the number (avoid duplication)
+                            // Skip the auto-num span when the paragraph text
+                            // already begins with the computed number, so a
+                            // user-typed "1. Overview" does not render as
+                            // "1. 1. Overview".
                             var paraText = GetParagraphText(para).TrimStart();
                             if (!paraText.StartsWith(numStr, StringComparison.Ordinal))
                                 sb.Append($"<span class=\"heading-num\" style=\"margin-right:0.5em\">{HtmlEncode(numStr)}</span>");

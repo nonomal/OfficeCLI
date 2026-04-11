@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using DocumentFormat.OpenXml;
-using DocumentFormat.OpenXml.Packaging;
 using Drawing = DocumentFormat.OpenXml.Drawing;
 using CX = DocumentFormat.OpenXml.Office2016.Drawing.ChartDrawing;
 
@@ -53,15 +52,7 @@ internal static class ChartExBuilder
 
         if (!string.IsNullOrEmpty(title))
         {
-            var chartTitle = new CX.ChartTitle();
-            chartTitle.AppendChild(new CX.Text(
-                new CX.RichTextBody(
-                    new Drawing.BodyProperties(),
-                    new Drawing.Paragraph(
-                        new Drawing.Run(
-                            new Drawing.RunProperties { Language = "en-US" },
-                            new Drawing.Text(title))))));
-            chart.AppendChild(chartTitle);
+            chart.AppendChild(BuildChartTitle(title, properties));
         }
 
         var plotArea = new CX.PlotArea();
@@ -77,17 +68,56 @@ internal static class ChartExBuilder
             _ => "funnel"
         };
 
+        // Parse series fill colors — reuse the `colors=RED,BLUE,GREEN`
+        // convention from regular charts, or accept a single `fill=COLOR`
+        // for one-series charts like histogram.
+        var seriesColors = ChartHelper.ParseSeriesColors(properties);
+        if (seriesColors == null && properties.TryGetValue("fill", out var fillStr))
+            seriesColors = new[] { fillStr };
+
+        // dataLabels: off by default. Accept "true" / "on" / "1" / "value"
+        // (any explicit truthy value enables). "false" / "off" / "0" disables.
+        var showDataLabels = IsTruthyProp(properties, "dataLabels", defaultValue: false);
+
         for (int si = 0; si < seriesData.Count; si++)
         {
             var series = new CX.Series { LayoutId = new EnumValue<CX.SeriesLayout>(
                 ParseSeriesLayout(layoutId)) };
+
+            // Schema order for cx:series:
+            //   tx → spPr → valueColors → valueColorPositions → dataPoint*
+            //   → dataLabels → dataId → layoutPr → axisId* → extLst
             series.AppendChild(new CX.Text(
                 new CX.TextData(
                     new CX.Formula(""),
                     new CX.VXsdstring(seriesData[si].name))));
+
+            // Per-series solid fill
+            if (seriesColors != null && si < seriesColors.Length && !string.IsNullOrEmpty(seriesColors[si]))
+            {
+                var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(seriesColors[si]);
+                series.AppendChild(new CX.ShapeProperties(
+                    new Drawing.SolidFill(
+                        new Drawing.RgbColorModelHex { Val = rgb })));
+            }
+
+            // Data labels (value count above each bar)
+            if (showDataLabels)
+            {
+                var dl = new CX.DataLabels { Pos = CX.DataLabelPos.OutEnd };
+                dl.AppendChild(new CX.DataLabelVisibilities
+                {
+                    Value = true,
+                    SeriesName = false,
+                    CategoryName = false,
+                });
+                series.AppendChild(dl);
+            }
+
             series.AppendChild(new CX.DataId { Val = (uint)si });
 
-            // Chart-type specific layoutPr
+            // Chart-type specific layoutPr (histogram binning, treemap label
+            // layout, boxWhisker stats, etc.)
             var layoutPr = BuildLayoutProperties(normalized, properties, seriesData[si].values.Length);
             if (layoutPr != null)
                 series.AppendChild(layoutPr);
@@ -97,17 +127,214 @@ internal static class ChartExBuilder
 
         plotArea.AppendChild(plotAreaRegion);
 
-        // Add axes for chart types that need them
+        // Axes for chart types that need them (histogram / boxWhisker).
+        // Funnel/treemap/sunburst are axis-less.
         if (normalized is "boxwhisker" or "histogram")
         {
-            plotArea.AppendChild(new CX.Axis(new CX.CategoryAxisScaling()) { Id = 0 });
-            plotArea.AppendChild(new CX.Axis(new CX.ValueAxisScaling()) { Id = 1 });
+            plotArea.AppendChild(BuildCategoryAxis(id: 0, chartType: normalized, properties));
+            plotArea.AppendChild(BuildValueAxis(id: 1, properties));
         }
 
         chart.AppendChild(plotArea);
-        chartSpace.AppendChild(chart);
 
+        // Legend (optional, appears AFTER plotArea per cx:chart schema order)
+        if (properties.TryGetValue("legend", out var legendPos) &&
+            !string.IsNullOrEmpty(legendPos) &&
+            !legendPos.Equals("none", StringComparison.OrdinalIgnoreCase) &&
+            !legendPos.Equals("false", StringComparison.OrdinalIgnoreCase) &&
+            !legendPos.Equals("off", StringComparison.OrdinalIgnoreCase))
+        {
+            chart.AppendChild(BuildLegend(legendPos));
+        }
+
+        chartSpace.AppendChild(chart);
         return chartSpace;
+    }
+
+    private static CX.ChartTitle BuildChartTitle(string title, Dictionary<string, string>? properties = null)
+    {
+        var rPr = new Drawing.RunProperties { Language = "en-US" };
+        // Delegate style parsing to the shared helper so cChart and cxChart
+        // stay in vocabulary lockstep. See
+        // ChartHelper.ApplyRunStyleProperties.
+        if (properties != null)
+            ChartHelper.ApplyRunStyleProperties(rPr, properties, keyPrefix: "title");
+
+        var chartTitle = new CX.ChartTitle();
+        chartTitle.AppendChild(new CX.Text(
+            new CX.RichTextBody(
+                new Drawing.BodyProperties(),
+                new Drawing.Paragraph(
+                    new Drawing.Run(
+                        rPr,
+                        new Drawing.Text(title))))));
+        return chartTitle;
+    }
+
+    private static CX.AxisTitle BuildAxisTitle(string title, Dictionary<string, string>? properties = null)
+    {
+        var rPr = new Drawing.RunProperties { Language = "en-US" };
+        if (properties != null)
+            ChartHelper.ApplyRunStyleProperties(rPr, properties, keyPrefix: "axisTitle");
+
+        return new CX.AxisTitle(
+            new CX.Text(
+                new CX.RichTextBody(
+                    new Drawing.BodyProperties(),
+                    new Drawing.Paragraph(
+                        new Drawing.Run(
+                            rPr,
+                            new Drawing.Text(title))))));
+    }
+
+    /// <summary>
+    /// Wrap a shared `a:defRPr` (built from a compound `"size:color:fontname"`
+    /// spec by <see cref="ChartHelper.BuildDefaultRunPropertiesFromCompoundSpec"/>)
+    /// in a <see cref="CX.TxPrTextBody"/>. Only the outer container differs
+    /// from the regular-cChart path (<see cref="C.TextProperties"/>).
+    /// </summary>
+    private static CX.TxPrTextBody? BuildAxisTickLabelStyle(string compoundSpec)
+    {
+        if (string.IsNullOrEmpty(compoundSpec)) return null;
+        var defRp = ChartHelper.BuildDefaultRunPropertiesFromCompoundSpec(compoundSpec);
+        return new CX.TxPrTextBody(
+            new Drawing.BodyProperties(),
+            new Drawing.ListStyle(),
+            new Drawing.Paragraph(new Drawing.ParagraphProperties(defRp)));
+    }
+
+    /// <summary>
+    /// Build a <see cref="CX.ShapeProperties"/> containing a solid-fill outline
+    /// for coloring gridlines. Mirrors the regular-chart `gridline.color` knob.
+    /// </summary>
+    private static CX.ShapeProperties? BuildGridlineShapeProperties(string color)
+    {
+        if (string.IsNullOrEmpty(color)) return null;
+        var (rgb, _) = ParseHelpers.SanitizeColorForOoxml(color);
+        var outline = new Drawing.Outline();
+        outline.AppendChild(new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = rgb }));
+        return new CX.ShapeProperties(outline);
+    }
+
+    private static CX.Legend BuildLegend(string posSpec)
+    {
+        var legend = new CX.Legend
+        {
+            Align = CX.PosAlign.Ctr,
+            Overlay = false,
+        };
+        legend.Pos = posSpec.ToLowerInvariant() switch
+        {
+            "top" or "t"    => CX.SidePos.T,
+            "bottom" or "b" => CX.SidePos.B,
+            "left" or "l"   => CX.SidePos.L,
+            _               => CX.SidePos.R,  // right is the Excel default
+        };
+        return legend;
+    }
+
+    // Build the category axis (X axis for histogram / boxWhisker). Schema
+    // order of Axis children: catScaling → title → majorGridlines →
+    // tickLabels → ... (only the ones we emit are listed).
+    private static CX.Axis BuildCategoryAxis(uint id, string chartType, Dictionary<string, string> properties)
+    {
+        var axis = new CX.Axis { Id = id };
+
+        // catScaling is required. histogram defaults gapWidth="0" (bars touch)
+        // because that's what real Excel emits and it's what users expect.
+        var catScaling = new CX.CategoryAxisScaling();
+        var gapWidth = properties.GetValueOrDefault("gapWidth");
+        if (string.IsNullOrEmpty(gapWidth) && chartType == "histogram")
+            gapWidth = "0";
+        if (!string.IsNullOrEmpty(gapWidth))
+            catScaling.GapWidth = gapWidth;
+        axis.AppendChild(catScaling);
+
+        if (properties.TryGetValue("xAxisTitle", out var xTitle) && !string.IsNullOrEmpty(xTitle))
+            axis.AppendChild(BuildAxisTitle(xTitle, properties));
+
+        // Category-axis major gridlines are off by default in Excel; opt-in.
+        if (IsTruthyProp(properties, "xGridlines", defaultValue: false))
+        {
+            var gl = new CX.MajorGridlinesGridlines();
+            // CONSISTENCY(chart-text-style): category-axis gridline color uses
+            // `xGridlineColor` to distinguish from value-axis `gridlineColor`.
+            var xglColor = properties.GetValueOrDefault("xGridlineColor")
+                        ?? properties.GetValueOrDefault("xGridline.color");
+            if (!string.IsNullOrEmpty(xglColor))
+                gl.ShapeProperties = BuildGridlineShapeProperties(xglColor);
+            axis.AppendChild(gl);
+        }
+
+        // Tick labels (bin range labels like "[100, 200]") are ON by default
+        // to match real Excel output. Opt out with tickLabels=false. Note
+        // that cx:tickLabels itself is an EMPTY element per CT_TickLabels —
+        // label text styling lives on the axis's own cx:txPr sibling (below),
+        // NOT inside tickLabels. Nesting txPr under tickLabels produces
+        // schema-invalid XML that Excel silently "repairs".
+        if (IsTruthyProp(properties, "tickLabels", defaultValue: true))
+            axis.AppendChild(new CX.TickLabels());
+
+        // CONSISTENCY(chart-text-style): axis-level cx:txPr styles tick
+        // labels AND axis title text, matching what ApplyAxisTextProperties
+        // does for regular cChart. Compound form `axisfont=size:color:fontname`.
+        // Must be AFTER tickLabels per CT_Axis schema sequence
+        // (catScaling → title → gridlines → tickLabels → numFmt → spPr → txPr).
+        var axisFont = properties.GetValueOrDefault("axisfont")
+                    ?? properties.GetValueOrDefault("axis.font");
+        if (!string.IsNullOrEmpty(axisFont))
+        {
+            var tickTxPr = BuildAxisTickLabelStyle(axisFont);
+            if (tickTxPr != null) axis.AppendChild(tickTxPr);
+        }
+
+        return axis;
+    }
+
+    private static CX.Axis BuildValueAxis(uint id, Dictionary<string, string> properties)
+    {
+        var axis = new CX.Axis { Id = id };
+        axis.AppendChild(new CX.ValueAxisScaling());
+
+        if (properties.TryGetValue("yAxisTitle", out var yTitle) && !string.IsNullOrEmpty(yTitle))
+            axis.AppendChild(BuildAxisTitle(yTitle, properties));
+
+        // Value-axis gridlines are ON by default — matches Excel's histogram
+        // and column charts out of the box.
+        if (IsTruthyProp(properties, "gridlines", defaultValue: true))
+        {
+            var gl = new CX.MajorGridlinesGridlines();
+            var glColor = properties.GetValueOrDefault("gridlineColor")
+                       ?? properties.GetValueOrDefault("gridline.color");
+            if (!string.IsNullOrEmpty(glColor))
+                gl.ShapeProperties = BuildGridlineShapeProperties(glColor);
+            axis.AppendChild(gl);
+        }
+
+        if (IsTruthyProp(properties, "tickLabels", defaultValue: true))
+            axis.AppendChild(new CX.TickLabels());
+
+        // cx:txPr must come after tickLabels per CT_Axis schema. See the
+        // CONSISTENCY(chart-text-style) note in BuildCategoryAxis above.
+        var axisFont = properties.GetValueOrDefault("axisfont")
+                    ?? properties.GetValueOrDefault("axis.font");
+        if (!string.IsNullOrEmpty(axisFont))
+        {
+            var tickTxPr = BuildAxisTickLabelStyle(axisFont);
+            if (tickTxPr != null) axis.AppendChild(tickTxPr);
+        }
+
+        return axis;
+    }
+
+    private static bool IsTruthyProp(Dictionary<string, string> properties, string key, bool defaultValue)
+    {
+        if (!properties.TryGetValue(key, out var v) || string.IsNullOrEmpty(v))
+            return defaultValue;
+        return !(v.Equals("false", StringComparison.OrdinalIgnoreCase)
+              || v.Equals("off", StringComparison.OrdinalIgnoreCase)
+              || v == "0"
+              || v.Equals("no", StringComparison.OrdinalIgnoreCase));
     }
 
     private static CX.Data BuildDataBlock(uint id, string chartType, string[]? categories, double[] values)

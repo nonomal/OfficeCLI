@@ -704,13 +704,19 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
-    /// Apply text properties (font, size, color) to all axis labels.
-    /// Format: "size:color:fontname" e.g. "10:8B949E:Helvetica Neue" or "10:CCCCCC"
+    /// Parse a compound text-style spec "size:color:fontname" into a
+    /// <see cref="Drawing.DefaultRunProperties"/>. Shared by regular cChart
+    /// and cx extended chart builders. Unspecified fields keep their
+    /// defaults (size defaults to 10pt = 1000 hundredths).
+    ///
+    /// CONSISTENCY(chart-text-style): this is the single source of truth
+    /// for parsing compound font specs. Callers wrap the result in their
+    /// container of choice — <see cref="C.TextProperties"/> for regular
+    /// cChart, or <c>CX.TxPrTextBody</c> for extended cxChart.
     /// </summary>
-    internal static void ApplyAxisTextProperties(OpenXmlCompositeElement axis, string value)
+    internal static Drawing.DefaultRunProperties BuildDefaultRunPropertiesFromCompoundSpec(string spec)
     {
-        axis.RemoveAllChildren<C.TextProperties>();
-        var parts = value.Split(':');
+        var parts = spec.Split(':');
         var fontSize = parts.Length > 0 && int.TryParse(parts[0], out var fs) ? fs * 100 : 1000;
         var color = parts.Length > 1 ? parts[1] : null;
         var fontName = parts.Length > 2 ? parts[2] : null;
@@ -727,6 +733,72 @@ internal static partial class ChartHelper
             defRp.AppendChild(new Drawing.LatinFont { Typeface = fontName });
             defRp.AppendChild(new Drawing.EastAsianFont { Typeface = fontName });
         }
+        return defRp;
+    }
+
+    /// <summary>
+    /// Apply run-level styling from `{prefix}.color`/`{prefix}.size`/
+    /// `{prefix}.font`/`{prefix}.bold` properties (and dotless aliases
+    /// `{prefix}color`, `{prefix}size`, ...) onto an existing
+    /// <see cref="Drawing.RunProperties"/>. Shared by both chart families.
+    ///
+    /// CONSISTENCY(chart-text-style): same vocabulary as
+    /// <c>ChartHelper.Setter.cs</c> case `"title.color"`. Setter keeps its
+    /// own inline implementation because it layers extra effects (glow /
+    /// shadow) that are out of scope here.
+    /// </summary>
+    internal static void ApplyRunStyleProperties(Drawing.RunProperties rPr,
+        Dictionary<string, string> properties, string keyPrefix)
+    {
+        string? Get(string suffix)
+        {
+            if (properties.TryGetValue($"{keyPrefix}.{suffix}", out var v) && !string.IsNullOrEmpty(v)) return v;
+            if (properties.TryGetValue($"{keyPrefix}{suffix}", out v) && !string.IsNullOrEmpty(v)) return v;
+            return null;
+        }
+
+        var color = Get("color");
+        if (!string.IsNullOrEmpty(color))
+        {
+            rPr.RemoveAllChildren<Drawing.SolidFill>();
+            var sf = new Drawing.SolidFill();
+            sf.AppendChild(BuildChartColorElement(color));
+            rPr.AppendChild(sf);
+        }
+
+        var size = Get("size");
+        if (!string.IsNullOrEmpty(size))
+        {
+            var sizeStr = size.EndsWith("pt", StringComparison.OrdinalIgnoreCase) ? size[..^2] : size;
+            if (double.TryParse(sizeStr, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var pts))
+                rPr.FontSize = (int)Math.Round(pts * 100);
+        }
+
+        var font = Get("font");
+        if (!string.IsNullOrEmpty(font))
+        {
+            rPr.RemoveAllChildren<Drawing.LatinFont>();
+            rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+            rPr.AppendChild(new Drawing.LatinFont { Typeface = font });
+            rPr.AppendChild(new Drawing.EastAsianFont { Typeface = font });
+        }
+
+        var bold = Get("bold");
+        if (!string.IsNullOrEmpty(bold))
+            rPr.Bold = ParseHelpers.IsTruthy(bold);
+    }
+
+    /// <summary>
+    /// Apply text properties (font, size, color) to all axis labels.
+    /// Format: "size:color:fontname" e.g. "10:8B949E:Helvetica Neue" or "10:CCCCCC".
+    /// Used by the regular cChart path; delegates parsing to
+    /// <see cref="BuildDefaultRunPropertiesFromCompoundSpec"/>.
+    /// </summary>
+    internal static void ApplyAxisTextProperties(OpenXmlCompositeElement axis, string value)
+    {
+        axis.RemoveAllChildren<C.TextProperties>();
+        var defRp = BuildDefaultRunPropertiesFromCompoundSpec(value);
 
         var tp = new C.TextProperties(
             new Drawing.BodyProperties(),

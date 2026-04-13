@@ -232,13 +232,15 @@
     // Main SSE listener for DOM-swap events
     es.addEventListener('update', function(e) {
         var msg = JSON.parse(e.data);
-        // Track version
+        // Track version — save prevVersion BEFORE updating so gap checks
+        // compare against the version we actually have, not the incoming one.
+        var prevVersion = _clientVersion;
         if (msg.version !== undefined) _clientVersion = msg.version;
         if (msg.action === 'word-patch') {
             // Version gap check: if we missed messages, fallback to full
-            if (msg.baseVersion !== 0 && msg.baseVersion !== _clientVersion) {
+            // Skip when prevVersion===0 (fresh client — no messages seen yet)
+            if (prevVersion > 0 && msg.baseVersion !== 0 && msg.baseVersion !== prevVersion) {
                 wordDiffUpdate(msg);
-                if (msg.version !== undefined) _clientVersion = msg.version;
                 return;
             }
             wordPatchUpdate(msg);
@@ -246,7 +248,8 @@
         }
         if (msg.action === 'excel-patch') {
             // Version gap check: if we missed messages, fallback to full reload
-            if (msg.baseVersion !== 0 && msg.baseVersion !== _clientVersion) {
+            // Skip when prevVersion===0 (fresh client — no messages seen yet)
+            if (prevVersion > 0 && msg.baseVersion !== 0 && msg.baseVersion !== prevVersion) {
                 location.reload();
                 return;
             }

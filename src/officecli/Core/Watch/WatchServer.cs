@@ -1229,6 +1229,19 @@ internal class WatchServer : IDisposable
 
     // ==================== Excel Row-Level Diff ====================
 
+    /// <summary>
+    /// Signature of chart overlay positions — concatenation of all data-from-row/col
+    /// values in document order. Different signature → chart was moved → need full refresh.
+    /// </summary>
+    private static string ChartOverlaySignature(string html)
+    {
+        var sb = new System.Text.StringBuilder();
+        var rx = new System.Text.RegularExpressions.Regex(@"data-from-(?:row|col)=""(\d+)""");
+        foreach (System.Text.RegularExpressions.Match m in rx.Matches(html))
+            sb.Append(m.Value).Append(',');
+        return sb.ToString();
+    }
+
     /// <summary>Split Excel HTML into rows keyed by "sheetIdx-rowNum" from data-row attributes.</summary>
     private static Dictionary<string, string> SplitExcelRows(string html)
     {
@@ -1254,6 +1267,12 @@ internal class WatchServer : IDisposable
         if (string.IsNullOrEmpty(oldHtml) || string.IsNullOrEmpty(newHtml))
             return null;
         if (!oldHtml.Contains("data-row=\"") || !newHtml.Contains("data-row=\""))
+            return null;
+
+        // If chart overlay positions changed, fall back to full refresh.
+        // excel-patch only patches <tr> rows; overlay divs are outside the table
+        // and won't be updated by row-level patching.
+        if (ChartOverlaySignature(oldHtml) != ChartOverlaySignature(newHtml))
             return null;
 
         var oldRows = SplitExcelRows(oldHtml);

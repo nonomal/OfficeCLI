@@ -161,7 +161,7 @@ officecli validate report.docx    # Check for schema errors
 officecli validate slides.pptx    # Must pass before delivery
 ```
 
-**For large documents**, ALWAYS use `--max-lines` or `--start`/`--end` to limit output.
+**For large documents**, ALWAYS use `--max-lines` to limit output.
 
 ---
 

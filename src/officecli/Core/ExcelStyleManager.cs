@@ -228,7 +228,7 @@ internal class ExcelStyleManager
             numFmtId, fontId, fillId, borderId, alignment, protection,
             applyNumFmt, applyFont, applyFill, applyBorder, applyAlignment, applyProtection);
 
-        stylesheet.Save();
+        // Caller (ExcelHandler) is responsible for saving via _dirtyStylesheet flag.
         return xfIndex;
     }
 

@@ -181,6 +181,15 @@ public partial class ExcelHandler
         sb.AppendLine("<script>");
         sb.AppendLine(GenerateExcelJs());
         sb.AppendLine("</script>");
+        // CONSISTENCY(excel-virt): private virt script injected after standard overlay.
+        // Open-source GetVirtScript() returns empty; private override loads watch-overlay-virt.js.
+        var virtScript = GetVirtScript();
+        if (virtScript.Length > 0)
+        {
+            sb.AppendLine("<script>");
+            sb.AppendLine(virtScript);
+            sb.AppendLine("</script>");
+        }
 
         sb.AppendLine("</body>");
         sb.AppendLine("</html>");
@@ -316,10 +325,12 @@ public partial class ExcelHandler
                 if (toRow > maxRow) maxRow = toRow;
             }
 
-        // Limit rendering to reasonable size
+        // Column cap: >200 cols is unusable in a browser table regardless of rendering mode.
+        // Row cap: default 5000; overridable via OnGetHtmlRowCap when the rendering backend
+        // keeps DOM node count bounded independently of sheet size.
         var actualRow = maxRow;
         var actualCol = maxCol;
-        maxRow = Math.Min(maxRow, 5000);
+        maxRow = Math.Min(maxRow, GetHtmlRowCap());
         maxCol = Math.Min(maxCol, 200);
         var truncated = actualRow > maxRow || actualCol > maxCol;
 
@@ -486,65 +497,15 @@ public partial class ExcelHandler
         // Visible column count for chart colspan
         var visibleColCount = Enumerable.Range(1, maxCol).Count(c => !hiddenCols.Contains(c));
 
-        // Data rows
-        sb.AppendLine("<tbody>");
-        for (int r = 1; r <= maxRow; r++)
-        {
-            if (hiddenRows.Contains(r)) { sb.AppendLine($"<tr data-row=\"{sheetIdx}-{r}\" style=\"display:none\"></tr>"); continue; }
-            bool isRowFrozen = frozenRows > 0 && r <= frozenRows;
-            var rowStyles = new List<string>();
-            if (rowHeights.TryGetValue(r, out var rh)) rowStyles.Add($"height:{rh:0.##}pt");
-            if (isRowFrozen) rowStyles.Add("background:#fff");
-            var rowStyle = rowStyles.Count > 0 ? $" style=\"{string.Join(";", rowStyles)}\"" : "";
-            var frozenAttr = isRowFrozen ? " data-frozen=\"1\"" : "";
-            sb.Append($"<tr data-row=\"{sheetIdx}-{r}\"{rowStyle}{frozenAttr}>");
-
-            // Row header
-            string rowHeaderStyle;
-            if (isRowFrozen)
-                rowHeaderStyle = " style=\"position:sticky;top:0;left:0;z-index:3\"";
-            else if (frozenCols > 0)
-                rowHeaderStyle = " style=\"position:sticky;left:0;z-index:2\"";
-            else
-                rowHeaderStyle = "";
-            sb.Append($"<th class=\"row-header\" data-path=\"/{HtmlEncode(sheetName)}/row[{r}]\"{rowHeaderStyle}>{r}</th>");
-
-            for (int c = 1; c <= maxCol; c++)
-            {
-                if (hiddenCols.Contains(c)) continue;
-                // Check if this cell is hidden by a merge (non-anchor cell in merged range)
-                var cellRef = $"{IndexToColumnName(c)}{r}";
-                if (mergeMap.TryGetValue(cellRef, out var mergeInfo))
-                {
-                    if (!mergeInfo.IsAnchor) continue; // skip non-anchor cells
-
-                    var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
-                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
-                    // Adjust colspan to exclude hidden columns within the merge range
-                    var adjColSpan = mergeInfo.ColSpan;
-                    if (adjColSpan > 1 && hiddenCols.Count > 0)
-                    {
-                        for (int hc = c + 1; hc < c + mergeInfo.ColSpan; hc++)
-                            if (hiddenCols.Contains(hc)) adjColSpan--;
-                    }
-                    var spanAttrs = "";
-                    if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
-                    if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
-
-                    sb.Append($"<td data-path=\"/{HtmlEncode(sheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spanAttrs}{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
-                }
-                else
-                {
-                    var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap);
-                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
-                    sb.Append($"<td data-path=\"/{HtmlEncode(sheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{style}>{BuildCellContent(cellRef, value, dataBarMap, iconSetMap)}</td>");
-                }
-            }
-            sb.AppendLine("</tr>");
-        }
-        sb.AppendLine("</tbody>");
+        // CONSISTENCY(excel-virt): Extension point — private override in
+        // ExcelHandler.HtmlPreview.Virt.cs replaces the full static tbody with a
+        // JSON-data tbody + JS virtual renderer. BuildRowInnerHtml is shared for
+        // cell rendering; open-source RenderTbody emits static <tr> elements.
+        var ctx = new SheetRenderContext(sheetName, sheetIdx, cellMap, maxRow, maxCol,
+            rowHeights, hiddenRows, hiddenCols, mergeMap, frozenRows, frozenCols,
+            frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap,
+            stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt);
+        RenderTbody(sb, ctx);
         sb.AppendLine("</table>");
 
         // Render charts as absolute-positioned overlays on top of the table grid.
@@ -598,7 +559,128 @@ public partial class ExcelHandler
 
     // ==================== Merge Map ====================
 
-    private record struct MergeInfo(bool IsAnchor, int RowSpan, int ColSpan);
+    internal record struct MergeInfo(bool IsAnchor, int RowSpan, int ColSpan);
+
+    // CONSISTENCY(excel-virt): Packages all sheet-level computed data needed to render
+    // tbody rows. Passed to RenderTbody so the private virt override can serialise all
+    // cell HTML to JSON without re-running the data-collection logic.
+    internal record SheetRenderContext(
+        string SheetName,
+        int SheetIdx,
+        Dictionary<(int row, int col), Cell> CellMap,
+        int MaxRow, int MaxCol,
+        Dictionary<int, double> RowHeights,
+        HashSet<int> HiddenRows,
+        HashSet<int> HiddenCols,
+        Dictionary<string, MergeInfo> MergeMap,
+        int FrozenRows, int FrozenCols,
+        Dictionary<int, double> FrozenLeftOffsets,
+        Dictionary<int, double> FrozenTopOffsets,
+        Dictionary<string, string> CfMap,
+        Dictionary<string, string> DataBarMap,
+        Dictionary<string, string> IconSetMap,
+        Stylesheet? Stylesheet,
+        Core.FormulaEvaluator? Evaluator,
+        double DefaultColWidthPt,
+        double DefaultRowHeightPt);
+
+    // CONSISTENCY(excel-virt): Private ExcelHandler.HtmlPreview.Virt.cs implements
+    // OnRenderTbody to emit virtualised rows (JSON data + empty tbody) and sets
+    // handled=true to skip the default. When no private implementation exists the
+    // partial call is removed by the compiler and the default static rendering runs.
+    partial void OnRenderTbody(StringBuilder sb, SheetRenderContext ctx, ref bool handled);
+
+    // CONSISTENCY(excel-virt): default 5000-row cap for HTML preview; backend can
+    // override via OnGetHtmlRowCap when DOM node count is bounded independently.
+    partial void OnGetHtmlRowCap(ref int cap);
+    internal int GetHtmlRowCap()
+    {
+        var cap = 5000;
+        OnGetHtmlRowCap(ref cap);
+        return cap;
+    }
+
+    internal void RenderTbody(StringBuilder sb, SheetRenderContext ctx)
+    {
+        bool handled = false;
+        OnRenderTbody(sb, ctx, ref handled);
+        if (handled) return;
+        // Default: render all rows as static <tr> elements.
+        sb.AppendLine("<tbody>");
+        for (int r = 1; r <= ctx.MaxRow; r++)
+        {
+            if (ctx.HiddenRows.Contains(r)) { sb.AppendLine($"<tr data-row=\"{ctx.SheetIdx}-{r}\" style=\"display:none\"></tr>"); continue; }
+            bool isRowFrozen = ctx.FrozenRows > 0 && r <= ctx.FrozenRows;
+            var rowStyles = new List<string>();
+            if (ctx.RowHeights.TryGetValue(r, out var rh)) rowStyles.Add($"height:{rh:0.##}pt");
+            if (isRowFrozen) rowStyles.Add("background:#fff");
+            var rowStyle = rowStyles.Count > 0 ? $" style=\"{string.Join(";", rowStyles)}\"" : "";
+            var frozenAttr = isRowFrozen ? " data-frozen=\"1\"" : "";
+            sb.Append($"<tr data-row=\"{ctx.SheetIdx}-{r}\"{rowStyle}{frozenAttr}>");
+            sb.Append(BuildRowInnerHtml(ctx, r, isRowFrozen));
+            sb.AppendLine("</tr>");
+        }
+        sb.AppendLine("</tbody>");
+    }
+
+    // CONSISTENCY(excel-virt): Shared row-cell renderer used by RenderTbody (open-source
+    // static rendering) and ExcelHandler.HtmlPreview.Virt.cs (JSON serialisation).
+    // Returns the <tr> inner content: row-header <th> + all cell <td> elements,
+    // without the <tr> wrapper.
+    internal string BuildRowInnerHtml(SheetRenderContext ctx, int r, bool isRowFrozen)
+    {
+        var rowSb = new StringBuilder();
+        string rowHeaderStyle;
+        if (isRowFrozen)
+            rowHeaderStyle = " style=\"position:sticky;top:0;left:0;z-index:3\"";
+        else if (ctx.FrozenCols > 0)
+            rowHeaderStyle = " style=\"position:sticky;left:0;z-index:2\"";
+        else
+            rowHeaderStyle = "";
+        rowSb.Append($"<th class=\"row-header\" data-path=\"/{HtmlEncode(ctx.SheetName)}/row[{r}]\"{rowHeaderStyle}>{r}</th>");
+
+        for (int c = 1; c <= ctx.MaxCol; c++)
+        {
+            if (ctx.HiddenCols.Contains(c)) continue;
+            var cellRef = $"{IndexToColumnName(c)}{r}";
+            if (ctx.MergeMap.TryGetValue(cellRef, out var mergeInfo))
+            {
+                if (!mergeInfo.IsAnchor) continue;
+                var cell = ctx.CellMap.TryGetValue((r, c), out var mc) ? mc : null;
+                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap);
+                var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
+                var adjColSpan = mergeInfo.ColSpan;
+                if (adjColSpan > 1 && ctx.HiddenCols.Count > 0)
+                    for (int hc = c + 1; hc < c + mergeInfo.ColSpan; hc++)
+                        if (ctx.HiddenCols.Contains(hc)) adjColSpan--;
+                var spanAttrs = "";
+                if (adjColSpan > 1) spanAttrs += $" colspan=\"{adjColSpan}\"";
+                if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
+                rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{spanAttrs}{style}>{BuildCellContent(cellRef, value, ctx.DataBarMap, ctx.IconSetMap)}</td>");
+            }
+            else
+            {
+                var cell = ctx.CellMap.TryGetValue((r, c), out var nc) ? nc : null;
+                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap);
+                var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
+                rowSb.Append($"<td data-path=\"/{HtmlEncode(ctx.SheetName)}/{cellRef}\"{GetFormulaAttr(cell)}{style}>{BuildCellContent(cellRef, value, ctx.DataBarMap, ctx.IconSetMap)}</td>");
+            }
+        }
+        return rowSb.ToString();
+    }
+
+    // CONSISTENCY(excel-virt): Private ExcelHandler.HtmlPreview.Virt.cs implements
+    // OnGetVirtScript to load watch-overlay-virt.js from embedded resources.
+    // When no private implementation exists the partial call is removed and result
+    // stays empty (no virtualisation script injected).
+    partial void OnGetVirtScript(ref string result);
+
+    internal string GetVirtScript()
+    {
+        var result = string.Empty;
+        OnGetVirtScript(ref result);
+        return result;
+    }
 
     private Dictionary<string, MergeInfo> BuildMergeMap(Worksheet ws)
     {

@@ -2066,6 +2066,19 @@ public partial class ExcelHandler
         var sd = ws.GetFirstChild<SheetData>();
         if (sd == null) return;
 
+        // Reject protected sheets unless the protection explicitly allows sort.
+        // Per OOXML sheetProtection, @sort defaults to true meaning "sort IS
+        // protected" (i.e. blocked). Only @sort="false" exempts sort from the
+        // protection and lets it run.
+        var protection = ws.GetFirstChild<SheetProtection>();
+        if (protection != null && (protection.Sheet?.Value ?? false))
+        {
+            bool sortBlocked = protection.Sort?.Value ?? true;
+            if (sortBlocked)
+                throw new InvalidOperationException(
+                    "Cannot sort a protected sheet. Unprotect first (or set sheetProtection@sort=\"false\" to allow sorting while protected).");
+        }
+
         // Reject malformed row layout: rows lacking RowIndex, or duplicate RowIndex values.
         // Both cases would cause silent data loss or silent skipped rows in the sort below
         // (RowIndex?.Value >= ... filter drops null; duplicate RowIndex means two rows get

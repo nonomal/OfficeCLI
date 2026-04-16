@@ -805,6 +805,10 @@ public partial class WordHandler
                 // Thickness: "thick" and any *Heavy variant
                 if (ulVal == "thick" || ulVal.EndsWith("Heavy"))
                     parts.Add("text-decoration-thickness:2px");
+                // Per-underline color via w:u w:color="RRGGBB"
+                var ulColor = rProps.Underline.Color?.Value;
+                if (!string.IsNullOrEmpty(ulColor) && !ulColor.Equals("auto", StringComparison.OrdinalIgnoreCase))
+                    parts.Add($"text-decoration-color:#{ulColor}");
             }
         }
 
@@ -1584,7 +1588,7 @@ public partial class WordHandler
             display: flex; flex-direction: column; font-kerning: none; letter-spacing: 0;
             transform-origin: left top; transition: transform 0.15s ease;
             }}
-        .page-body {{ flex: 1; display: flex; flex-direction: column; text-autospace: ideograph-alpha ideograph-numeric; {hyphensCss} }}
+        .page-body {{ flex: 1; display: flex; flex-direction: column; text-autospace: ideograph-alpha ideograph-numeric; overflow-wrap: anywhere; {hyphensCss} }}
         .page-body > :first-child {{ margin-top: 0 !important; }}
         .page-body > img + h1, .page-body > img + img + h1 {{ margin-top: 0 !important; }}
         .doc-header, .doc-footer {{ font-size: {dd.SizePt:0.##}pt; }}

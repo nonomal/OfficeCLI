@@ -255,6 +255,12 @@ public partial class WordHandler
         if (!hasContent) return;
 
         var rProps = ResolveEffectiveRunProperties(run, para);
+        // w:vanish / w:specVanish — hidden text should be omitted from the
+        // visual preview, matching native Word's default view behavior.
+        if (rProps.Vanish != null && (rProps.Vanish.Val == null || rProps.Vanish.Val.Value))
+            return;
+        if (rProps.SpecVanish != null && (rProps.SpecVanish.Val == null || rProps.SpecVanish.Val.Value))
+            return;
         var style = GetRunInlineCss(rProps);
         var needsSpan = !string.IsNullOrEmpty(style);
 

@@ -1512,6 +1512,45 @@ public partial class ExcelHandler
     /// <summary>
     /// Parse x, y, width, height from properties with given defaults. Used by both picture Add and shape Add.
     /// </summary>
+    // CONSISTENCY(shape-preset): mirror PowerPointHandler.ParsePresetShape token
+    // set so Excel `add shape preset=X` accepts the same vocabulary as PPT.
+    private static Drawing.ShapeTypeValues ParseExcelShapePreset(string name) =>
+        name.Trim().ToLowerInvariant() switch
+        {
+            "rect" or "rectangle" => Drawing.ShapeTypeValues.Rectangle,
+            "roundrect" or "roundedrectangle" => Drawing.ShapeTypeValues.RoundRectangle,
+            "ellipse" or "oval" => Drawing.ShapeTypeValues.Ellipse,
+            "triangle" => Drawing.ShapeTypeValues.Triangle,
+            "rtriangle" or "righttriangle" => Drawing.ShapeTypeValues.RightTriangle,
+            "diamond" => Drawing.ShapeTypeValues.Diamond,
+            "parallelogram" => Drawing.ShapeTypeValues.Parallelogram,
+            "trapezoid" => Drawing.ShapeTypeValues.Trapezoid,
+            "pentagon" => Drawing.ShapeTypeValues.Pentagon,
+            "hexagon" => Drawing.ShapeTypeValues.Hexagon,
+            "heptagon" => Drawing.ShapeTypeValues.Heptagon,
+            "octagon" => Drawing.ShapeTypeValues.Octagon,
+            "star4" => Drawing.ShapeTypeValues.Star4,
+            "star5" => Drawing.ShapeTypeValues.Star5,
+            "star6" => Drawing.ShapeTypeValues.Star6,
+            "star8" => Drawing.ShapeTypeValues.Star8,
+            "rightarrow" or "rarrow" => Drawing.ShapeTypeValues.RightArrow,
+            "leftarrow" or "larrow" => Drawing.ShapeTypeValues.LeftArrow,
+            "uparrow" => Drawing.ShapeTypeValues.UpArrow,
+            "downarrow" => Drawing.ShapeTypeValues.DownArrow,
+            "chevron" => Drawing.ShapeTypeValues.Chevron,
+            "plus" or "cross" => Drawing.ShapeTypeValues.Plus,
+            "heart" => Drawing.ShapeTypeValues.Heart,
+            "cloud" => Drawing.ShapeTypeValues.Cloud,
+            "sun" => Drawing.ShapeTypeValues.Sun,
+            "moon" => Drawing.ShapeTypeValues.Moon,
+            "arc" => Drawing.ShapeTypeValues.Arc,
+            "donut" => Drawing.ShapeTypeValues.Donut,
+            "cube" => Drawing.ShapeTypeValues.Cube,
+            "can" or "cylinder" => Drawing.ShapeTypeValues.Can,
+            "line" => Drawing.ShapeTypeValues.Line,
+            _ => Drawing.ShapeTypeValues.Rectangle
+        };
+
     private static (int x, int y, int width, int height) ParseAnchorBounds(
         Dictionary<string, string> properties, string defX, string defY, string defW, string defH)
     {

@@ -1230,13 +1230,22 @@ public partial class ExcelHandler
                     .Select(p => (uint?)p.Id?.Value ?? 0u).DefaultIfEmpty(0u).Max() + 1;
                 if (string.IsNullOrEmpty(shpName)) shpName = $"Shape {shpId}";
 
+                // CONSISTENCY(shape-preset): map `preset=` to a:prstGeom prst value
+                // using the same token set PowerPointHandler.ParsePresetShape accepts.
+                // textbox ignores preset (always "rect"). Default for shape: "rect".
+                var shpPreset = Drawing.ShapeTypeValues.Rectangle;
+                if (string.Equals(type, "shape", StringComparison.OrdinalIgnoreCase)
+                    && properties.TryGetValue("preset", out var shpPresetRaw)
+                    && !string.IsNullOrWhiteSpace(shpPresetRaw))
+                    shpPreset = ParseExcelShapePreset(shpPresetRaw);
+
                 // Build ShapeProperties
                 var spPr = new XDR.ShapeProperties(
                     new Drawing.Transform2D(
                         new Drawing.Offset { X = 0, Y = 0 },
                         new Drawing.Extents { Cx = 0, Cy = 0 }
                     ),
-                    new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = Drawing.ShapeTypeValues.Rectangle }
+                    new Drawing.PresetGeometry(new Drawing.AdjustValueList()) { Preset = shpPreset }
                 );
 
                 // Fill

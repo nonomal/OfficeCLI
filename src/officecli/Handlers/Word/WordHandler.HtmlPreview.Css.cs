@@ -404,7 +404,26 @@ public partial class WordHandler
                 }
                 else if (rule == "exact" || rule == "atLeast")
                 {
-                    parts.Add($"line-height:{Units.TwipsToPt(lv):0.##}pt");
+                    var linePt = Units.TwipsToPt(lv);
+                    parts.Add($"line-height:{linePt:0.##}pt");
+                    // #7b0001: when lineRule=exact pins the line box below
+                    // ~120% of the paragraph's font size, Word clips
+                    // over-tall glyphs. Emit overflow:hidden so tall glyphs
+                    // don't leak into neighboring lines.
+                    if (rule == "exact")
+                    {
+                        var sizeStr = ResolveStyleFontSize(
+                            para.ParagraphProperties?.ParagraphStyleId?.Val?.Value ?? "")
+                            ?? $"{ReadDocDefaults().SizePt}pt";
+                        // ResolveStyleFontSize returns "Npt"; strip suffix.
+                        if (sizeStr.EndsWith("pt", StringComparison.Ordinal)
+                            && double.TryParse(sizeStr[..^2],
+                                System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                out var runSizePt)
+                            && runSizePt > 0 && linePt < runSizePt * 1.2)
+                            parts.Add("overflow:hidden");
+                    }
                 }
             }
 
@@ -1622,6 +1641,9 @@ public partial class WordHandler
         .toc a {{ color: inherit; text-decoration: none; display: flex; flex: 1; }}
         .toc a span {{ color: inherit !important; text-decoration: none !important; }}
         .dot-leader {{ flex: 1; border-bottom: 1px dotted #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
+        .hyphen-leader {{ flex: 1; border-bottom: 1px dashed #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
+        .underscore-leader {{ flex: 1; border-bottom: 1px solid #000; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
+        .middledot-leader {{ flex: 1; border-bottom: 2px dotted #555; margin: 0 4px; min-width: 2em; align-self: flex-end; margin-bottom: 0.25em; }}
         ul, ol {{ padding-left: 2em; margin: 0.2em 0; }}
         ul {{ list-style-type: disc; }}
         li {{ margin: 0.1em 0; }}

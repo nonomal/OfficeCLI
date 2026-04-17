@@ -313,14 +313,24 @@ public partial class WordHandler
                     var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                     if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
                 }
-                // TOC-style special case: any right-aligned tab with dot leader
-                var rightDotTab = tabs?.FirstOrDefault(t =>
-                    t.Val?.InnerText == "right" && t.Leader?.InnerText == "dot");
-                if (rightDotTab != null)
+                // TOC-style special case: right-aligned tab with any leader.
+                // Dot/hyphen/underscore/middleDot all fill the gap between
+                // the current inline position and the right edge of the
+                // content box via a flex-grow spacer.
+                var rightLeaderTab = tabs?.FirstOrDefault(t =>
+                    t.Val?.InnerText == "right"
+                    && t.Leader?.InnerText is "dot" or "hyphen" or "underscore" or "middleDot" or "dash" or "heavy");
+                if (rightLeaderTab != null)
                 {
-                    // Close current span, insert dot leader, then page number follows
                     if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
-                    sb.Append("<span class=\"dot-leader\"></span>");
+                    var leaderClass = rightLeaderTab.Leader?.InnerText switch
+                    {
+                        "hyphen" or "dash" => "hyphen-leader",
+                        "underscore" or "heavy" => "underscore-leader",
+                        "middleDot" => "middledot-leader",
+                        _ => "dot-leader",
+                    };
+                    sb.Append($"<span class=\"{leaderClass}\"></span>");
                 }
                 else
                 {

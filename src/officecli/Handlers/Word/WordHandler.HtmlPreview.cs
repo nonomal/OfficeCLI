@@ -285,7 +285,29 @@ public partial class WordHandler
                 $"{activeLayout.MarginRightPt.ToString("0.#", ci)}pt " +
                 $"{activeLayout.MarginBottomPt.ToString("0.#", ci)}pt " +
                 $"{activeLayout.MarginLeftPt.ToString("0.#", ci)}pt";
-            sb.AppendLine($"<div class=\"page-wrapper\" data-section=\"{i + 1}\">");
+            // #1: lnNumType — read per-section line-number settings and
+            // expose them as data-* attributes so the JS paginator can
+            // inject line numbers after layout settles. Only applies when
+            // countBy > 0; absent element means "no line numbers".
+            string lineNumAttrs = "";
+            if (activeSectionIdx >= 0 && activeSectionIdx < sections.Count)
+            {
+                var ln = sections[activeSectionIdx].GetFirstChild<LineNumberType>();
+                if (ln?.CountBy?.Value is short by && by > 0)
+                {
+                    var startN = ln.Start?.Value ?? 1;
+                    var distTwips = ln.Distance?.Value is string ds
+                        && int.TryParse(ds, out var dv) ? dv : 0;
+                    var distPt = distTwips / 20.0;
+                    var restart = ln.Restart?.InnerText ?? "newPage";
+                    lineNumAttrs =
+                        $" data-line-num-by=\"{by}\"" +
+                        $" data-line-num-start=\"{startN}\"" +
+                        $" data-line-num-dist=\"{distPt.ToString("0.#", ci)}\"" +
+                        $" data-line-num-restart=\"{restart}\"";
+                }
+            }
+            sb.AppendLine($"<div class=\"page-wrapper\" data-section=\"{i + 1}\"{lineNumAttrs}>");
             sb.AppendLine($"<div class=\"page\" data-page=\"{i + 1}\" style=\"{pageStyle}\">");
             // #3: per-page header/footer selection. titlePg → first-page
             // variant; evenAndOddHeaders + even-numbered page → even
@@ -492,7 +514,73 @@ public partial class WordHandler
       if(ch>maxBodyH-fh+2 && visibleCount>1)again=true;
     });
     if(again)setTimeout(paginate,0);
-    else{setTimeout(positionFootnotes,0);setTimeout(applyPageFilter,0);setTimeout(function(){scalePages(false);},0);}
+    else{setTimeout(positionFootnotes,0);setTimeout(applyLineNumbers,0);setTimeout(applyPageFilter,0);setTimeout(function(){scalePages(false);},0);}
+  }
+  // #1: walk each page's text nodes, use Range.getClientRects() to find
+  // visual line rectangles, and inject absolute-positioned <span> markers
+  // in the left margin. Honors countBy (show every Nth line), start
+  // (initial number), distance (offset from text), and restart semantics
+  // (newPage resets per-page; continuous keeps running).
+  function applyLineNumbers(){
+    var wrappers=document.querySelectorAll('.page-wrapper[data-line-num-by]');
+    if(!wrappers.length)return;
+    var runningNum=null;  // continuous/newSection running counter across pages
+    var prevRestart=null;
+    wrappers.forEach(function(wrap){
+      var body=wrap.querySelector('.page-body');
+      if(!body)return;
+      // Clear any previous markers before re-applying (keeps idempotent).
+      body.querySelectorAll('.line-number').forEach(function(m){m.remove();});
+      var by=parseInt(wrap.dataset.lineNumBy||'1')||1;
+      var start=parseInt(wrap.dataset.lineNumStart||'1')||1;
+      var dist=parseFloat(wrap.dataset.lineNumDist||'0')||0;
+      var restart=wrap.dataset.lineNumRestart||'newPage';
+      var current=(restart==='newPage'||runningNum===null||prevRestart!==restart)
+        ?start:runningNum;
+      prevRestart=restart;
+      body.style.position='relative';
+      var bodyRect=body.getBoundingClientRect();
+      var seenY=Object.create(null);
+      var lineTops=[];
+      var walker=document.createTreeWalker(body,NodeFilter.SHOW_TEXT,{
+        acceptNode:function(n){
+          if(!n.textContent.trim())return NodeFilter.FILTER_REJECT;
+          // Skip line numbers we just injected (idempotence), footers, etc.
+          var el=n.parentElement;
+          while(el && el!==body){
+            if(el.classList && (el.classList.contains('line-number')
+              ||el.classList.contains('footnotes')))return NodeFilter.FILTER_REJECT;
+            el=el.parentElement;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+      var node;
+      while((node=walker.nextNode())){
+        var range=document.createRange();
+        range.selectNodeContents(node);
+        var rects=range.getClientRects();
+        for(var i=0;i<rects.length;i++){
+          var r=rects[i];
+          var y=Math.round(r.top-bodyRect.top);
+          if(!(y in seenY)){seenY[y]=true;lineTops.push(y);}
+        }
+      }
+      lineTops.sort(function(a,b){return a-b;});
+      var leftPt=-(dist+20);
+      for(var li=0;li<lineTops.length;li++){
+        var n=current+li;
+        if(by>1 && n%by!==0)continue;
+        var marker=document.createElement('span');
+        marker.className='line-number';
+        marker.textContent=n;
+        marker.style.cssText='position:absolute;left:'+leftPt+'pt;'
+          +'font-size:8pt;color:#888;user-select:none;pointer-events:none;';
+        marker.style.top=lineTops[li]+'px';
+        body.appendChild(marker);
+      }
+      runningNum=current+lineTops.length;
+    });
   }
   function positionFootnotes(){
     document.querySelectorAll('.page').forEach(function(page){

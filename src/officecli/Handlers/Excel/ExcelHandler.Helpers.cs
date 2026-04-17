@@ -27,6 +27,22 @@ public partial class ExcelHandler
         return new XDR.BlipFill(blip, new Drawing.Stretch(new Drawing.FillRectangle()));
     }
 
+    // Returns true if `s` would parse as a valid cell reference (e.g. A1,
+    // TBL1, XFD1048576). Excel refuses to open files whose table names match
+    // this pattern — the name is ambiguous with a cell address.
+    internal static bool LooksLikeCellReference(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return false;
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"^\$?([A-Za-z]{1,3})\$?([0-9]+)$");
+        if (!m.Success) return false;
+        var col = m.Groups[1].Value.ToUpperInvariant();
+        var colIdx = 0;
+        foreach (var ch in col) colIdx = colIdx * 26 + (ch - 'A' + 1);
+        if (colIdx < 1 || colIdx > 16384) return false;
+        if (!long.TryParse(m.Groups[2].Value, out var row) || row < 1 || row > 1048576) return false;
+        return true;
+    }
+
     // ==================== Path Normalization ====================
 
     /// <summary>

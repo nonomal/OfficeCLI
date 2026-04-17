@@ -1428,6 +1428,14 @@ public partial class ExcelHandler
 
                 var tableName = properties.GetValueOrDefault("name", $"Table{tableId}");
                 var displayName = properties.GetValueOrDefault("displayName", tableName);
+                // Excel rejects table names that parse as a cell reference
+                // (e.g. "tbl1" → column TBL=13584, row 1). The file won't open
+                // at all. Reject early with a clear error so callers pick a
+                // different name (e.g. "Table1", "tbl_1", "MyTable").
+                foreach (var n in new[] { tableName, displayName })
+                    if (LooksLikeCellReference(n))
+                        throw new ArgumentException(
+                            $"Table name '{n}' looks like a cell reference — Excel will refuse to open the file. Pick a name that is not <letters><digits> within A1:XFD1048576 (e.g. 'Table1', 'tbl_1', 'MyTable').");
                 var styleName = properties.GetValueOrDefault("style", "TableStyleMedium2");
                 var hasHeader = !properties.TryGetValue("headerRow", out var hrVal) || IsTruthy(hrVal);
                 var hasTotalRow = properties.TryGetValue("totalRow", out var trVal) && IsTruthy(trVal);

@@ -1967,10 +1967,15 @@ public partial class ExcelHandler
             border-right: none;
         }
         td {
-            /* Default gridlines. Explicit OOXML borders are rendered as inline
-               styles on individual cells, which win the border-collapse contest
-               because inline specificity > stylesheet rule. */
-            border: 1px solid #e0e0e0;
+            /* Default gridlines are painted with inset box-shadow instead of
+               border, so they do NOT participate in border-collapse tie-breaking.
+               Explicit OOXML borders (rendered as inline border styles on cells
+               with an OOXML style) always win at cell boundaries; missing cells
+               / style-0 cells no longer erase neighbours' black borders via the
+               CSS position-based tie-break. Right+bottom gridlines are owned by
+               each cell; first-row top and first-col left gridlines are added
+               via the :first-child rules below. */
+            box-shadow: inset -1px -1px 0 #e0e0e0;
             padding: 2px 4px;
             white-space: nowrap;
             overflow: hidden;
@@ -1979,14 +1984,15 @@ public partial class ExcelHandler
             max-width: 500px;
             word-break: break-all; /* CJK text wrapping support */
         }
+        tbody tr:first-child td { box-shadow: inset -1px -1px 0 #e0e0e0, inset 0 1px 0 #e0e0e0; }
+        tr td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 0 0 #e0e0e0; }
+        tbody tr:first-child td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 1px 0 #e0e0e0; }
         .empty-sheet {
             padding: 40px;
             text-align: center;
             color: #999;
             font-size: 14px;
         }
-        /* Frozen pane visual separator */
-        tr:nth-child(1) td { border-top-color: #e0e0e0; }
         /* Chart containers */
         .chart-container {
             margin: 16px auto;

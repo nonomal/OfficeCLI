@@ -29,6 +29,88 @@ public partial class ExcelHandler
 
     // Build an <xdr:pic> element with an initial Transform2D, applying any
     // user-supplied rotation/flip props. Keeps the Add.cs path readable.
+    // CONSISTENCY(scheme-color): Map a scheme-color name
+    // ("accent1"-"accent6", "lt1"/"dk1", "lt2"/"dk2", "bg1"/"tx1", "bg2"/"tx2",
+    // "hlink", "folHlink") to the OOXML theme index used by TabColor.Theme,
+    // color.Theme on fonts, etc. Returns null for non-scheme inputs — callers
+    // then fall back to srgbClr (hex) handling.
+    internal static uint? ExcelSchemeColorNameToThemeIndex(string s) =>
+        s?.Trim().ToLowerInvariant() switch
+        {
+            "lt1" or "bg1" => 0u,
+            "dk1" or "tx1" => 1u,
+            "lt2" or "bg2" => 2u,
+            "dk2" or "tx2" => 3u,
+            "accent1" => 4u,
+            "accent2" => 5u,
+            "accent3" => 6u,
+            "accent4" => 7u,
+            "accent5" => 8u,
+            "accent6" => 9u,
+            "hlink" => 10u,
+            "folhlink" => 11u,
+            _ => null
+        };
+
+    // CONSISTENCY(rc-units): Row height is in points in OOXML; this helper
+    // accepts bare numbers (treated as points, backward compat) as well as
+    // unit-qualified "40pt", "40px", "1cm", "0.5in" and returns points.
+    internal static double ParseRowHeightPoints(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Row height cannot be empty.");
+        var trimmed = value.Trim();
+        // Bare number → points (legacy behavior)
+        if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var bare)
+            && !char.IsLetter(trimmed[^1]))
+        {
+            if (double.IsNaN(bare) || double.IsInfinity(bare))
+                throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number (row height in points, e.g. 15.75).");
+            return bare;
+        }
+        // Unit-qualified: convert via EMU then back to points.
+        try
+        {
+            var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+            return emu / 12700.0;
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 15.75, 40pt, 40px, 1cm, 0.5in).", ex);
+        }
+    }
+
+    // CONSISTENCY(rc-units): Column width is in "maximum digit width" char
+    // units (Calibri 11pt ≈ 7px per char). Accepts bare number (char units,
+    // legacy) or unit-qualified px/cm/in/pt — physical sizes converted via
+    // the 7-px-per-char approximation Excel uses internally.
+    internal static double ParseColWidthChars(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Column width cannot be empty.");
+        var trimmed = value.Trim();
+        if (double.TryParse(trimmed, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var bare)
+            && !char.IsLetter(trimmed[^1]))
+        {
+            if (double.IsNaN(bare) || double.IsInfinity(bare))
+                throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number (column width in char units, e.g. 8.43).");
+            return bare;
+        }
+        try
+        {
+            var emu = OfficeCli.Core.EmuConverter.ParseEmu(trimmed);
+            // 9525 EMU = 1 px; 7 px ≈ 1 char unit (Calibri 11pt MDW baseline)
+            var px = emu / 9525.0;
+            return px / 7.0;
+        }
+        catch (Exception ex)
+        {
+            throw new ArgumentException($"Invalid 'width' value: '{value}'. Expected a finite number or unit-qualified value (e.g. 8.43, 20px, 2cm, 1in, 60pt).", ex);
+        }
+    }
+
     internal static XDR.Picture BuildPictureElementWithTransform(
         uint picId, string alt, string imgRelId, string? svgRelId,
         Dictionary<string, string> properties)
@@ -37,9 +119,20 @@ public partial class ExcelHandler
             new Drawing.Offset { X = 0, Y = 0 },
             new Drawing.Extents { Cx = 0, Cy = 0 });
         ApplyTransform2DRotationFlip(xfrm, properties);
+        // P13: accept user-supplied `name=` to override the auto-generated
+        // "Picture {id}" label stamped into xdr:cNvPr @name.
+        // P9: `altText=` alias for `alt=` (Description attribute).
+        // P11: `title=` populates the OOXML @title attribute (distinct from alt).
+        var picName = properties.GetValueOrDefault("name");
+        if (string.IsNullOrWhiteSpace(picName))
+            picName = $"Picture {picId}";
+        var picTitle = properties.GetValueOrDefault("title");
+        var cNvPr = new XDR.NonVisualDrawingProperties { Id = picId, Name = picName, Description = alt };
+        if (!string.IsNullOrWhiteSpace(picTitle))
+            cNvPr.Title = picTitle;
         return new XDR.Picture(
             new XDR.NonVisualPictureProperties(
-                new XDR.NonVisualDrawingProperties { Id = picId, Name = $"Picture {picId}", Description = alt },
+                cNvPr,
                 new XDR.NonVisualPictureDrawingProperties(new Drawing.PictureLocks { NoChangeAspect = true })
             ),
             BuildPictureBlipFill(imgRelId, svgRelId),

@@ -1407,25 +1407,49 @@ public partial class ExcelHandler
                         hyperlinksEl.Elements<Hyperlink>()
                             .Where(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true)
                             .ToList().ForEach(h => h.Remove());
+                        // H2: optional tooltip/screenTip from sibling props.
+                        var setHlTip = properties.GetValueOrDefault("tooltip")
+                            ?? properties.GetValueOrDefault("screenTip")
+                            ?? properties.GetValueOrDefault("screentip");
                         if (value.StartsWith("#"))
                         {
                             // Internal target (sheet cell or named range) is
                             // written as an in-document hyperlink via the
                             // `location` attribute, no relationship/target.
                             var location = value.Substring(1);
-                            hyperlinksEl.AppendChild(new Hyperlink
+                            var hl = new Hyperlink
                             {
                                 Reference = cellRef.ToUpperInvariant(),
                                 Location = location
-                            });
+                            };
+                            if (!string.IsNullOrEmpty(setHlTip)) hl.Tooltip = setHlTip;
+                            hyperlinksEl.AppendChild(hl);
                         }
                         else
                         {
                             var hlUri = new Uri(value, UriKind.RelativeOrAbsolute);
                             var hlRel = worksheet.AddHyperlinkRelationship(hlUri, isExternal: true);
-                            hyperlinksEl.AppendChild(new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id });
+                            var hl = new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id };
+                            if (!string.IsNullOrEmpty(setHlTip)) hl.Tooltip = setHlTip;
+                            hyperlinksEl.AppendChild(hl);
                         }
                     }
+                    break;
+                }
+                case "tooltip":
+                case "screentip":
+                {
+                    // H2: tooltip may also be applied to an EXISTING hyperlink.
+                    var ws = GetSheet(worksheet);
+                    var hyperlinksEl = ws.GetFirstChild<Hyperlinks>();
+                    var existing = hyperlinksEl?.Elements<Hyperlink>()
+                        .FirstOrDefault(h => h.Reference?.Value?.Equals(cellRef, StringComparison.OrdinalIgnoreCase) == true);
+                    if (existing == null)
+                    {
+                        unsupported.Add($"tooltip (no hyperlink exists on {cellRef}; add a link first)");
+                        break;
+                    }
+                    existing.Tooltip = string.IsNullOrEmpty(value) ? null : value;
                     break;
                 }
                 default:
@@ -1714,8 +1738,20 @@ public partial class ExcelHandler
                     sheetPr.RemoveAllChildren<TabColor>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
-                        var colorHex = OfficeCli.Core.ParseHelpers.NormalizeArgbColor(value);
-                        sheetPr.AppendChild(new TabColor { Rgb = new HexBinaryValue(colorHex) });
+                        // CONSISTENCY(scheme-color): accept scheme-color names
+                        // ("accent1"-"accent6", "lt1", "dk1", ...) by mapping
+                        // them to TabColor.Theme index. Otherwise fall back to
+                        // the numeric color parser for hex/named/rgb() inputs.
+                        var themeIndex = ExcelSchemeColorNameToThemeIndex(value);
+                        if (themeIndex.HasValue)
+                        {
+                            sheetPr.AppendChild(new TabColor { Theme = (UInt32Value)themeIndex.Value });
+                        }
+                        else
+                        {
+                            var colorHex = OfficeCli.Core.ParseHelpers.NormalizeArgbColor(value);
+                            sheetPr.AppendChild(new TabColor { Rgb = new HexBinaryValue(colorHex) });
+                        }
                     }
                     break;
                 }
@@ -2717,7 +2753,7 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "width":
-                    col.Width = ParseHelpers.SafeParseDouble(value, "width");
+                    col.Width = ParseColWidthChars(value);
                     col.CustomWidth = true;
                     break;
                 case "hidden":
@@ -2865,9 +2901,7 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "height":
-                    if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var heightVal) || double.IsNaN(heightVal) || double.IsInfinity(heightVal))
-                        throw new ArgumentException($"Invalid 'height' value: '{value}'. Expected a finite number (row height in points, e.g. 15.75).");
-                    row.Height = heightVal;
+                    row.Height = ParseRowHeightPoints(value);
                     row.CustomHeight = true;
                     break;
                 case "hidden":

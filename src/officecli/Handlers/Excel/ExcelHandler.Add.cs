@@ -368,7 +368,15 @@ public partial class ExcelHandler
                         else
                             ws.AppendChild(hyperlinksEl);
                     }
-                    hyperlinksEl.AppendChild(new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id });
+                    var hl = new Hyperlink { Reference = cellRef.ToUpperInvariant(), Id = hlRel.Id };
+                    // H2: tooltip (OOXML @tooltip) — Excel surfaces it as a
+                    // ScreenTip when the cell is hovered in read mode.
+                    var hlTip = properties.GetValueOrDefault("tooltip")
+                        ?? properties.GetValueOrDefault("screenTip")
+                        ?? properties.GetValueOrDefault("screentip");
+                    if (!string.IsNullOrEmpty(hlTip))
+                        hl.Tooltip = hlTip;
+                    hyperlinksEl.AppendChild(hl);
                 }
 
                 // Apply style properties if any
@@ -477,6 +485,15 @@ public partial class ExcelHandler
                 var comments = commentsPart.Comments;
                 var authors = comments.GetFirstChild<Authors>()!;
                 var commentList = comments.GetFirstChild<CommentList>()!;
+
+                // CONSISTENCY(overlap-reject): duplicate comment on the same
+                // cell is ambiguous — mirror the table T4 overlap-reject
+                // pattern. User must `remove comment` first to replace it.
+                var cmtRefUpper = cmtRef.ToUpperInvariant();
+                if (commentList.Elements<Comment>().Any(c =>
+                        string.Equals(c.Reference?.Value, cmtRefUpper, StringComparison.OrdinalIgnoreCase)))
+                    throw new ArgumentException(
+                        $"comment already exists on {cmtRefUpper}. Remove it first before adding a new comment.");
 
                 uint authorId = 0;
                 var existingAuthors = authors.Elements<Author>().ToList();
@@ -647,6 +664,14 @@ public partial class ExcelHandler
 
                 var afRange = properties.GetValueOrDefault("range")
                     ?? throw new ArgumentException("AutoFilter requires 'range' property (e.g. range=A1:F100)");
+
+                // CONSISTENCY(cellref-validate): reject garbage refs (e.g. "BADREF")
+                // so Excel doesn't silently open with an invalid <x:autoFilter ref="...">.
+                if (!Regex.IsMatch(afRange.Trim(),
+                        @"^\$?[A-Z]+\$?\d+(?::\$?[A-Z]+\$?\d+)?$",
+                        RegexOptions.IgnoreCase))
+                    throw new ArgumentException(
+                        $"Invalid 'range' value: '{afRange}'. Expected a cell range like 'A1:F100' or 'A1'.");
 
                 var wsElement = GetSheet(afWorksheet);
                 var autoFilter = wsElement.GetFirstChild<AutoFilter>();
@@ -1161,7 +1186,10 @@ public partial class ExcelHandler
                 // so width/height accept unit-qualified strings ("6cm", "2in")
                 // in addition to bare integer cell counts.
                 var (px, py, pwEmu, phEmu) = ParseAnchorBoundsEmu(properties, "0", "0", "5", "5");
-                var alt = properties.GetValueOrDefault("alt", "");
+                // P9: accept `altText=` as alias for `alt=`.
+                var alt = properties.GetValueOrDefault("alt")
+                    ?? properties.GetValueOrDefault("altText")
+                    ?? properties.GetValueOrDefault("alttext", "");
 
                 var picDrawingsPart = picWorksheet.DrawingsPart
                     ?? picWorksheet.AddNewPart<DrawingsPart>();
@@ -2070,9 +2098,10 @@ public partial class ExcelHandler
                     DeleteCalcChainIfPresent();
                 }
 
-                // Optionally set column width
-                if (properties.TryGetValue("width", out var widthStr) && double.TryParse(widthStr, out var width))
+                // Optionally set column width (accepts bare char units or unit-qualified)
+                if (properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr))
                 {
+                    var width = ParseColWidthChars(widthStr);
                     var ws = GetSheet(colWorksheet);
                     var columns = ws.GetFirstChild<Columns>() ?? ws.PrependChild(new Columns());
                     columns.AppendChild(new Column

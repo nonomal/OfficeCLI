@@ -977,9 +977,34 @@ public partial class WordHandler
         int currentSectionIdx = 0;
         sb.Append($"<!--SECT:{currentSectionIdx}-->");
 
+        // Drop cap wrapping (#7c): a framePr dropCap paragraph and the
+        // paragraph that follows must sit inside a non-flex container so
+        // `float:left` on the drop cap actually wraps the follow-on text.
+        // The parent page-body is a flex column which would otherwise
+        // stack them vertically. Counts down from 2 → 0.
+        int dropCapWrapRemaining = 0;
+
         for (int ei = 0; ei < elements.Count; ei++)
         {
             var element = elements[ei];
+
+            // #7c: close drop cap wrap once the follow-on paragraph has
+            // emitted. If we hit a non-paragraph (table, SectionProperties)
+            // before the follow-on, also close to keep HTML well-formed.
+            if (dropCapWrapRemaining > 0 && ei > 0)
+            {
+                var prev = elements[ei - 1];
+                if (prev is Paragraph)
+                {
+                    dropCapWrapRemaining--;
+                    if (dropCapWrapRemaining == 0) sb.Append("</div>");
+                }
+                else if (prev is Table)
+                {
+                    sb.Append("</div>");
+                    dropCapWrapRemaining = 0;
+                }
+            }
 
             // Emit invisible anchors for watch scroll targeting
             if (element is Paragraph) { wParaCount++; sb.Append($"<a id=\"w-p-{wParaCount}\"></a>"); }
@@ -1048,6 +1073,20 @@ public partial class WordHandler
 
             if (element is Paragraph para)
             {
+                // Drop cap wrapping (#7c): open non-flex wrapper on the
+                // dropCap paragraph; close after the paragraph that follows.
+                // Skip wrapping when para is a list item, heading, or empty —
+                // Word's drop cap only applies to body paragraphs.
+                var paraFramePr = para.ParagraphProperties?.GetFirstChild<FrameProperties>();
+                var paraIsDropCap = paraFramePr != null &&
+                    paraFramePr.GetAttributes().FirstOrDefault(a => a.LocalName == "dropCap").Value
+                        is "drop" or "margin";
+                if (paraIsDropCap && dropCapWrapRemaining == 0)
+                {
+                    sb.Append("<div class=\"dropcap-wrap\" style=\"display:block;overflow:hidden\">");
+                    dropCapWrapRemaining = 2;
+                }
+
                 // Check for pageBreakBefore (direct or from style) — insert page break marker
                 var pgBB = para.ParagraphProperties?.PageBreakBefore;
                 if (pgBB == null)
@@ -1382,6 +1421,7 @@ public partial class WordHandler
         if (pendingBlockClose > 0) sb.Append($"<span class=\"we\" data-block=\"{pendingBlockClose}\" style=\"display:none\"></span>");
         if (inList) sb.Append($"<span class=\"we\" data-block=\"{wBlockCount}\" style=\"display:none\"></span>");
         if (inMultiColumn) sb.AppendLine("</div>");
+        if (dropCapWrapRemaining > 0) sb.Append("</div>");
         CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
     }
 

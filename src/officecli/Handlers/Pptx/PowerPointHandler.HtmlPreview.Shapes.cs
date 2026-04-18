@@ -25,6 +25,41 @@ public partial class PowerPointHandler
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var xfrm = shape.ShapeProperties?.Transform2D;
 
+        // Shape-level hyperlink → wrap rendered shape <div> in <a> for clickability in HTML preview.
+        // Only external URLs are wrapped; internal slide-jump links (ppaction://hlinksldjump) are
+        // skipped because there is no corresponding external href in this static HTML context.
+        string? shapeHrefUrl = null;
+        string? shapeHrefTooltip = null;
+        {
+            var nvHlink = shape.NonVisualShapeProperties?.NonVisualDrawingProperties
+                ?.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (nvHlink != null)
+            {
+                shapeHrefTooltip = nvHlink.Tooltip?.Value;
+                var action = nvHlink.Action?.Value;
+                var hlId = nvHlink.Id?.Value;
+                // Skip if this is a slide-jump action (no external URL target)
+                if (string.IsNullOrEmpty(action) || !action.Contains("hlink"))
+                {
+                    // Plain external: no action + r:id → look up external relationship
+                    if (!string.IsNullOrEmpty(hlId))
+                    {
+                        try
+                        {
+                            var rel = part.HyperlinkRelationships.FirstOrDefault(r => r.Id == hlId);
+                            if (rel?.Uri != null) shapeHrefUrl = rel.Uri.ToString();
+                        }
+                        catch { }
+                    }
+                }
+                else if (action.Contains("hlinksldjump"))
+                {
+                    // Internal slide-jump — deliberately not wrapped (no navigable href in static HTML)
+                    shapeHrefUrl = null;
+                }
+            }
+        }
+
         long x, y, cx, cy;
         if (overridePos != null)
         {
@@ -238,6 +273,14 @@ public partial class PowerPointHandler
             || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
         var shapeClass = hasFillBg ? "shape has-fill" : "shape";
 
+        // Open <a> wrapper for shape-level hyperlink (before the shape <div>)
+        if (!string.IsNullOrEmpty(shapeHrefUrl))
+        {
+            var tooltipAttr = !string.IsNullOrEmpty(shapeHrefTooltip)
+                ? $" title=\"{HtmlEncode(shapeHrefTooltip!)}\"" : "";
+            sb.Append($"    <a class=\"shape-link\" href=\"{HtmlEncode(shapeHrefUrl!)}\" rel=\"noopener\" target=\"_blank\"{tooltipAttr} style=\"display:contents;cursor:pointer\">");
+        }
+
         if (!string.IsNullOrEmpty(clipPathCss))
         {
             // For clip-path shapes: move fill to a clipped background layer, keep text unclipped
@@ -254,6 +297,8 @@ public partial class PowerPointHandler
                 else
                     outerStyles.Add(s);
             }
+            // When wrapped in a link, add cursor:pointer to the shape <div> itself
+            if (!string.IsNullOrEmpty(shapeHrefUrl)) outerStyles.Add("cursor:pointer");
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", outerStyles)}\">");
             // Fill layer (clipped)
             if (fillStyles.Count > 0)
@@ -274,6 +319,7 @@ public partial class PowerPointHandler
         }
         else
         {
+            if (!string.IsNullOrEmpty(shapeHrefUrl)) styles.Add("cursor:pointer");
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", styles)}\">");
         }
 
@@ -346,7 +392,10 @@ public partial class PowerPointHandler
             }
         }
 
-        sb.AppendLine("</div>");
+        sb.Append("</div>");
+        if (!string.IsNullOrEmpty(shapeHrefUrl))
+            sb.Append("</a>");
+        sb.AppendLine();
     }
 
     // ==================== Placeholder Position Inheritance ====================

@@ -351,7 +351,10 @@ public partial class PowerPointHandler
 
                 // Hyperlink on shape
                 if (properties.TryGetValue("link", out var linkVal))
-                    ApplyShapeHyperlink(slidePart, newShape, linkVal);
+                {
+                    var tooltipVal = properties.GetValueOrDefault("tooltip");
+                    ApplyShapeHyperlink(slidePart, newShape, linkVal, tooltipVal);
+                }
 
                 // lineDash, effects, 3D, flip — delegate to SetRunOrShapeProperties
                 var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)

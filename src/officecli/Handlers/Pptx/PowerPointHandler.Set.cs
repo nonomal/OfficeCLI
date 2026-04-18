@@ -307,11 +307,13 @@ public partial class PowerPointHandler
 
             var targetRun = allRuns[runIdx - 1];
             var linkValRun = properties.GetValueOrDefault("link");
+            var tooltipValRun = properties.GetValueOrDefault("tooltip");
             var runOnlyProps = properties
-                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
+                          && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
             var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart);
-            if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun);
+            if (linkValRun != null) ApplyRunHyperlink(slidePart, targetRun, linkValRun, tooltipValRun);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -338,11 +340,13 @@ public partial class PowerPointHandler
 
             var targetRun = paraRuns[runIdx - 1];
             var linkVal = properties.GetValueOrDefault("link");
+            var tooltipVal = properties.GetValueOrDefault("tooltip");
             var runOnlyProps = properties
-                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase))
+                .Where(kv => !kv.Key.Equals("link", StringComparison.OrdinalIgnoreCase)
+                          && !kv.Key.Equals("tooltip", StringComparison.OrdinalIgnoreCase))
                 .ToDictionary(kv => kv.Key, kv => kv.Value);
             var unsupported = SetRunOrShapeProperties(runOnlyProps, new List<Drawing.Run> { targetRun }, shape, slidePart);
-            if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal);
+            if (linkVal != null) ApplyRunHyperlink(slidePart, targetRun, linkVal, tooltipVal);
             GetSlide(slidePart).Save();
             return unsupported;
         }
@@ -429,8 +433,14 @@ public partial class PowerPointHandler
                         break;
                     }
                     case "link":
+                    {
+                        var paraTooltip = properties.GetValueOrDefault("tooltip");
                         foreach (var r in paraRuns)
-                            ApplyRunHyperlink(slidePart, r, value);
+                            ApplyRunHyperlink(slidePart, r, value, paraTooltip);
+                        break;
+                    }
+                    case "tooltip":
+                        // handled in tandem with "link"; standalone tooltip change is not supported here
                         break;
                     default:
                         // Apply run-level properties to all runs in this paragraph
@@ -1684,8 +1694,9 @@ public partial class PowerPointHandler
                 var motionPathValue = properties.GetValueOrDefault("motionpath")
                     ?? properties.GetValueOrDefault("motionPath");
                 var linkValue = properties.GetValueOrDefault("link");
+                var tooltipValue = properties.GetValueOrDefault("tooltip");
                 var excludeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    { "animation", "animate", "motionpath", "motionPath", "link", "zorder", "z-order", "order" };
+                    { "animation", "animate", "motionpath", "motionPath", "link", "tooltip", "zorder", "z-order", "order" };
                 var shapeProps = properties
                     .Where(kv => !excludeKeys.Contains(kv.Key))
                     .ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -1703,7 +1714,7 @@ public partial class PowerPointHandler
                 if (motionPathValue != null)
                     ApplyMotionPathAnimation(slidePart, shape, motionPathValue);
                 if (linkValue != null)
-                    ApplyShapeHyperlink(slidePart, shape, linkValue);
+                    ApplyShapeHyperlink(slidePart, shape, linkValue, tooltipValue);
 
                 GetSlide(slidePart).Save();
                 return unsupported;

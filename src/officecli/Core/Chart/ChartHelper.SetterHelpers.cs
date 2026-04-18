@@ -79,27 +79,55 @@ internal static partial class ChartHelper
     {
         switch (optionKey)
         {
-            case "name":
+            case "name" or "label":
                 trendline.RemoveAllChildren<C.TrendlineName>();
                 trendline.PrependChild(new C.TrendlineName { Text = value });
+                // Also emit a <c:trendlineLbl> with rich-text so Excel actually
+                // paints the label next to the trendline (a <c:name> alone is
+                // used by older tooling as a legend-entry override).
+                trendline.RemoveAllChildren<C.TrendlineLabel>();
+                var tlLbl = new C.TrendlineLabel(
+                    new C.Layout(),
+                    new C.ChartText(
+                        new C.RichText(
+                            new Drawing.BodyProperties(),
+                            new Drawing.ListStyle(),
+                            new Drawing.Paragraph(
+                                new Drawing.Run(
+                                    new Drawing.RunProperties { Language = "en-US" },
+                                    new Drawing.Text(value))))));
+                // Schema order under CT_Trendline: name, trendlineLbl, trendlineType, ...
+                var trendlineType = trendline.GetFirstChild<C.TrendlineType>();
+                if (trendlineType != null)
+                    trendline.InsertBefore(tlLbl, trendlineType);
+                else
+                    trendline.AppendChild(tlLbl);
                 break;
-            case "forward":
+            case "forward" or "forecastforward":
                 trendline.RemoveAllChildren<C.Forward>();
                 trendline.AppendChild(new C.Forward { Val = ParseHelpers.SafeParseDouble(value, "trendline.forward") });
                 break;
-            case "backward":
+            case "backward" or "forecastbackward":
                 trendline.RemoveAllChildren<C.Backward>();
                 trendline.AppendChild(new C.Backward { Val = ParseHelpers.SafeParseDouble(value, "trendline.backward") });
+                break;
+            case "order":
+                trendline.RemoveAllChildren<C.PolynomialOrder>();
+                trendline.AppendChild(new C.PolynomialOrder { Val = (byte)Math.Clamp(ParseHelpers.SafeParseInt(value, "trendline.order"), 2, 6) });
+                break;
+            case "period":
+                trendline.RemoveAllChildren<C.Period>();
+                trendline.AppendChild(new C.Period { Val = (uint)Math.Max(2, ParseHelpers.SafeParseInt(value, "trendline.period")) });
                 break;
             case "intercept":
                 trendline.RemoveAllChildren<C.Intercept>();
                 trendline.AppendChild(new C.Intercept { Val = ParseHelpers.SafeParseDouble(value, "trendline.intercept") });
                 break;
-            case "disprsqr" or "rsquared" or "r2":
+            case "disprsqr" or "rsquared" or "r2" or "displayrsquared":
                 trendline.RemoveAllChildren<C.DisplayRSquaredValue>();
                 trendline.AppendChild(new C.DisplayRSquaredValue { Val = ParseHelpers.IsTruthy(value) });
                 break;
-            case "dispeq" or "equation":
+            case "dispeq" or "equation" or "displayequation":
                 trendline.RemoveAllChildren<C.DisplayEquation>();
                 trendline.AppendChild(new C.DisplayEquation { Val = ParseHelpers.IsTruthy(value) });
                 break;

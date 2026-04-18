@@ -1225,6 +1225,34 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // CL23 — chart-level trendline.* fan-out. Applies the sub-property to every
+                // series' existing trendline. Use `series{N}.trendline.{prop}` for per-series.
+                case "trendline.label" or "trendline.forecastforward" or "trendline.forecastbackward"
+                    or "trendline.order" or "trendline.period"
+                    or "trendline.intercept" or "trendline.displayequation" or "trendline.displayrsquared":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var subKey = key.ToLowerInvariant()["trendline.".Length..] switch
+                    {
+                        "label" => "name",
+                        "forecastforward" => "forward",
+                        "forecastbackward" => "backward",
+                        "order" => "order",
+                        "period" => "period",
+                        "intercept" => "intercept",
+                        "displayequation" => "dispeq",
+                        "displayrsquared" => "disprsqr",
+                        var s => s
+                    };
+                    foreach (var ser in plotArea2.Descendants<OpenXmlCompositeElement>().Where(e => e.LocalName == "ser"))
+                    {
+                        foreach (var tl in ser.Elements<C.Trendline>())
+                            ApplyTrendlineOptions(tl, subKey, value);
+                    }
+                    break;
+                }
+
                 // ==================== DataLabel Enhancements ====================
 
                 case "datalabels.separator" or "labelseparator":

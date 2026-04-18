@@ -408,6 +408,10 @@ internal static partial class ChartHelper
         "datalabels.separator", "labelseparator",
         "datalabels.numfmt", "labelnumfmt",
         "datalabels.showleaderlines", "leaderlines",
+        // CL23 — chart-level trendline.* fan-out
+        "trendline.label", "trendline.forecastforward", "trendline.forecastbackward",
+        "trendline.order", "trendline.period", "trendline.intercept",
+        "trendline.displayequation", "trendline.displayrsquared",
         "datalabels.showbubblesize",
         "axisfont", "axis.font", "legendfont", "legend.font",
         // Title styling

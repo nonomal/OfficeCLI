@@ -1153,6 +1153,34 @@ public partial class ExcelHandler
             && cellColIdx >= ColumnNameToIndex(startCol) && cellColIdx <= ColumnNameToIndex(endCol);
     }
 
+    // T4 — rectangle intersection over A1:B2 style ranges (case-insensitive).
+    // Returns true if two inclusive cell ranges share at least one cell.
+    private static bool RangesOverlap(string rangeA, string rangeB)
+    {
+        if (string.IsNullOrEmpty(rangeA) || string.IsNullOrEmpty(rangeB)) return false;
+        var (a1, a2) = SplitRange(rangeA);
+        var (b1, b2) = SplitRange(rangeB);
+        var (aSc, aSr) = ParseCellReference(a1);
+        var (aEc, aEr) = ParseCellReference(a2);
+        var (bSc, bSr) = ParseCellReference(b1);
+        var (bEc, bEr) = ParseCellReference(b2);
+        int aSci = ColumnNameToIndex(aSc), aEci = ColumnNameToIndex(aEc);
+        int bSci = ColumnNameToIndex(bSc), bEci = ColumnNameToIndex(bEc);
+        // Normalize (callers may pass B2:A1 theoretically)
+        if (aSci > aEci) (aSci, aEci) = (aEci, aSci);
+        if (bSci > bEci) (bSci, bEci) = (bEci, bSci);
+        if (aSr > aEr) (aSr, aEr) = (aEr, aSr);
+        if (bSr > bEr) (bSr, bEr) = (bEr, bSr);
+        return aSci <= bEci && bSci <= aEci && aSr <= bEr && bSr <= aEr;
+    }
+
+    private static (string, string) SplitRange(string range)
+    {
+        if (!range.Contains(':')) return (range, range);
+        var p = range.Split(':');
+        return (p[0], p[1]);
+    }
+
     private DocumentNode GetCellRange(string sheetName, SheetData sheetData, string range, int depth, WorksheetPart? part = null)
     {
         var parts = range.Split(':');

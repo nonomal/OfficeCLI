@@ -1513,6 +1513,17 @@ public partial class ExcelHandler
                 var rangeRef = (properties.GetValueOrDefault("ref") ?? properties.GetValueOrDefault("range")
                     ?? throw new ArgumentException("Property 'ref' or 'range' is required for table")).ToUpperInvariant();
 
+                // T4 — reject a new table whose ref overlaps any existing table on
+                // the same sheet. Excel silently corrupts the file otherwise.
+                foreach (var existingTdp in tblWorksheet.TableDefinitionParts)
+                {
+                    var existing = existingTdp.Table;
+                    if (existing?.Reference?.Value is not string existingRef) continue;
+                    if (RangesOverlap(rangeRef, existingRef))
+                        throw new ArgumentException(
+                            $"Table ref overlaps existing table '{existing.Name?.Value ?? existing.DisplayName?.Value}' ({existingRef})");
+                }
+
                 var existingTableIds = _doc.WorkbookPart!.WorksheetParts
                     .SelectMany(wp => wp.TableDefinitionParts)
                     .Select(tdp => tdp.Table?.Id?.Value ?? 0);

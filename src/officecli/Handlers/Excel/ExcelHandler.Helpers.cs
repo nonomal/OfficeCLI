@@ -1980,6 +1980,87 @@ public partial class ExcelHandler
     }
 
     /// <summary>
+    /// Set horizontal / vertical flip on a shape's Transform2D. Accepts "h", "v", "both",
+    /// or "none" to clear both. Returns true if the key was handled.
+    /// </summary>
+    private static bool TrySetShapeFlip(XDR.ShapeProperties? spPr, string key, string value)
+    {
+        if (key != "flip") return false;
+        if (spPr == null) return true;
+        var xfrm = spPr.GetFirstChild<Drawing.Transform2D>();
+        if (xfrm == null)
+        {
+            xfrm = new Drawing.Transform2D(
+                new Drawing.Offset { X = 0, Y = 0 },
+                new Drawing.Extents { Cx = 0, Cy = 0 });
+            spPr.InsertAt(xfrm, 0);
+        }
+        var f = value.Trim().ToLowerInvariant();
+        bool none = f is "none" or "false" or "";
+        bool flipH = !none && (f is "h" or "horizontal" or "both" or "hv" or "vh");
+        bool flipV = !none && (f is "v" or "vertical" or "both" or "hv" or "vh");
+        xfrm.HorizontalFlip = flipH ? true : (bool?)null;
+        xfrm.VerticalFlip = flipV ? true : (bool?)null;
+        return true;
+    }
+
+    /// <summary>
+    /// Apply a dotted-form font property (`font.bold`, `font.italic`, `font.color`,
+    /// `font.size`, `font.name`, `font.underline`) to every run in the shape's text body.
+    /// Returns true if the key was handled.
+    /// </summary>
+    private static bool TrySetShapeFontProp(XDR.Shape shape, string key, string value)
+    {
+        if (!key.StartsWith("font.", StringComparison.Ordinal)) return false;
+        var sub = key.Substring(5);
+        foreach (var run in shape.Descendants<Drawing.Run>())
+        {
+            var rPr = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
+            switch (sub)
+            {
+                case "bold":
+                    rPr.Bold = IsTruthy(value);
+                    break;
+                case "italic":
+                    rPr.Italic = IsTruthy(value);
+                    break;
+                case "size":
+                    rPr.FontSize = (int)Math.Round(ParseHelpers.ParseFontSize(value) * 100);
+                    break;
+                case "name":
+                    rPr.RemoveAllChildren<Drawing.LatinFont>();
+                    rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+                    rPr.AppendChild(new Drawing.LatinFont { Typeface = value });
+                    rPr.AppendChild(new Drawing.EastAsianFont { Typeface = value });
+                    break;
+                case "color":
+                {
+                    rPr.RemoveAllChildren<Drawing.SolidFill>();
+                    var (cRgb, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                    OfficeCli.Core.DrawingEffectsHelper.InsertFillInRunProperties(rPr,
+                        new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = cRgb }));
+                    break;
+                }
+                case "underline":
+                {
+                    var uv = value.ToLowerInvariant();
+                    rPr.Underline = uv switch
+                    {
+                        "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
+                        "double" or "dbl" => Drawing.TextUnderlineValues.Double,
+                        "none" or "false" => Drawing.TextUnderlineValues.None,
+                        _ => Drawing.TextUnderlineValues.Single
+                    };
+                    break;
+                }
+                default:
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
     /// Apply shape-level effects (shadow, glow, reflection, softedge) on a ShapeProperties element.
     /// Returns true if the key was handled.
     /// </summary>

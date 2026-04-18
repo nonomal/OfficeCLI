@@ -566,6 +566,8 @@ public partial class ExcelHandler
                 var lk = key.ToLowerInvariant();
                 if (TrySetAnchorPosition(anchor, lk, value)) continue;
                 if (TrySetRotation(shape.ShapeProperties, lk, value)) continue;
+                if (TrySetShapeFlip(shape.ShapeProperties, lk, value)) continue;
+                if (TrySetShapeFontProp(shape, lk, value)) continue;
 
                 // For effects on shapes: check if fill=none → text-level, otherwise shape-level
                 if (lk is "shadow" or "glow" or "reflection" or "softedge")
@@ -696,6 +698,81 @@ public partial class ExcelHandler
                             };
                         }
                         break;
+                    case "valign":
+                    {
+                        var txBody = shape.TextBody;
+                        var bodyPr = txBody?.GetFirstChild<Drawing.BodyProperties>();
+                        if (bodyPr != null)
+                        {
+                            bodyPr.Anchor = value.ToLowerInvariant() switch
+                            {
+                                "top" or "t" => Drawing.TextAnchoringTypeValues.Top,
+                                "center" or "ctr" or "middle" or "m" or "c" => Drawing.TextAnchoringTypeValues.Center,
+                                "bottom" or "b" => Drawing.TextAnchoringTypeValues.Bottom,
+                                _ => throw new ArgumentException($"Invalid valign value: '{value}'. Valid values: top, center, bottom.")
+                            };
+                        }
+                        break;
+                    }
+                    case "gradientfill":
+                    {
+                        var spPr = shape.ShapeProperties;
+                        if (spPr != null)
+                        {
+                            spPr.RemoveAllChildren<Drawing.SolidFill>();
+                            spPr.RemoveAllChildren<Drawing.NoFill>();
+                            spPr.RemoveAllChildren<Drawing.GradientFill>();
+                            // CONSISTENCY(shape-gradient-fill): reuse the Add-branch parser so
+                            // shape Set accepts the same "C1-C2[-C3][:angle]" spec.
+                            spPr.AppendChild(BuildShapeGradientFill(value));
+                        }
+                        break;
+                    }
+                    case "line" or "border":
+                    {
+                        // CONSISTENCY(shape-line): mirror Add — accept "none" or "color[:width[:style]]".
+                        var spPr = shape.ShapeProperties;
+                        if (spPr == null) break;
+                        spPr.RemoveAllChildren<Drawing.Outline>();
+                        if (value.Equals("none", StringComparison.OrdinalIgnoreCase))
+                        {
+                            spPr.AppendChild(new Drawing.Outline(new Drawing.NoFill()));
+                            break;
+                        }
+                        var parts = value.Split(':');
+                        var (lRgb, _) = ParseHelpers.SanitizeColorForOoxml(parts[0]);
+                        var outline = new Drawing.Outline(
+                            new Drawing.SolidFill(new Drawing.RgbColorModelHex { Val = lRgb }));
+                        if (parts.Length > 1
+                            && double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                                System.Globalization.CultureInfo.InvariantCulture, out var wpt))
+                        {
+                            outline.Width = (int)Math.Round(wpt * 12700);
+                        }
+                        if (parts.Length > 2)
+                        {
+                            var dash = parts[2].ToLowerInvariant() switch
+                            {
+                                "dash" => Drawing.PresetLineDashValues.Dash,
+                                "dot" => Drawing.PresetLineDashValues.Dot,
+                                "dashdot" => Drawing.PresetLineDashValues.DashDot,
+                                "longdash" => Drawing.PresetLineDashValues.LargeDash,
+                                "solid" => Drawing.PresetLineDashValues.Solid,
+                                _ => (Drawing.PresetLineDashValues?)null
+                            };
+                            if (dash != null)
+                                outline.AppendChild(new Drawing.PresetDash { Val = dash });
+                        }
+                        spPr.AppendChild(outline);
+                        break;
+                    }
+                    case "alt" or "alttext" or "descr" or "description":
+                    {
+                        var altNv = shape.NonVisualShapeProperties?
+                            .GetFirstChild<XDR.NonVisualDrawingProperties>();
+                        if (altNv != null) altNv.Description = value;
+                        break;
+                    }
                     default:
                         shpUnsupported.Add(key);
                         break;

@@ -1645,10 +1645,11 @@ public partial class ExcelHandler
 
         if (dv.Formula1 != null)
         {
-            var f1 = dv.Formula1.Text ?? "";
-            if (f1.StartsWith("\"") && f1.EndsWith("\""))
-                f1 = f1[1..^1];
-            node.Format["formula1"] = f1;
+            // Preserve formula1 exactly as stored in XML so query→set round-trips:
+            // list-type validations wrap literal options in "..." at Add time, and
+            // stripping those quotes here made set(formula1=<stripped>) treat the
+            // whole list as a single item. See DEFERRED(xlsx/validation-list-formula-roundtrip).
+            node.Format["formula1"] = dv.Formula1.Text ?? "";
         }
 
         if (dv.Formula2 != null)

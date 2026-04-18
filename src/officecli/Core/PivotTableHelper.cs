@@ -131,6 +131,12 @@ internal static partial class PivotTableHelper
             // key. Add-path warning suppression relies on this rewrite.
             ["showcolumnstripes"] = "showcolstripes",
             ["showcolumnheaders"] = "showcolheaders",
+            // PV7: bandedRows/bandedCols are Excel Ribbon labels for the
+            // same knobs that OOXML calls showRowStripes/showColStripes.
+            // Accept the user-facing spelling too.
+            ["bandedrows"]        = "showrowstripes",
+            ["bandedcols"]        = "showcolstripes",
+            ["bandedcolumns"]     = "showcolstripes",
             // repeatItemLabels aliases
             ["repeatitemlabels"]  = "repeatlabels",
             ["repeatalllabels"]   = "repeatlabels",
@@ -208,6 +214,11 @@ internal static partial class PivotTableHelper
             "showrowstripes", "showcolstripes",
             "showrowheaders", "showcolheaders",
             "showlastcolumn",
+            // PV7: showDrill toggles the expand/collapse (+/-) buttons on
+            // every pivotField. mergeLabels emits <pivotTableDefinition
+            // mergeItem="1"/> which tells Excel to merge+center repeated
+            // outer axis item cells.
+            "showdrill", "mergelabels",
         };
 
     /// <summary>
@@ -1056,6 +1067,24 @@ internal static partial class PivotTableHelper
         // just created with defaults. Shared helper with the Set path so
         // Add and Set accept the same vocabulary / validation.
         ApplyPivotStyleInfoProps(EnsurePivotTableStyle(pivotDef), properties);
+        // PV7: mergeLabels → <pivotTableDefinition mergeItem="1"/>. This
+        // tells Excel to merge+center repeated outer axis item cells.
+        if (properties.TryGetValue("mergelabels", out var mergeLabelsVal)
+            && ParseHelpers.IsTruthy(mergeLabelsVal))
+            pivotDef.MergeItem = true;
+        // PV7: showDrill (inverted sense) → every pivotField's
+        // showDropDowns attribute. Excel's "Show expand/collapse buttons"
+        // toggle. showDropDowns defaults to true; we only write false
+        // when user sets showDrill=false.
+        if (properties.TryGetValue("showdrill", out var showDrillVal))
+        {
+            bool showDrill = ParseHelpers.IsTruthy(showDrillVal);
+            if (!showDrill && pivotDef.PivotFields != null)
+            {
+                foreach (var pf in pivotDef.PivotFields.Elements<PivotField>())
+                    pf.ShowDropDowns = false;
+            }
+        }
         pivotPart.PivotTableDefinition = pivotDef;
         pivotPart.PivotTableDefinition.Save();
 

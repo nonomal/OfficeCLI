@@ -190,7 +190,28 @@ public partial class PowerPointHandler
 
             // Underline
             if (rp.Underline?.HasValue == true && rp.Underline.Value != Drawing.TextUnderlineValues.None)
-                styles.Add("text-decoration:underline");
+            {
+                // CONSISTENCY(underline-variants): only `dbl` needs an explicit style —
+                // all other OOXML variants (wavy/dotted/dash/heavy/...) still collapse
+                // to plain underline here. Deferred; expand this switch in one pass.
+                if (rp.Underline.Value == Drawing.TextUnderlineValues.Double)
+                {
+                    // CONSISTENCY(underline-variants): Chromium renders
+                    // `text-decoration:underline double` visually identical to
+                    // single underline at common font sizes. Use a
+                    // background-image polyfill (two 1px linear-gradient
+                    // lines) so double underline renders as two distinct lines
+                    // in all engines while keeping inline flow intact.
+                    styles.Add("text-decoration:none");
+                    styles.Add("background-image:linear-gradient(currentColor,currentColor),linear-gradient(currentColor,currentColor)");
+                    styles.Add("background-size:100% 2px");
+                    styles.Add("background-position:0 100%,0 calc(100% - 5px)");
+                    styles.Add("background-repeat:no-repeat");
+                    styles.Add("padding-bottom:7px");
+                }
+                else
+                    styles.Add("text-decoration:underline");
+            }
 
             // Strikethrough
             if (rp.Strike?.HasValue == true && rp.Strike.Value != Drawing.TextStrikeValues.NoStrike)

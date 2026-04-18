@@ -2746,7 +2746,10 @@ public partial class ExcelHandler
                         new XDR.NonVisualDrawingProperties
                         {
                             Id = cxFrameId,
-                            Name = chartTitle ?? "Chart"
+                            // CONSISTENCY(drawing-name): honor `name=` like
+                            // sheet/namedrange/picture/shape. Fall back to
+                            // chartTitle for back-compat, then "Chart".
+                            Name = properties.GetValueOrDefault("name") ?? chartTitle ?? "Chart"
                         },
                         new XDR.NonVisualGraphicFrameDrawingProperties()
                     );
@@ -2810,7 +2813,10 @@ public partial class ExcelHandler
                     new XDR.NonVisualDrawingProperties
                     {
                         Id = chartFrameId,
-                        Name = chartTitle ?? "Chart"
+                        // CONSISTENCY(drawing-name): honor `name=` like
+                        // sheet/namedrange/picture/shape. Fall back to
+                        // chartTitle for back-compat, then "Chart".
+                        Name = properties.GetValueOrDefault("name") ?? chartTitle ?? "Chart"
                     },
                     new XDR.NonVisualGraphicFrameDrawingProperties()
                 );

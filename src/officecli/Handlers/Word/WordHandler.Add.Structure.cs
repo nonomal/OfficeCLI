@@ -15,6 +15,13 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    private static string HeaderFooterTypeName(HeaderFooterValues v)
+    {
+        if (v == HeaderFooterValues.First) return "first";
+        if (v == HeaderFooterValues.Even) return "even";
+        return "default";
+    }
+
     private string AddSection(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         var body = _doc.MainDocumentPart?.Document?.Body
@@ -428,7 +435,7 @@ public partial class WordHandler
                 .Any(r => r.Type != null && r.Type.Value == preHeaderType))
         {
             throw new ArgumentException(
-                $"Header of type '{preHeaderType}' already exists in this section. " +
+                $"Header of type '{HeaderFooterTypeName(preHeaderType)}' already exists in this section. " +
                 "Remove the existing one first or use --prop type=<first|even>.");
         }
 
@@ -552,7 +559,7 @@ public partial class WordHandler
                 .Any(r => r.Type != null && r.Type.Value == preFooterType))
         {
             throw new ArgumentException(
-                $"Footer of type '{preFooterType}' already exists in this section. " +
+                $"Footer of type '{HeaderFooterTypeName(preFooterType)}' already exists in this section. " +
                 "Remove the existing one first or use --prop type=<first|even>.");
         }
 

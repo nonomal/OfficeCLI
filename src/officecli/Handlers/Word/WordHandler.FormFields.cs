@@ -276,6 +276,21 @@ public partial class WordHandler
                 $"Form field name '{name}' contains path-special characters " +
                 "('/', '[', ']'). These characters prevent later addressing via " +
                 "selectors. Use only letters, digits, '.', '_', '-' in form field names.");
+        // Form fields embed a BookmarkStart/End with the same name, so they
+        // must obey the same addressability rules as bookmarks (R18): no
+        // whitespace, no leading '@'/'\'', no embedded '"', and no duplicate
+        // names anywhere in the document.
+        if (name.Any(char.IsWhiteSpace) || name[0] == '@' || name[0] == '\'' || name.Contains('"'))
+            throw new ArgumentException(
+                $"Form field name '{name}' contains whitespace or quote/@ chars " +
+                "that prevent later addressing via bare attribute selectors. " +
+                "Use only letters, digits, '.', '_', '-' in form field names.");
+        if (body.Descendants<BookmarkStart>()
+                .Any(b => string.Equals(b.Name?.Value, name, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                $"form field name '{name}' already exists as a bookmark; pick a unique name.");
+        }
         var text = ciProps.GetValueOrDefault("text", ciProps.GetValueOrDefault("value", ""));
 
         // Generate unique bookmark ID

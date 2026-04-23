@@ -495,6 +495,20 @@ public partial class WordHandler
             throw new ArgumentException(
                 $"Cannot clone '{sourcePath}': <w:comment> belongs in /word/comments.xml. Use `add --type comment --prop text=...` to create a new comment, or clone a paragraph containing commentRangeStart/End.");
         }
+        // Equation content (<m:oMathPara>, <m:oMath>) lives inside a <w:p>
+        // (paragraph) and is not itself a valid direct child of <w:body>.
+        // Cloning a bare oMathPara/oMath into /body produces schema-invalid
+        // OOXML. Direct users to clone the containing paragraph instead.
+        if (element is DocumentFormat.OpenXml.Math.Paragraph)
+        {
+            throw new ArgumentException(
+                $"Cannot clone '{sourcePath}': equation content lives inside a paragraph; clone /body/p[N] instead.");
+        }
+        if (element is DocumentFormat.OpenXml.Math.OfficeMath)
+        {
+            throw new ArgumentException(
+                $"Cannot clone '{sourcePath}': equation content lives inside a paragraph; clone /body/p[N] instead.");
+        }
 
         OpenXmlElement targetParent;
         if (targetParentPath is "/" or "" or "/body")

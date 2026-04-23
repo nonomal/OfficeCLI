@@ -178,15 +178,30 @@ public partial class WordHandler
         // positional hint: --after /watermark appends to parent, --before
         // /watermark prepends. Callers needing a specific body position
         // should pass an explicit /body/p[N] anchor instead.
-        if (System.Text.RegularExpressions.Regex.IsMatch(anchorPath, @"^/watermark(\[\d+\])?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
         {
-            // Honour the positional-hint contract only when a watermark
-            // actually exists in the doc. Otherwise fall through so the
-            // standard "Anchor element not found" error fires — matching
-            // /chart[1] and other absent-anchor behaviour.
-            if (FindWatermark() != null)
+            var wmMatch = System.Text.RegularExpressions.Regex.Match(anchorPath, @"^/watermark(?:\[(\d+)\])?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (wmMatch.Success)
+            {
+                // Honour the positional-hint contract only when a watermark
+                // actually exists in the doc. Otherwise fall through so the
+                // standard "Anchor element not found" error fires — matching
+                // /chart[1] and other absent-anchor behaviour. An explicit
+                // index beyond the number of watermarks (there's at most one)
+                // is out-of-range — error instead of silently appending.
+                var wmExists = FindWatermark() != null;
+                var wmCount = wmExists ? 1 : 0;
+                if (wmMatch.Groups[1].Success)
+                {
+                    var wmIdx = int.Parse(wmMatch.Groups[1].Value);
+                    if (wmIdx < 1 || wmIdx > wmCount)
+                        throw new ArgumentException($"Anchor element not found: {anchorPath}");
+                }
+                else if (!wmExists)
+                {
+                    throw new ArgumentException($"Anchor element not found: {anchorPath}");
+                }
                 return position.After != null ? (int?)null : 0;
-            throw new ArgumentException($"Anchor element not found: {anchorPath}");
+            }
         }
 
         var segments = ParsePath(anchorPath);

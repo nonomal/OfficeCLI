@@ -277,11 +277,13 @@ public partial class WordHandler
         }
         settingsPart2.Settings.Save();
 
-        // Count TOC fields in document to determine index
-        var tocCount = body.Elements<Paragraph>()
-            .Count(p => p.Descendants<FieldCode>().Any(fc =>
-                fc.Text != null && fc.Text.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase)));
-        var resultPath = $"/toc[{tocCount}]";
+        // Determine TOC index in document order (not total count)
+        var tocParas = body.Elements<Paragraph>()
+            .Where(p => p.Descendants<FieldCode>().Any(fc =>
+                fc.Text != null && fc.Text.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        var tocIdx = tocParas.FindIndex(p => ReferenceEquals(p, tocPara));
+        var resultPath = $"/toc[{(tocIdx >= 0 ? tocIdx + 1 : tocParas.Count)}]";
         return resultPath;
     }
 

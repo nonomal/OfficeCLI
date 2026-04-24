@@ -1,0 +1,44 @@
+{
+  "$schema": "../_schema.json",
+  "format": "xlsx",
+  "element": "slicer",
+  "parent": "sheet",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/SheetName/slicer[N]"]
+  },
+  "note": "Slicers require an existing pivot table target. 'field' must match an existing cacheField name in the pivot's cache.",
+  "properties": {
+    "pivotTable": {
+      "type": "string",
+      "description": "path or reference to an existing pivot table. Aliases: pivot, source.",
+      "aliases": ["pivot", "source"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop pivotTable=/Sheet1/pivottable[1]"],
+      "readback": "pivot reference",
+      "enforcement": "report"
+    },
+    "field": {
+      "type": "string",
+      "description": "pivot field name. Must match an existing cacheField (case-insensitive).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop field=Region"],
+      "readback": "field name",
+      "enforcement": "report"
+    },
+    "name": {
+      "type": "string",
+      "description": "slicer name. Sanitized; defaults to 'Slicer_<fieldName>'.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop name=RegionSlicer"],
+      "readback": "slicer name",
+      "enforcement": "report"
+    }
+  }
+}

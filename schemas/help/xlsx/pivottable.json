@@ -1,0 +1,44 @@
+{
+  "$schema": "../_schema.json",
+  "format": "xlsx",
+  "element": "pivottable",
+  "parent": "sheet",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/SheetName/pivottable[N]"]
+  },
+  "note": "Aliases: pivot. 'source' required (e.g. Sheet1!A1:D100). External workbook refs rejected. Position auto-placed after source if omitted. Row/column/value fields via separate props.",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "source range. Alias: src. External workbook refs rejected.",
+      "aliases": ["src"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop source=Sheet1!A1:D100"],
+      "readback": "source reference",
+      "enforcement": "report"
+    },
+    "position": {
+      "type": "string",
+      "description": "anchor cell (e.g. H1). Alias: pos. Auto-placed after source if omitted.",
+      "aliases": ["pos"],
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop position=H1"],
+      "readback": "anchor cell",
+      "enforcement": "report"
+    },
+    "name": {
+      "type": "string",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop name=RevenueByRegion"],
+      "readback": "pivot name",
+      "enforcement": "report"
+    }
+  }
+}

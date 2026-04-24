@@ -1,0 +1,68 @@
+{
+  "$schema": "../_schema.json",
+  "format": "xlsx",
+  "element": "chart",
+  "parent": "sheet",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/SheetName/chart[N]"]
+  },
+  "note": "Data via 'data' (inline series spec), 'dataRange' (sheet-qualified), or seriesN=. chartType defaults to column. Anchor via cell range OR x/y/width/height grid coords — anchor wins if both are supplied.",
+  "properties": {
+    "chartType": {
+      "type": "enum",
+      "values": ["column", "bar", "line", "pie", "doughnut", "area", "scatter", "radar", "stock", "bubble", "surface"],
+      "aliases": ["type"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop chartType=column"],
+      "readback": "chart type name",
+      "enforcement": "report"
+    },
+    "title": {
+      "type": "string",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop title=\"Q1 Revenue\""],
+      "readback": "chart title text",
+      "enforcement": "report"
+    },
+    "data": {
+      "type": "string",
+      "description": "inline series spec: 'Series1:1,2,3;Series2:4,5,6'.",
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop data=\"Sales:10,20,30\""],
+      "readback": "series values as stored",
+      "enforcement": "report"
+    },
+    "dataRange": {
+      "type": "string",
+      "description": "sheet-qualified cell range: 'Sheet1!A1:D5'.",
+      "aliases": ["datarange", "range"],
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop dataRange=Sheet1!A1:D5"],
+      "readback": "range reference",
+      "enforcement": "report"
+    },
+    "categories": {
+      "type": "string",
+      "description": "category labels (comma-separated).",
+      "add": true, "set": false, "get": false,
+      "examples": ["--prop categories=A,B,C"],
+      "readback": "category list",
+      "enforcement": "report"
+    },
+    "anchor": {
+      "type": "string",
+      "description": "cell range anchor (e.g. D2:J18). Overrides x/y/width/height.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop anchor=D2:J18"],
+      "readback": "resolved anchor",
+      "enforcement": "report"
+    }
+  }
+}

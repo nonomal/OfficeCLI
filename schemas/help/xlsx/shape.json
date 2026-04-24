@@ -1,0 +1,50 @@
+{
+  "$schema": "../_schema.json",
+  "format": "xlsx",
+  "element": "shape",
+  "parent": "sheet",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/SheetName/shape[N]"]
+  },
+  "note": "Aliases: textbox. Anchor: 'anchor=B2:F7' (cell range) or x/y/width/height in cell units. 'ref=B2' expands to a 1x1 cell rectangle.",
+  "properties": {
+    "shape": {
+      "type": "string",
+      "description": "shape geometry name (rect, ellipse, line, roundRect, etc.).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop shape=rect"],
+      "readback": "geometry preset name",
+      "enforcement": "report"
+    },
+    "anchor": {
+      "type": "string",
+      "description": "cell range anchor (e.g. B2:F7). Overrides x/y/width/height.",
+      "aliases": ["ref"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop anchor=B2:F7"],
+      "readback": "resolved anchor",
+      "enforcement": "report"
+    },
+    "text": {
+      "type": "string",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop text=\"Note\""],
+      "readback": "concatenated run text",
+      "enforcement": "report"
+    },
+    "fill": {
+      "type": "color",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop fill=#FFFF00"],
+      "readback": "#-prefixed uppercase hex",
+      "enforcement": "report"
+    }
+  }
+}

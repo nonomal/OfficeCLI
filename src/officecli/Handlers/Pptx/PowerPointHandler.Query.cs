@@ -852,6 +852,7 @@ public partial class PowerPointHandler
                 or "connector" or "connection"
                 or "group" or "zoom"
                 or "slidemaster" or "slidelayout"
+                or "theme"
                 or "media" or "image"
                 // CONSISTENCY(ole-alias): "oleobject" mirrors Add's case switch
                 or "ole" or "oleobject" or "object" or "embed"
@@ -865,6 +866,17 @@ public partial class PowerPointHandler
                 results.AddRange(GenericXmlQuery.Query(
                     GetSlide(slidePart), genericParsed.element, genericParsed.attrs, genericParsed.containsText));
             }
+            return results;
+        }
+
+        // Theme query — schema advertises query=true; reuse Get("/theme").
+        // CONSISTENCY(query-selector-vs-path): path format `/theme` (no index)
+        // mirrors the Get path; PPTX has a single active theme.
+        if (rawType == "theme")
+        {
+            var themeNode = GetThemeNode();
+            if (themeNode != null)
+                results.Add(themeNode);
             return results;
         }
 

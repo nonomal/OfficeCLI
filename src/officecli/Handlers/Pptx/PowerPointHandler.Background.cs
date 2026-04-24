@@ -567,14 +567,19 @@ public partial class PowerPointHandler
         var type = parts[0].Trim().ToUpperInvariant();
         var colorAndParams = parts.Skip(1).Select(p => p.Trim()).ToArray();
 
-        // Dash is the separator in the canonical form, so a trailing negative angle
-        // (e.g. "LINEAR;C1;C2;-90") would splice into "C1-C2--90" and fail as an
-        // empty color token. Normalize a negative trailing integer to its positive
-        // equivalent (-90 → 270) so the advertised semicolon form stays usable.
-        if (colorAndParams.Length >= 2 && (type == "LINEAR" || type == "RADIAL" || type == "PATH"))
+        // Dash is the separator in the canonical form, so a trailing signed angle
+        // (e.g. "LINEAR;C1;C2;-90" or "LINEAR;C1;C2;+45") would splice into "C1-C2--90"
+        // / "C1-C2-+45" and fail as an empty color token. Normalize a trailing signed
+        // integer to its unsigned canonical form so the advertised semicolon syntax
+        // stays usable.
+        // Only linear form has a trailing angle; radial/path have a focus keyword, so
+        // don't touch their trailing token — a trailing integer there is a color stop,
+        // not an angle, and wrapping it would fabricate a fake color.
+        if (colorAndParams.Length >= 2 && type == "LINEAR")
         {
             var tail = colorAndParams[^1];
-            if (int.TryParse(tail, out var angleDeg) && angleDeg < 0 && angleDeg >= -360)
+            if (int.TryParse(tail, out var angleDeg) && angleDeg >= -360 && angleDeg <= 360
+                && (tail.StartsWith('-') || tail.StartsWith('+')))
                 colorAndParams[^1] = (((angleDeg % 360) + 360) % 360).ToString();
         }
 
@@ -592,18 +597,13 @@ public partial class PowerPointHandler
     /// </summary>
     private static bool IsGradientColorString(string value)
     {
-        // Handle radial:/path: prefix — must have color data after prefix
+        // The radial:/path: prefix is itself the gradient marker — don't second-guess
+        // the color forms (hex/scheme/8-hex) here; BuildGradientFill validates them.
         var v = value;
         if (v.StartsWith("radial:", StringComparison.OrdinalIgnoreCase))
-        {
-            var after = v[7..];
-            return after.Length > 0 && after.Split('-').Any(p => IsHexColorString(p));
-        }
+            return v.Length > 7;
         if (v.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
-        {
-            var after = v[5..];
-            return after.Length > 0 && after.Split('-').Any(p => IsHexColorString(p));
-        }
+            return v.Length > 5;
 
         var parts = v.Split('-');
         return parts.Length >= 2 && IsHexColorString(parts[0]);
@@ -615,7 +615,10 @@ public partial class PowerPointHandler
         // Strip @position suffix used for gradient stops (e.g. "FF0000@50").
         var at = s.IndexOf('@');
         if (at >= 0) s = s[..at];
-        return (s.Length == 6 || s.Length == 8) &&
+        // Accept 3-digit shorthand (parity with SanitizeColorForOoxml) alongside
+        // the canonical 6/8-digit forms so gradients can mix "F00-00F" consistently
+        // with the solid-bg path.
+        return (s.Length == 3 || s.Length == 6 || s.Length == 8) &&
                s.All(c => char.IsAsciiHexDigit(c));
     }
 

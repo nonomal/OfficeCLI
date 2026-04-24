@@ -1,0 +1,124 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "style",
+  "parent": "styles",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "stable":     ["/styles/StyleId"],
+    "positional": ["/style[@name=NAME]", "/style[N]"]
+  },
+  "note": "Style type defaults to paragraph. 'id' must be unique in styles.xml; duplicate id rejected if explicit, else auto-suffixed. Built-in ids (Normal, Heading1..9, Title, Subtitle, Quote, IntenseQuote, ListParagraph, NoSpacing, TOCHeading) bypass the customStyle=true flag.",
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "w:styleId (unique). Aliases fall through to 'name' when 'id' is omitted.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop id=MyAccent"],
+      "readback": "StyleId value",
+      "enforcement": "strict"
+    },
+    "name": {
+      "type": "string",
+      "description": "display name. Defaults to 'id' when omitted.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop name=\"My Accent\""],
+      "readback": "StyleName.Val",
+      "enforcement": "report"
+    },
+    "type": {
+      "type": "enum",
+      "values": ["paragraph", "character", "table", "numbering"],
+      "aliases": {
+        "character": ["char"],
+        "paragraph": ["para"]
+      },
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop type=paragraph"],
+      "readback": "one of values (innerText of StyleValues)",
+      "enforcement": "report"
+    },
+    "basedOn": {
+      "type": "string",
+      "aliases": ["basedon"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop basedOn=Normal"],
+      "readback": "BasedOn.Val",
+      "enforcement": "report"
+    },
+    "next": {
+      "type": "string",
+      "description": "next-paragraph style id.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop next=Normal"],
+      "readback": "NextParagraphStyle.Val",
+      "enforcement": "report"
+    },
+    "alignment": {
+      "type": "enum",
+      "values": ["left", "center", "right", "justify", "both", "distribute"],
+      "aliases": ["align"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop alignment=center"],
+      "readback": "one of values",
+      "enforcement": "report"
+    },
+    "spaceBefore": {
+      "type": "length",
+      "aliases": ["spacebefore"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop spaceBefore=12pt"],
+      "readback": "unit-qualified",
+      "enforcement": "report"
+    },
+    "spaceAfter": {
+      "type": "length",
+      "aliases": ["spaceafter"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop spaceAfter=6pt"],
+      "readback": "unit-qualified",
+      "enforcement": "report"
+    },
+    "font": {
+      "type": "string",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop font=\"Calibri\""],
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "size": {
+      "type": "length",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop size=14"],
+      "readback": "unit-qualified pt",
+      "enforcement": "report"
+    },
+    "bold": {
+      "type": "bool",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop bold=true"],
+      "readback": "true/false",
+      "enforcement": "report"
+    },
+    "italic": {
+      "type": "bool",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop italic=true"],
+      "readback": "true/false",
+      "enforcement": "report"
+    },
+    "color": {
+      "type": "color",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop color=#FF0000"],
+      "readback": "#-prefixed uppercase hex",
+      "enforcement": "report"
+    }
+  }
+}

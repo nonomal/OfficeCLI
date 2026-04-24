@@ -1,0 +1,34 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "cell",
+  "parent": "row",
+  "operations": {
+    "add": true,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": true
+  },
+  "paths": {
+    "positional": ["/body/tbl[N]/tr[R]/tc[C]"]
+  },
+  "properties": {
+    "text": {
+      "type": "string",
+      "description": "single-run text content placed in a fresh paragraph.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop text=\"Hello\""],
+      "readback": "concatenated run text",
+      "enforcement": "strict"
+    },
+    "width": {
+      "type": "int",
+      "description": "cell width in twips (Dxa).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop width=2500"],
+      "readback": "twips",
+      "enforcement": "report"
+    }
+  }
+}

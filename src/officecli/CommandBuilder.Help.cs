@@ -222,7 +222,8 @@ static partial class CommandBuilder
         // Guard drops `element == null` for CRUD verbs so the rewrite case is handled.
         if (!SchemaHelpLoader.IsKnownFormat(format)
             && verb == null
-            && (element == null || HelpVerbs.Contains(format, StringComparer.OrdinalIgnoreCase)))
+            && (element == null || HelpVerbs.Contains(format, StringComparer.OrdinalIgnoreCase)
+                || EarlyDispatchHelp.ContainsKey(format)))
         {
             if (WriteEarlyDispatchUsage(format, Console.Out))
                 return 0;

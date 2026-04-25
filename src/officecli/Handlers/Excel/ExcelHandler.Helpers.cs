@@ -1352,6 +1352,10 @@ public partial class ExcelHandler
                         }
                     }
 
+                    // R29: quotePrefix readback (set by leading apostrophe text mode)
+                    if (xf.QuotePrefix?.Value == true)
+                        node.Format["quotePrefix"] = true;
+
                     // Number format readback
                     var numFmtId = xf.NumberFormatId?.Value ?? 0;
                     if (numFmtId > 0)

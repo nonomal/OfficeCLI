@@ -19,8 +19,8 @@
   "properties": {
     "id": {
       "type": "string",
-      "description": "w:styleId (unique). Aliases fall through to 'name' when 'id' is omitted.",
-      "add": true, "set": true, "get": true,
+      "description": "w:styleId (unique, immutable identity). Aliases fall through to 'name' when 'id' is omitted. Renaming after Add would require rewriting every paragraph/run/basedOn reference in the document; not supported.",
+      "add": true, "set": false, "get": true,
       "examples": ["--prop id=MyAccent"],
       "readback": "StyleId value",
       "enforcement": "strict"

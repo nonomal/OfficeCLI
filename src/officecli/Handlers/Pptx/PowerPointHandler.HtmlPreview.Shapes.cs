@@ -487,8 +487,8 @@ public partial class PowerPointHandler
             ?.GetFirstChild<PlaceholderShape>();
 
         // Get slide dimensions for proportional positioning
-        long slideW = 12192000; // default 33.87cm
-        long slideH = 6858000;  // default 19.05cm
+        long slideW = SlideSizeDefaults.Widescreen16x9Cx;
+        long slideH = SlideSizeDefaults.Widescreen16x9Cy;
         if (part is SlidePart sp)
         {
             var presDoc = sp.GetParentParts().OfType<PresentationPart>().FirstOrDefault();

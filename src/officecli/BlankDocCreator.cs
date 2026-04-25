@@ -306,8 +306,8 @@ public static class BlankDocCreator
                 new DocumentFormat.OpenXml.Presentation.SlideMasterId { Id = 2147483648, RelationshipId = "rId1" }
             ),
             new SlideIdList(),
-            new SlideSize { Cx = 12192000, Cy = 6858000 },
-            new NotesSize { Cx = 6858000, Cy = 9144000 }
+            new SlideSize { Cx = (int)SlideSizeDefaults.Widescreen16x9Cx, Cy = (int)SlideSizeDefaults.Widescreen16x9Cy },
+            new NotesSize { Cx = SlideSizeDefaults.NotesPortraitCx, Cy = SlideSizeDefaults.NotesPortraitCy }
         );
         presentationPart.Presentation.Save();
     }

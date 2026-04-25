@@ -86,59 +86,15 @@ public partial class PowerPointHandler
                     case "slidesize":
                         var sz = presentation.GetFirstChild<SlideSize>()
                             ?? presentation.AppendChild(new SlideSize());
-                        switch (value.ToLowerInvariant())
+                        if (SlideSizeDefaults.Presets.TryGetValue(value, out var preset))
                         {
-                            case "16:9" or "widescreen":
-                                sz.Cx = 12192000; sz.Cy = 6858000;
-                                sz.Type = SlideSizeValues.Screen16x9;
-                                break;
-                            case "4:3" or "standard":
-                                sz.Cx = 9144000; sz.Cy = 6858000;
-                                sz.Type = SlideSizeValues.Screen4x3;
-                                break;
-                            case "16:10":
-                                sz.Cx = 12192000; sz.Cy = 7620000;
-                                sz.Type = SlideSizeValues.Screen16x10;
-                                break;
-                            case "a4":
-                                sz.Cx = 10692000; sz.Cy = 7560000;
-                                sz.Type = SlideSizeValues.A4;
-                                break;
-                            case "a3":
-                                sz.Cx = 15120000; sz.Cy = 10692000;
-                                sz.Type = SlideSizeValues.A3;
-                                break;
-                            case "letter":
-                                sz.Cx = 9144000; sz.Cy = 6858000;
-                                sz.Type = SlideSizeValues.Letter;
-                                break;
-                            case "b4":
-                                sz.Cx = 11430000; sz.Cy = 8574000;
-                                sz.Type = SlideSizeValues.B4ISO;
-                                break;
-                            case "b5":
-                                sz.Cx = 8208000; sz.Cy = 5760000;
-                                sz.Type = SlideSizeValues.B5ISO;
-                                break;
-                            case "35mm":
-                                sz.Cx = 10287000; sz.Cy = 6858000;
-                                sz.Type = SlideSizeValues.Film35mm;
-                                break;
-                            case "overhead":
-                                sz.Cx = 9144000; sz.Cy = 6858000;
-                                sz.Type = SlideSizeValues.Overhead;
-                                break;
-                            case "banner":
-                                sz.Cx = 7315200; sz.Cy = 914400;
-                                sz.Type = SlideSizeValues.Banner;
-                                break;
-                            case "ledger":
-                                sz.Cx = 12192000; sz.Cy = 9144000;
-                                sz.Type = SlideSizeValues.Ledger;
-                                break;
-                            default:
-                                unsupported.Add(key);
-                                break;
+                            sz.Cx = (int)preset.Cx;
+                            sz.Cy = (int)preset.Cy;
+                            sz.Type = preset.Type;
+                        }
+                        else
+                        {
+                            unsupported.Add(key);
                         }
                         break;
                     // Core document properties

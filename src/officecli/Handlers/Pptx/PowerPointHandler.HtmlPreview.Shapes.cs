@@ -918,7 +918,7 @@ public partial class PowerPointHandler
         // Branch on preset geometry: straightConnectorN -> line; bentConnectorN -> polyline;
         // curvedConnectorN -> cubic bezier path. Falls back to straight line for unknown presets.
         var prstGeom = cxn.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
-        var preset = prstGeom?.Preset?.HasValue == true ? prstGeom.Preset.InnerText : "straightConnector1";
+        var preset = prstGeom?.Preset?.HasValue == true ? (prstGeom.Preset.InnerText ?? "straightConnector1") : "straightConnector1";
 
         // CONSISTENCY(shape-stroke-unit): stroke-width in pt matches CSS border path (see R3 fix).
         var strokeAttrs = $"stroke=\"{safeColor}\" stroke-width=\"{lineWidth:0.##}pt\" fill=\"none\"{dashAttr}{markerStartAttr}{markerEndAttr}";

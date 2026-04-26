@@ -312,6 +312,8 @@ internal static class GenericXmlQuery
     /// Uses the SDK's XML parsing to validate: clones the parent (empty), injects
     /// a child XML fragment, checks if the SDK recognizes it as a typed element with Val property.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2075",
+        Justification = "Probing for a SDK-generated 'Val' property by name. OpenXml typed-element classes are referenced elsewhere and preserved by the trimmer; if trimmed away, the probe simply returns null and the caller falls through.")]
     public static bool TryCreateTypedChild(OpenXmlElement parent, string key, string value)
     {
         var nsUri = parent.NamespaceUri;

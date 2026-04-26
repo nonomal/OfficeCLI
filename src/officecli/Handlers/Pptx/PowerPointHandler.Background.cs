@@ -655,8 +655,6 @@ public partial class PowerPointHandler
         var colorParts = parts.ToList();
         string? focusPoint = null;
         int angle = 5400000; // default 90° = top→bottom
-        bool angleStripped = false;
-        bool focusStripped = false;
 
         if (gradientType != null)
         {
@@ -666,7 +664,6 @@ public partial class PowerPointHandler
             {
                 focusPoint = last;
                 colorParts.RemoveAt(colorParts.Count - 1);
-                focusStripped = true;
             }
         }
         else
@@ -690,7 +687,6 @@ public partial class PowerPointHandler
                 angleDeg = ((angleDeg % 360) + 360) % 360;
                 angle = angleDeg * 60000;
                 colorParts.RemoveAt(colorParts.Count - 1);
-                angleStripped = true;
             }
         }
 

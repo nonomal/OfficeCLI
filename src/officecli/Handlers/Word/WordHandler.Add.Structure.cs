@@ -423,6 +423,23 @@ public partial class WordHandler
             styleRPr.RunFonts = new RunFonts { Ascii = sFont, HighAnsi = sFont, EastAsia = sFont };
             hasRPr = true;
         }
+        // Per-script font split. Each w:rFonts attr is independent — Word falls
+        // back through the style chain / docDefaults for any unset attr, so we
+        // only write what the caller passed and leave the rest alone. Dotted
+        // keys layer on top of the bare `font=` shortcut: `font=Times,
+        // font.eastAsia=SimSun` produces ascii/hAnsi=Times, eastAsia=SimSun.
+        bool TrySetRFontsAttr(string key, Action<RunFonts, string> assign)
+        {
+            if (!properties.TryGetValue(key, out var v) || string.IsNullOrEmpty(v)) return false;
+            styleRPr.RunFonts ??= new RunFonts();
+            assign(styleRPr.RunFonts, v);
+            hasRPr = true;
+            return true;
+        }
+        TrySetRFontsAttr("font.ascii",    (rf, v) => rf.Ascii = v);
+        TrySetRFontsAttr("font.hAnsi",    (rf, v) => rf.HighAnsi = v);
+        TrySetRFontsAttr("font.eastAsia", (rf, v) => rf.EastAsia = v);
+        TrySetRFontsAttr("font.cs",       (rf, v) => rf.ComplexScript = v);
         if (properties.TryGetValue("size", out var sSize))
         {
             styleRPr.FontSize = new FontSize { Val = ((int)Math.Round(ParseFontSize(sSize) * 2, MidpointRounding.AwayFromZero)).ToString() };
@@ -456,6 +473,7 @@ public partial class WordHandler
             "id", "name", "type", "basedon", "basedOn", "next",
             "alignment", "align", "spacebefore", "spaceBefore",
             "spaceafter", "spaceAfter", "font", "size", "bold", "italic", "color",
+            "font.ascii", "font.hAnsi", "font.eastAsia", "font.cs",
         };
         foreach (var (key, value) in properties)
         {
@@ -493,8 +511,11 @@ public partial class WordHandler
                 continue;
             }
             // Anything still unconsumed is a genuine silent drop — composites
-            // (font.eastAsia, ind.firstLine, tabs, numId, ...) handled by
-            // the curated additions in the follow-up commit.
+            // (font.eastAsia, ind.firstLine, tabs, numId, ...) that the
+            // curated AddStyle does not yet model. Record so the CLI layer
+            // can surface a WARNING with targeted hints instead of a silent
+            // "Added" lie. See StyleUnsupportedHints for the hint catalog.
+            LastAddUnsupportedProps.Add(key);
         }
 
         stylesPart.Styles.AppendChild(newStyle);

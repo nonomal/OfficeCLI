@@ -16,6 +16,14 @@ public partial class WordHandler : IDocumentHandler
     private int _nextParaId = 0x100000;
     public int LastFindMatchCount { get; internal set; }
 
+    /// <summary>
+    /// Props that the most recent Add() call could not consume. Surfaced to
+    /// the CLI layer so silent-drops on the curated surface (e.g.
+    /// `add /styles --prop font.eastAsia=...`) become visible warnings
+    /// instead of "Added" lies. Reset at the start of each Add.
+    /// </summary>
+    public List<string> LastAddUnsupportedProps { get; internal set; } = new();
+
     public WordHandler(string filePath, bool editable)
     {
         _filePath = filePath;

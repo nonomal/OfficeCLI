@@ -950,7 +950,20 @@ public class ResidentServer : IDisposable
         else if (unsupported.Count > 0)
             Console.WriteLine($"No properties applied to {path}");
         if (unsupported.Count > 0)
-            Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", unsupported)}");
+        {
+            // /styles/<id> on Word: targeted curated hints, no raw-set push.
+            // See StyleUnsupportedHints + matching branch in CommandBuilder.
+            if (_handler is WordHandler
+                && path.StartsWith("/styles/", StringComparison.Ordinal))
+            {
+                var styleHint = OfficeCli.Core.StyleUnsupportedHints.Format(unsupported);
+                if (styleHint != null) Console.Error.WriteLine(styleHint);
+            }
+            else
+            {
+                Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", unsupported)}");
+            }
+        }
         var overflow = CommandBuilder.CheckTextOverflow(_handler, path);
         if (overflow != null)
             Console.Error.WriteLine($"  WARNING: {overflow}");
@@ -999,8 +1012,27 @@ public class ResidentServer : IDisposable
             var overflow = CommandBuilder.CheckTextOverflow(_handler, resultPath);
             if (overflow != null)
                 Console.Error.WriteLine($"  WARNING: {overflow}");
-            if (schemaUnsupported.Count > 0)
-                Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", schemaUnsupported)}");
+
+            // Combine schema-level unsupported (caught before handler.Add) and
+            // handler-level silent-drop (e.g. AddStyle props that pass schema
+            // validation via the `font.` prefix but the curated AddStyle has
+            // no slot for, like `font.eastAsia`). Both surface to the user.
+            var allUnsupported = new List<string>(schemaUnsupported);
+            if (_handler is WordHandler residWh)
+                allUnsupported.AddRange(residWh.LastAddUnsupportedProps);
+
+            if (allUnsupported.Count > 0)
+            {
+                if (resultPath.StartsWith("/styles/", StringComparison.Ordinal))
+                {
+                    var hint = OfficeCli.Core.StyleUnsupportedHints.Format(allUnsupported);
+                    if (hint != null) Console.Error.WriteLine("WARNING: " + hint);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", allUnsupported)}");
+                }
+            }
         }
     }
 

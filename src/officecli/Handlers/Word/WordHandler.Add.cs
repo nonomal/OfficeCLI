@@ -26,6 +26,11 @@ public partial class WordHandler
                 ? properties
                 : new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
 
+        // Reset per-Add diagnostic. Helpers that detect silent-drop props
+        // (currently only AddStyle) populate this; the CLI layer surfaces
+        // it as a WARNING line so curated-surface gaps stop being silent.
+        LastAddUnsupportedProps = new List<string>();
+
         // Reject negative --index up front with a clean message instead of
         // letting it fall through and surface as a raw .NET
         // ArgumentOutOfRangeException from collection indexing. Applies to

@@ -653,6 +653,25 @@ public partial class WordHandler
                     ApplyStyleParagraphBorders(pPrB, key, value);
                     break;
                 }
+                // Per-script font split. Each w:rFonts attr is independent and
+                // unset attrs fall back through the style chain / docDefaults,
+                // so writing only the requested attr is correct — no need to
+                // backfill the others. Merge into any existing w:rFonts so a
+                // chain of `set font.eastAsia=…` then `set font.ascii=…`
+                // produces a single rFonts element with both attrs.
+                case "font.ascii" or "font.hansi" or "font.eastasia" or "font.cs":
+                {
+                    var rPrFonts = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
+                    rPrFonts.RunFonts ??= new RunFonts();
+                    switch (key.ToLowerInvariant())
+                    {
+                        case "font.ascii":    rPrFonts.RunFonts.Ascii         = value; break;
+                        case "font.hansi":    rPrFonts.RunFonts.HighAnsi      = value; break;
+                        case "font.eastasia": rPrFonts.RunFonts.EastAsia      = value; break;
+                        case "font.cs":       rPrFonts.RunFonts.ComplexScript = value; break;
+                    }
+                    break;
+                }
                 default:
                 {
                     // Long-tail OOXML fallback — symmetric with the Get-side

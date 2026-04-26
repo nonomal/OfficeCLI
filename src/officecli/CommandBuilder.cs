@@ -457,14 +457,28 @@ static partial class CommandBuilder
                 }
                 if (unsupported.Count > 0)
                 {
-                    string? batchScope = handler switch
+                    // /styles/<id> in Word: route through curated hints
+                    // instead of the generic "use raw-set" message. raw-set
+                    // is an escape hatch and pushing users there for missing
+                    // curated coverage trains them out of the canonical
+                    // vocabulary. See StyleUnsupportedHints.
+                    if (handler is OfficeCli.Handlers.WordHandler
+                        && path.StartsWith("/styles/", StringComparison.Ordinal))
                     {
-                        OfficeCli.Handlers.ExcelHandler => "excel",
-                        OfficeCli.Handlers.WordHandler => "word",
-                        OfficeCli.Handlers.PowerPointHandler => "pptx",
-                        _ => null,
-                    };
-                    parts.Add(FormatUnsupported(unsupported, batchScope));
+                        var styleHint = OfficeCli.Core.StyleUnsupportedHints.Format(unsupported);
+                        if (styleHint != null) parts.Add(styleHint);
+                    }
+                    else
+                    {
+                        string? batchScope = handler switch
+                        {
+                            OfficeCli.Handlers.ExcelHandler => "excel",
+                            OfficeCli.Handlers.WordHandler => "word",
+                            OfficeCli.Handlers.PowerPointHandler => "pptx",
+                            _ => null,
+                        };
+                        parts.Add(FormatUnsupported(unsupported, batchScope));
+                    }
                 }
                 return string.Join("\n", parts);
             }
@@ -489,7 +503,22 @@ static partial class CommandBuilder
                 {
                     var type = item.Type ?? "";
                     var resultPath = handler.Add(parentPath, type, pos, props);
-                    return $"Added {type} at {resultPath}";
+                    var addMsg = $"Added {type} at {resultPath}";
+
+                    // Surface silent-drop props that the curated Add helper
+                    // could not consume. Currently only AddStyle populates
+                    // this. Use the curated-hint formatter (no raw-set
+                    // recommendation) so users learn the right curated
+                    // alternative instead of being pushed to the escape
+                    // hatch.
+                    if (handler is OfficeCli.Handlers.WordHandler addWh
+                        && addWh.LastAddUnsupportedProps.Count > 0
+                        && resultPath.StartsWith("/styles/", StringComparison.Ordinal))
+                    {
+                        var hint = OfficeCli.Core.StyleUnsupportedHints.Format(addWh.LastAddUnsupportedProps);
+                        if (hint != null) addMsg += "\nWARNING: " + hint;
+                    }
+                    return addMsg;
                 }
             }
             case "remove":

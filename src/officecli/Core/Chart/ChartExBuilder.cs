@@ -369,9 +369,12 @@ internal static partial class ChartExBuilder
         // Note: cx:legend's SidePos has no topRight — fall back to top with
         // a clear note rather than rejecting, since topRight is a valid
         // value for the regular cChart variant and users may pass it through.
-        legend.Pos = posSpec.ToLowerInvariant() switch
+        // CONSISTENCY(legend-separator-normalize): mirror SetterHelpers — dash
+        // and underscore separators are equivalent (top-right == top_right).
+        var posSpecNorm = (posSpec ?? string.Empty).ToLowerInvariant().Replace("-", "").Replace("_", "");
+        legend.Pos = posSpecNorm switch
         {
-            "top" or "t" or "topright" or "tr" or "top-right" => CX.SidePos.T,
+            "top" or "t" or "topright" or "tr" => CX.SidePos.T,
             "bottom" or "b" => CX.SidePos.B,
             "left" or "l"   => CX.SidePos.L,
             "right" or "r"  => CX.SidePos.R,

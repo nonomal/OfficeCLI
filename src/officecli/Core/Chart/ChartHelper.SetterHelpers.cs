@@ -25,13 +25,18 @@ internal static partial class ChartHelper
     /// </summary>
     internal static C.LegendPositionValues ParseLegendPosition(string value)
     {
-        return value.ToLowerInvariant() switch
+        // CONSISTENCY(legend-separator-normalize): accept dash AND underscore
+        // as separators (`top-right`, `top_right`, `TOP_RIGHT`) by stripping
+        // both before comparison. Without this, `TOP_RIGHT` threw while
+        // `top-right` succeeded — punctuation variants should be uniform.
+        var norm = (value ?? string.Empty).ToLowerInvariant().Replace("-", "").Replace("_", "");
+        return norm switch
         {
             "top" or "t" => C.LegendPositionValues.Top,
             "bottom" or "b" => C.LegendPositionValues.Bottom,
             "left" or "l" => C.LegendPositionValues.Left,
             "right" or "r" => C.LegendPositionValues.Right,
-            "topright" or "tr" or "top-right" => C.LegendPositionValues.TopRight,
+            "topright" or "tr" => C.LegendPositionValues.TopRight,
             _ => throw new ArgumentException(
                 $"Invalid legend position '{value}'. " +
                 "Valid: none, top, bottom, left, right, topRight " +

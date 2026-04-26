@@ -26,6 +26,12 @@ public partial class ExcelHandler
             ?? GetWorkbook().AppendChild(new Sheets());
 
         var name = properties.GetValueOrDefault("name", $"Sheet{sheets.Elements<Sheet>().Count() + 1}");
+        // CONSISTENCY(sheet-name-validation): mirror Set's name validation
+        // (ExcelHandler.Set.cs L1777) so Add and Set both reject names Excel
+        // would refuse to open. Only validate when explicitly user-supplied —
+        // the auto-generated SheetN default is always safe.
+        if (properties.ContainsKey("name"))
+            ValidateSheetName(name);
         if (sheets.Elements<Sheet>().Any(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
             if (_initialSheetNames.Contains(name))

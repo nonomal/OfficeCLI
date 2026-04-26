@@ -395,15 +395,24 @@ static partial class CommandBuilder
 
     private static void WriteError(Exception ex, bool json)
     {
+        // CONSISTENCY(error-wrap): bare XmlException leaks ("Data at the root
+        // level is invalid. Line 1, position 1.") when an OOXML part is
+        // externally corrupted. Surface a friendlier message naming the
+        // underlying cause so users know it's a malformed part, not a bug.
+        var rendered = ex is System.Xml.XmlException xe
+            ? new InvalidDataException(
+                $"Malformed XML in document part: {xe.Message} " +
+                $"(the file appears to have a corrupted OOXML part).", xe)
+            : ex;
         if (json)
         {
             // JSON mode: structured error envelope to stdout so AI agents get it in the same stream
             WarningContext.End(); // discard any partial warnings
-            Console.WriteLine(OutputFormatter.WrapErrorEnvelope(ex));
+            Console.WriteLine(OutputFormatter.WrapErrorEnvelope(rendered));
         }
         else
         {
-            Console.Error.WriteLine($"Error: {ex.Message}");
+            Console.Error.WriteLine($"Error: {rendered.Message}");
         }
     }
 

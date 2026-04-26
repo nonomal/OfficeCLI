@@ -512,17 +512,26 @@ public class ResidentServer : IDisposable
         }
         catch (Exception ex)
         {
+            // CONSISTENCY(error-wrap): mirror CommandBuilder.WriteError —
+            // surface a friendlier message when an OOXML part is externally
+            // corrupted, instead of the raw "Data at the root level is
+            // invalid. Line 1, position 1." XmlException leak (fuzz-3, fuzz-4).
+            var rendered = ex is System.Xml.XmlException xe
+                ? new InvalidDataException(
+                    $"Malformed XML in document part: {xe.Message} " +
+                    $"(the file appears to have a corrupted OOXML part).", xe)
+                : ex;
             if (request?.Json == true)
             {
                 // JSON mode: wrap error in envelope
-                return MakeResponse(1, OutputFormatter.WrapErrorEnvelope(ex), "");
+                return MakeResponse(1, OutputFormatter.WrapErrorEnvelope(rendered), "");
             }
             // BUG-R11-02: prefix the stderr string with the canonical
             // "Error: " marker so resident-mode error output matches the
             // non-resident CLI path (WriteError in Program.cs). Without
             // this, clients diffing stderr across modes would mis-detect
             // failures.
-            return MakeResponse(1, "", $"Error: {ex.Message}");
+            return MakeResponse(1, "", $"Error: {rendered.Message}");
         }
     }
 

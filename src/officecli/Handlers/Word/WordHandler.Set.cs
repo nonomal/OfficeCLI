@@ -512,7 +512,10 @@ public partial class WordHandler
                 return true;
             case "numLevel" or "numlevel" or "ilvl":
                 var numPr2 = pProps.NumberingProperties ?? (pProps.NumberingProperties = new NumberingProperties());
-                numPr2.NumberingLevelReference = new NumberingLevelReference { Val = ParseHelpers.SafeParseInt(value, "numLevel") };
+                var ilvlSetVal = ParseHelpers.SafeParseInt(value, "numLevel");
+                if (ilvlSetVal < 0 || ilvlSetVal > 8)
+                    throw new ArgumentException($"ilvl must be in range 0..8 (got {ilvlSetVal}).");
+                numPr2.NumberingLevelReference = new NumberingLevelReference { Val = ilvlSetVal };
                 return true;
             case "pbdr.top" or "pbdr.bottom" or "pbdr.left" or "pbdr.right" or "pbdr.between" or "pbdr.bar" or "pbdr.all" or "pbdr":
             case "border.all" or "border" or "border.top" or "border.bottom" or "border.left" or "border.right":

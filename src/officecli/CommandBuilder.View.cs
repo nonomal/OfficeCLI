@@ -122,7 +122,17 @@ static partial class CommandBuilder
             {
                 if (handler is OfficeCli.Handlers.PowerPointHandler pptSvgHandler)
                 {
-                    var slideNum = start ?? 1;
+                    // CONSISTENCY(view-page): SVG mode honors --page like html mode; --page wins over --start
+                    int slideNum = 1;
+                    if (!string.IsNullOrEmpty(pageFilter))
+                    {
+                        var firstTok = pageFilter.Split(',')[0].Split('-')[0].Trim();
+                        if (int.TryParse(firstTok, out var p) && p > 0) slideNum = p;
+                    }
+                    else if (start.HasValue && start.Value > 0)
+                    {
+                        slideNum = start.Value;
+                    }
                     var svg = pptSvgHandler.ViewAsSvg(slideNum);
 
                     if (browser)

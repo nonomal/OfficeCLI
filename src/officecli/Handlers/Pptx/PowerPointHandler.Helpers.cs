@@ -30,6 +30,17 @@ public partial class PowerPointHandler
     /// </summary>
     private static string NormalizeCellPath(string path)
     {
+        // Reject malformed segment separators that previously slipped past
+        // the regex matchers and ended up exposing raw OOXML local names
+        // (e.g. `Get("/slide[1]/")` returned type=sld, `Get("//slide[1]")`
+        // returned sld). DOCX already rejects these forms; bring PPTX/XLSX
+        // up to parity with an explicit error rather than silent leakage.
+        if (path.Length > 1 && path != "/" && path.EndsWith("/"))
+            throw new ArgumentException($"Invalid path '{path}': trailing '/' is not allowed.");
+        if (path.StartsWith("//"))
+            throw new ArgumentException($"Invalid path '{path}': leading '//' is not allowed.");
+        if (path.Contains("//"))
+            throw new ArgumentException($"Invalid path '{path}': empty path segment ('//') is not allowed.");
         return Regex.Replace(path, @"cell\[(\d+),\s*(\d+)\]", m => $"tr[{m.Groups[1].Value}]/tc[{m.Groups[2].Value}]");
     }
 

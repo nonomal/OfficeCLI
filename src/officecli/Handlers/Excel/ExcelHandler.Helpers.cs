@@ -691,6 +691,15 @@ public partial class ExcelHandler
     /// </summary>
     internal static string NormalizeExcelPath(string path)
     {
+        // Reject malformed segment separators that previously slipped past
+        // the regex matchers and exposed raw OOXML local names. DOCX already
+        // rejects these; bring XLSX up to parity.
+        if (path.Length > 1 && path != "/" && path.EndsWith("/"))
+            throw new ArgumentException($"Invalid path '{path}': trailing '/' is not allowed.");
+        if (path.StartsWith("//"))
+            throw new ArgumentException($"Invalid path '{path}': leading '//' is not allowed.");
+        if (path.Contains("//"))
+            throw new ArgumentException($"Invalid path '{path}': empty path segment ('//') is not allowed.");
         // Handle "/Sheet1!A1" — strip leading '/' when '!' is present so native notation is parsed correctly
         if (path.StartsWith('/') && path.Contains('!'))
             path = path[1..];

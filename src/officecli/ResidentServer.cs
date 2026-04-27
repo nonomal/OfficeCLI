@@ -980,10 +980,65 @@ public class ResidentServer : IDisposable
             .Select(u => u.Contains(' ') ? u[..u.IndexOf(' ')] : u)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var applied = properties.Where(kv => !unsupportedKeys.Contains(kv.Key)).ToList();
-        if (applied.Count > 0)
-            Console.WriteLine($"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}");
-        else if (unsupported.Count > 0)
-            Console.WriteLine($"No properties applied to {path}");
+
+        // CONSISTENCY(find-match-count): mirrored in CommandBuilder.Set.cs.
+        // The resident path is hit whenever a resident process is open
+        // (which `create` does by default), so both sites must surface
+        // findMatchCount + zero_matches warning identically.
+        int? findMatchCount = null;
+        if (properties.ContainsKey("find"))
+        {
+            findMatchCount = _handler switch
+            {
+                WordHandler wh => wh.LastFindMatchCount,
+                PowerPointHandler ph => ph.LastFindMatchCount,
+                ExcelHandler eh => eh.LastFindMatchCount,
+                _ => null
+            };
+        }
+
+        var message = applied.Count > 0
+            ? $"Updated {path}: {string.Join(", ", applied.Select(kv => $"{kv.Key}={kv.Value}"))}"
+              + (findMatchCount.HasValue ? $" ({findMatchCount.Value} matched)" : "")
+            : (unsupported.Count > 0 ? $"No properties applied to {path}" : $"Updated {path}");
+
+        var warnings = new List<OfficeCli.Core.CliWarning>();
+        if (findMatchCount is 0)
+        {
+            warnings.Add(new OfficeCli.Core.CliWarning
+            {
+                Message = $"find pattern matched 0 occurrences at {path} — original text may have been edited or the path is wrong",
+                Code = "zero_matches",
+                Suggestion = "verify the path still resolves and the find text is current"
+            });
+        }
+        var overflow = CommandBuilder.CheckTextOverflow(_handler, path);
+        if (overflow != null)
+        {
+            warnings.Add(new OfficeCli.Core.CliWarning
+            {
+                Message = overflow,
+                Code = "text_overflow",
+                Suggestion = "Increase shape height/width, reduce font size, or shorten text"
+            });
+        }
+
+        if (req.Json)
+        {
+            bool allFailed = applied.Count == 0 && unsupported.Count > 0;
+            Console.WriteLine(allFailed
+                ? OutputFormatter.WrapEnvelopeError(message, warnings.Count > 0 ? warnings : null)
+                : OutputFormatter.WrapEnvelopeText(message, warnings.Count > 0 ? warnings : null, findMatchCount));
+        }
+        else
+        {
+            if (applied.Count > 0 || unsupported.Count > 0) Console.WriteLine(message);
+            if (findMatchCount is 0)
+                Console.Error.WriteLine($"WARNING: find pattern matched 0 occurrences at {path}");
+            if (overflow != null)
+                Console.Error.WriteLine($"  WARNING: {overflow}");
+        }
+
         if (unsupported.Count > 0)
         {
             // /styles/<id> on Word: targeted curated hints, no raw-set push.
@@ -999,9 +1054,6 @@ public class ResidentServer : IDisposable
                 Console.Error.WriteLine($"UNSUPPORTED props (use raw-set instead): {string.Join(", ", unsupported)}");
             }
         }
-        var overflow = CommandBuilder.CheckTextOverflow(_handler, path);
-        if (overflow != null)
-            Console.Error.WriteLine($"  WARNING: {overflow}");
     }
 
     private void ExecuteAdd(ResidentRequest req)

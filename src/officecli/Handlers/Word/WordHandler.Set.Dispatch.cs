@@ -170,8 +170,93 @@ public partial class WordHandler
 
         var field = allFields[fieldIdx - 1];
 
+        // CONSISTENCY(field-set-instruction-rewrite): support the same
+        // high-level keys Add accepts (fieldType, name, format) by rewriting
+        // the field instruction. schemas/help/docx/field.json advertises
+        // [add/set/get] for these keys; previously Set rejected them as
+        // UNSUPPORTED. We rewrite the instruction code in-place so the field
+        // updates on next Word open (Dirty=true also auto-set).
+        var rewriteFieldType = properties.GetValueOrDefault("fieldType")
+            ?? properties.GetValueOrDefault("fieldtype")
+            ?? properties.GetValueOrDefault("type");
+        var rewriteName = properties.GetValueOrDefault("name")
+            ?? properties.GetValueOrDefault("fieldName")
+            ?? properties.GetValueOrDefault("fieldname");
+        var hasRewriteFormat = properties.TryGetValue("format", out var rewriteFormat);
+        if (!string.IsNullOrEmpty(rewriteFieldType) || !string.IsNullOrEmpty(rewriteName) || hasRewriteFormat)
+        {
+            var existingInstr = field.InstrCode.Text ?? "";
+            // Decide effective field type: prefer explicit fieldType, else
+            // sniff first token from existing instruction.
+            string effType;
+            if (!string.IsNullOrEmpty(rewriteFieldType))
+            {
+                effType = rewriteFieldType.ToUpperInvariant() switch
+                {
+                    "PAGENUM" or "PAGENUMBER" => "PAGE",
+                    var t => t
+                };
+            }
+            else
+            {
+                var trimmed = existingInstr.Trim();
+                var firstSpace = trimmed.IndexOf(' ');
+                effType = (firstSpace > 0 ? trimmed[..firstSpace] : trimmed).ToUpperInvariant();
+            }
+
+            // Sniff existing name (token after the field type) when not supplied
+            string? effName = rewriteName;
+            if (string.IsNullOrEmpty(effName))
+            {
+                var parts = existingInstr.Trim().Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 2 && !parts[1].StartsWith("\\"))
+                    effName = parts[1].Trim('"');
+            }
+
+            // Sniff existing \@ "..." format switch when not supplied
+            string? effFormat = hasRewriteFormat ? rewriteFormat : null;
+            if (!hasRewriteFormat)
+            {
+                var fmtMatch = System.Text.RegularExpressions.Regex.Match(existingInstr, "\\\\@\\s+\"([^\"]+)\"");
+                if (fmtMatch.Success) effFormat = fmtMatch.Groups[1].Value;
+            }
+
+            string newInstr = effType switch
+            {
+                "PAGE" or "NUMPAGES" or "SECTION" or "SECTIONPAGES"
+                or "AUTHOR" or "TITLE" or "SUBJECT" or "FILENAME"
+                or "EDITTIME" or "REVNUM" or "TEMPLATE" or "COMMENTS"
+                or "KEYWORDS" or "LASTSAVEDBY" or "NUMWORDS" or "NUMCHARS"
+                    => $" {effType} ",
+                "DATE" or "CREATEDATE" or "SAVEDATE" or "PRINTDATE" or "TIME"
+                    => string.IsNullOrWhiteSpace(effFormat)
+                        ? $" {effType} "
+                        : $" {effType} \\@ \"{effFormat}\" ",
+                "MERGEFIELD" => string.IsNullOrEmpty(effName)
+                    ? throw new ArgumentException("MERGEFIELD requires a 'name' / 'fieldName' property.")
+                    : $" MERGEFIELD {effName} ",
+                "REF" or "PAGEREF" or "NOTEREF" => string.IsNullOrEmpty(effName)
+                    ? throw new ArgumentException($"{effType} requires a 'name' property (target bookmark).")
+                    : $" {effType} {effName} ",
+                _ => $" {effType}{(string.IsNullOrEmpty(effName) ? "" : " " + effName)}{(string.IsNullOrWhiteSpace(effFormat) ? "" : $" \\@ \"{effFormat}\"")} "
+            };
+            field.InstrCode.Text = newInstr;
+            field.InstrCode.Space = SpaceProcessingModeValues.Preserve;
+            var beginCharR = field.BeginRun.GetFirstChild<FieldChar>();
+            if (beginCharR != null) beginCharR.Dirty = true;
+        }
+
         foreach (var (key, value) in properties)
         {
+            // Handled above by the instruction-rewrite block.
+            if (key.Equals("fieldType", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("fieldtype", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("type", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("name", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("fieldName", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("fieldname", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("format", StringComparison.OrdinalIgnoreCase))
+                continue;
             switch (key.ToLowerInvariant())
             {
                 case "instruction" or "instr":

@@ -110,6 +110,26 @@ public partial class ExcelHandler
                 }
             }
 
+            // CONSISTENCY(remove-sheet-refs): sparklines on other sheets
+            // carry <xne:f>SheetName!A1:A4</xne:f> data ranges that
+            // suffer the exact same "external links" warning if left
+            // dangling. Mirror the chart-ref guard above.
+            foreach (var otherWsPart in workbookPart.WorksheetParts)
+            {
+                if (sheetWsPartForCheck != null && ReferenceEquals(otherWsPart, sheetWsPartForCheck)) continue;
+                var wsRoot = otherWsPart.Worksheet;
+                if (wsRoot == null) continue;
+                foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Office.Excel.Formula>())
+                {
+                    if (f.Text == null) continue;
+                    if (f.Text.Contains(refToken, StringComparison.OrdinalIgnoreCase)
+                        || f.Text.Contains(quotedRefToken, StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException(
+                            $"Cannot remove sheet '{sheetName}': it is referenced by a sparkline in this workbook. " +
+                            $"Remove or repoint the sparkline first.");
+                }
+            }
+
             // R10-2: capture pivot cache definitions referenced by this
             // sheet's pivot table parts BEFORE deleting the worksheet part,
             // so we can prune any caches that become orphaned by the

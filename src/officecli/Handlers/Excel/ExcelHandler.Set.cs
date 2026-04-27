@@ -846,6 +846,55 @@ public partial class ExcelHandler
                             }
                         }
 
+                        // CONSISTENCY(sheet-rename-refs): three more places
+                        // carry sheet-qualified formula text in worksheet
+                        // XML and need the rename cascaded:
+                        //   - sparkline data range  (<xne:f>Sheet1!A1:A4</xne:f>)
+                        //   - data validation list  (<x:formula1>Sheet1!A1:A3</x:formula1>)
+                        //   - conditional formatting (<x:formula>Sheet1!$A$1</x:formula>)
+                        // Walk each worksheet's typed descendants so we
+                        // don't accidentally rewrite cell text that happens
+                        // to contain the literal substring "Sheet1!".
+                        foreach (var anyWsPart2 in workbookPart.WorksheetParts)
+                        {
+                            var wsRoot = anyWsPart2.Worksheet;
+                            if (wsRoot == null) continue;
+                            bool wsChanged = false;
+                            foreach (var f in wsRoot.Descendants<DocumentFormat.OpenXml.Office.Excel.Formula>())
+                            {
+                                if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
+                            foreach (var f in wsRoot.Descendants<Formula1>())
+                            {
+                                if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
+                            foreach (var f in wsRoot.Descendants<Formula2>())
+                            {
+                                if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
+                            foreach (var f in wsRoot.Descendants<Formula>())
+                            {
+                                if (f.Text != null && f.Text.Contains(oldRef, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    f.Text = f.Text.Replace(oldRef, newRef, StringComparison.OrdinalIgnoreCase);
+                                    wsChanged = true;
+                                }
+                            }
+                            if (wsChanged) wsRoot.Save();
+                        }
+
                         workbook.Save();
                     }
                     break;

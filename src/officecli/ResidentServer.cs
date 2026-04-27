@@ -822,7 +822,11 @@ public class ResidentServer : IDisposable
         {
             string? html = null;
             if (_handler is OfficeCli.Handlers.PowerPointHandler pptHandler)
-                html = pptHandler.ViewAsHtml(start, end);
+            {
+                // BUG-R36-B7: honor --page on pptx html with strict bounds.
+                var (pStart, pEnd) = ResolvePptHtmlPage(pageFilter, start, end, pptHandler);
+                html = pptHandler.ViewAsHtml(pStart, pEnd);
+            }
             else if (_handler is OfficeCli.Handlers.ExcelHandler excelHandler)
                 html = excelHandler.ViewAsHtml();
             else if (_handler is OfficeCli.Handlers.WordHandler wordHandler)
@@ -1435,6 +1439,37 @@ public class ResidentServer : IDisposable
             kick.Connect(500);
         }
         catch { }
+    }
+
+    /// <summary>
+    /// BUG-R36-B7 helper. Mirror of CommandBuilder.View.ParsePptHtmlPage —
+    /// validate --page against slide count and reject silent fallbacks.
+    /// </summary>
+    private static (int? start, int? end) ResolvePptHtmlPage(
+        string? pageFilter, int? start, int? end,
+        OfficeCli.Handlers.PowerPointHandler pptHandler)
+    {
+        if (string.IsNullOrEmpty(pageFilter)) return (start, end);
+        var slideCount = pptHandler.Query("slide").Count;
+        var firstTok = pageFilter.Split(',')[0].Trim();
+        if (firstTok.Contains('-'))
+        {
+            var parts = firstTok.Split('-', 2);
+            if (!int.TryParse(parts[0], out var ps) || !int.TryParse(parts[1], out var pe))
+                throw new ArgumentException($"Invalid --page value '{pageFilter}': expected N or M-N or comma list.");
+            if (ps <= 0 || pe <= 0)
+                throw new ArgumentException($"Invalid --page value '{pageFilter}': slide number must be >= 1.");
+            if (ps > slideCount)
+                throw new ArgumentException($"--page {ps} out of range (total slides: {slideCount}).");
+            return (ps, Math.Min(pe, slideCount));
+        }
+        if (!int.TryParse(firstTok, out var p))
+            throw new ArgumentException($"Invalid --page value '{pageFilter}': expected a positive slide number.");
+        if (p <= 0)
+            throw new ArgumentException($"Invalid --page value '{pageFilter}': slide number must be >= 1.");
+        if (p > slideCount)
+            throw new ArgumentException($"--page {p} out of range (total slides: {slideCount}).");
+        return (p, p);
     }
 }
 

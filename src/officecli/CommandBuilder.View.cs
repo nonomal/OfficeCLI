@@ -74,7 +74,14 @@ static partial class CommandBuilder
             {
                 string? html = null;
                 if (handler is OfficeCli.Handlers.PowerPointHandler pptHandler)
-                    html = pptHandler.ViewAsHtml(start, end);
+                {
+                    // BUG-R36-B7: --page on pptx html previously fell through to
+                    // start/end via the parser default (no value), so --page 99
+                    // silently rendered all slides. Honor --page with strict
+                    // range checking, matching SVG mode's CONSISTENCY(strict-page).
+                    var (pStart, pEnd) = ParsePptHtmlPage(pageFilter, start, end, pptHandler);
+                    html = pptHandler.ViewAsHtml(pStart, pEnd);
+                }
                 else if (handler is OfficeCli.Handlers.ExcelHandler excelHandler)
                     html = excelHandler.ViewAsHtml();
                 else if (handler is OfficeCli.Handlers.WordHandler wordHandler)
@@ -247,5 +254,39 @@ static partial class CommandBuilder
         }, json); });
 
         return viewCommand;
+    }
+
+    /// <summary>
+    /// BUG-R36-B7 helper. Resolve --page (and fallback --start/--end) into a
+    /// validated (startSlide, endSlide) pair for pptx html previews. Rejects
+    /// non-positive numbers and indices past the slide count instead of
+    /// silently rendering the whole deck.
+    /// </summary>
+    private static (int? start, int? end) ParsePptHtmlPage(
+        string? pageFilter, int? start, int? end,
+        OfficeCli.Handlers.PowerPointHandler pptHandler)
+    {
+        if (string.IsNullOrEmpty(pageFilter)) return (start, end);
+        var slideCount = pptHandler.Query("slide").Count;
+        var firstTok = pageFilter.Split(',')[0].Trim();
+        // Range form "M-N"
+        if (firstTok.Contains('-'))
+        {
+            var parts = firstTok.Split('-', 2);
+            if (!int.TryParse(parts[0], out var ps) || !int.TryParse(parts[1], out var pe))
+                throw new ArgumentException($"Invalid --page value '{pageFilter}': expected N or M-N or comma list.");
+            if (ps <= 0 || pe <= 0)
+                throw new ArgumentException($"Invalid --page value '{pageFilter}': slide number must be >= 1.");
+            if (ps > slideCount)
+                throw new ArgumentException($"--page {ps} out of range (total slides: {slideCount}).");
+            return (ps, Math.Min(pe, slideCount));
+        }
+        if (!int.TryParse(firstTok, out var p))
+            throw new ArgumentException($"Invalid --page value '{pageFilter}': expected a positive slide number.");
+        if (p <= 0)
+            throw new ArgumentException($"Invalid --page value '{pageFilter}': slide number must be >= 1.");
+        if (p > slideCount)
+            throw new ArgumentException($"--page {p} out of range (total slides: {slideCount}).");
+        return (p, p);
     }
 }

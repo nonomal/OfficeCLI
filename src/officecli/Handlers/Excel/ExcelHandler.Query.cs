@@ -1235,6 +1235,44 @@ public partial class ExcelHandler
             return results;
         }
 
+        // Handle row queries. Symmetric to col/column above: each <row r="N">
+        // surfaces as one DocumentNode pointing at /SheetName/row[N]. Without
+        // this branch, `query row` fell through to the generic cell loop and
+        // returned cell nodes (BUG-BT-R33-2).
+        if (elementName is "row")
+        {
+            foreach (var (sheetName, worksheetPart) in GetWorksheets())
+            {
+                if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var sheetData = GetSheet(worksheetPart).GetFirstChild<SheetData>();
+                if (sheetData == null) continue;
+
+                foreach (var row in sheetData.Elements<Row>())
+                {
+                    var rowIdx = row.RowIndex?.Value ?? 0u;
+                    if (rowIdx == 0) continue;
+                    var node = new DocumentNode
+                    {
+                        Path = $"/{sheetName}/row[{rowIdx}]",
+                        Type = "row",
+                        ChildCount = row.Elements<Cell>().Count(),
+                        Preview = rowIdx.ToString()
+                    };
+                    if (row.Height?.Value != null) node.Format["height"] = row.Height.Value;
+                    if (row.Hidden?.Value == true) node.Format["hidden"] = true;
+                    if (row.CustomHeight?.Value == true) node.Format["customHeight"] = true;
+                    if (row.OutlineLevel?.HasValue == true && row.OutlineLevel.Value > 0)
+                        node.Format["outlineLevel"] = (int)row.OutlineLevel.Value;
+                    if (row.Collapsed?.Value == true) node.Format["collapsed"] = true;
+                    if (MatchesFormatAttributes(node, parsed))
+                        results.Add(node);
+                }
+            }
+            return results;
+        }
+
         // Handle column queries. OOXML stores columns as <col min=".." max="..">,
         // which can span a range of column indices. We expand spans into one
         // DocumentNode per concrete column so `/SheetName/col[X]` paths align

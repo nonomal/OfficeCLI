@@ -336,6 +336,39 @@
       "examples": ["--prop animation=fade"],
       "readback": "n/a",
       "enforcement": "report"
+    },
+    "shadow": {
+      "type": "string",
+      "description": "outer shadow effect. Pass a color (e.g. '000000') or 'true' (defaults to black). Routed to text-level rPr for text-only shapes.",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop shadow=000000", "--prop shadow=true"],
+      "readback": "color hex string",
+      "enforcement": "report"
+    },
+    "glow": {
+      "type": "string",
+      "description": "glow effect. Pass a color (e.g. '4472C4') or 'true' (defaults to accent blue).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop glow=4472C4", "--prop glow=true"],
+      "readback": "color hex string",
+      "enforcement": "report"
+    },
+    "reflection": {
+      "type": "string",
+      "description": "reflection effect. Accepts 'true' to enable a default reflection.",
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop reflection=true"],
+      "readback": "n/a",
+      "enforcement": "report"
+    },
+    "softEdge": {
+      "type": "length",
+      "description": "soft-edge blur radius (pt).",
+      "aliases": ["softedge"],
+      "add": true, "set": true, "get": false,
+      "examples": ["--prop softEdge=4pt"],
+      "readback": "n/a",
+      "enforcement": "report"
     }
   }
 }

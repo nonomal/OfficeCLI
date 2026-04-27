@@ -252,6 +252,12 @@ public partial class WordHandler
             }
             else if (IsStructuralElement(element))
             {
+                // sectPr is a layout descriptor, not user-visible content —
+                // surfacing it in 'view text' adds noise without payload
+                // ([/body/sectPr] [sectPr]). Skip it; annotated/outline
+                // views still emit it via the same IsStructuralElement
+                // gate when those modes want layout context.
+                if (element.LocalName == "sectPr") continue;
                 path = $"/body/{element.LocalName}";
             }
             else
@@ -906,6 +912,9 @@ public partial class WordHandler
             }
             else if (IsStructuralElement(element))
             {
+                // CONSISTENCY(view-text-sectpr): same skip rationale as
+                // ViewAsText — sectPr is layout metadata, not content.
+                if (element.LocalName == "sectPr") continue;
                 path = $"/body/{element.LocalName}";
                 type = element.LocalName;
             }

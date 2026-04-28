@@ -409,7 +409,7 @@ public class ResidentServer : IDisposable
                 // confirming a save that didn't land on disk.
                 var response = _shutdownFileMissing
                     ? MakeResponse(1, "",
-                        $"file vanished during resident session — data may be lost: {_filePath}")
+                        $"save failed during shutdown — data may be lost: {_filePath}")
                     : MakeResponse(0, "Closing resident.", "");
                 // ShutdownAsync cancelled the ping token; write on a
                 // fresh CTS so the client still gets the ack.
@@ -1486,27 +1486,28 @@ public class ResidentServer : IDisposable
         //    disk and closes the file handle). The ping pipe is still
         //    live right now, so any TryResident caller will correctly
         //    conclude "resident still owns the file".
+        bool disposeFailed = false;
         try { _handler.Dispose(); }
         catch (Exception ex)
         {
+            disposeFailed = true;
             LogStderr($"Warning: handler dispose error: {ex.Message}");
         }
 
-        // BUG-BT-R26-2: detect file-deleted-mid-session. If the user (or an
-        // external process) unlinked the file while the resident held it
-        // open, OpenXML wrote into a now-orphaned inode and the on-disk
-        // path no longer points at our data. Loud-fail so the close
-        // command's exit code + stderr message reflect the loss instead
-        // of pretending the save succeeded.
-        try
+        // BUG-BT-R26-2 / BUG-R43: detect data loss. The original probe used
+        // File.Exists(_filePath) post-Dispose — but on macOS, renaming the
+        // file via Finder/mv preserves the inode, so OpenXML still wrote our
+        // data successfully (just under a different path). That triggered a
+        // false-positive "data may be lost" close-time error.
+        // Flag data loss only when Dispose itself failed (positive evidence
+        // the save did not land). A vanished path alone (rename or unlink
+        // post-save) is no longer treated as a loss — the bytes are durable
+        // either way; an external rename is the user's intent.
+        if (disposeFailed)
         {
-            if (!File.Exists(_filePath))
-            {
-                _shutdownFileMissing = true;
-                LogStderr($"ERROR: file vanished during resident session — data may be lost: {_filePath}");
-            }
+            _shutdownFileMissing = true;
+            LogStderr($"ERROR: save failed during shutdown — data may be lost: {_filePath}");
         }
-        catch { /* best-effort probe; don't mask the real shutdown */ }
 
         // 5. NOW cancel ping + idle. Clients observing the ping pipe from
         //    this moment on will see it dead and can safely open the file

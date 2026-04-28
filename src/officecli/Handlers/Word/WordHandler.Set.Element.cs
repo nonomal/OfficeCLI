@@ -484,7 +484,8 @@ public partial class WordHandler
                 case "href":
                 case "link":
                 {
-                    var mainPart3 = _doc.MainDocumentPart!;
+                    // BUG-FIX(B1): add rel to enclosing host part (header/footer/etc.)
+                    var hostPart3 = ResolveHostPart(run);
                     if (string.IsNullOrEmpty(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
                         // Remove hyperlink wrapper if present
@@ -501,7 +502,7 @@ public partial class WordHandler
                         var uri = Uri.TryCreate(value, UriKind.Absolute, out var absUri)
                             ? absUri
                             : new Uri(value, UriKind.Relative);
-                        var newRelId = mainPart3.AddHyperlinkRelationship(uri, isExternal: true).Id;
+                        var newRelId = hostPart3.AddHyperlinkRelationship(uri, isExternal: true).Id;
                         if (run.Parent is Hyperlink existingHl)
                         {
                             existingHl.Id = newRelId;
@@ -733,19 +734,21 @@ public partial class WordHandler
                 case "link":
                 case "href":
                 {
-                    var mainPartHl = _doc.MainDocumentPart!;
-                    // Delete old relationship to avoid storage bloat
+                    // BUG-FIX(B1): add rel to enclosing host part (header/footer/etc.)
+                    var hostPartHl = ResolveHostPart(hl);
+                    // Delete old relationship to avoid storage bloat. Old rel may
+                    // live on a different part (e.g. legacy doc-rooted rel).
                     var oldRelId = hl.Id?.Value;
                     if (oldRelId != null)
                     {
-                        var oldRel = mainPartHl.HyperlinkRelationships.FirstOrDefault(r => r.Id == oldRelId);
-                        if (oldRel != null)
-                            mainPartHl.DeleteReferenceRelationship(oldRel);
+                        var oldRel = ResolveHyperlinkRelationship(hl, oldRelId);
+                        if (oldRel?.Container != null)
+                            oldRel.Container.DeleteReferenceRelationship(oldRel);
                     }
                     var uri = Uri.TryCreate(value, UriKind.Absolute, out var absUri)
                         ? absUri
                         : new Uri(value, UriKind.Relative);
-                    var newRelId = mainPartHl.AddHyperlinkRelationship(uri, isExternal: true).Id;
+                    var newRelId = hostPartHl.AddHyperlinkRelationship(uri, isExternal: true).Id;
                     hl.Id = newRelId;
                     break;
                 }

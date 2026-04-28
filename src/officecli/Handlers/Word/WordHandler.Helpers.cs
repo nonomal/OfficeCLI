@@ -19,6 +19,70 @@ public partial class WordHandler
     // prevent catastrophic-backtracking DoS (e.g. "(a+)+b" against long inputs).
     private static readonly TimeSpan FindRegexMatchTimeout = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Resolve the OpenXmlPart that owns a given element. Returns the
+    /// HeaderPart/FooterPart/FootnotesPart/EndnotesPart/CommentsPart when the
+    /// element lives inside one of those parts, falling back to MainDocumentPart.
+    /// Used for part-local relationships like hyperlinks that must be added to
+    /// the host part's rels file (e.g. word/_rels/header1.xml.rels) rather than
+    /// the document rels.
+    /// </summary>
+    private OpenXmlPart ResolveHostPart(OpenXmlElement element)
+    {
+        var main = _doc.MainDocumentPart!;
+        // Walk to the part-root element (Header/Footer/Footnotes/Endnotes/Comments/Document)
+        var hdr = element.Ancestors<Header>().FirstOrDefault();
+        if (hdr != null)
+        {
+            var hp = main.HeaderParts.FirstOrDefault(p => ReferenceEquals(p.Header, hdr));
+            if (hp != null) return hp;
+        }
+        var ftr = element.Ancestors<Footer>().FirstOrDefault();
+        if (ftr != null)
+        {
+            var fp = main.FooterParts.FirstOrDefault(p => ReferenceEquals(p.Footer, ftr));
+            if (fp != null) return fp;
+        }
+        // Footnote/Endnote: parts live on MainDocumentPart.FootnotesPart / EndnotesPart
+        if (element.Ancestors<Footnote>().Any() && main.FootnotesPart != null)
+            return main.FootnotesPart;
+        if (element.Ancestors<Endnote>().Any() && main.EndnotesPart != null)
+            return main.EndnotesPart;
+        return main;
+    }
+
+    /// <summary>
+    /// Resolve a hyperlink relationship by id, searching the element's host
+    /// part first, then falling back to MainDocumentPart and other host parts.
+    /// </summary>
+    private HyperlinkRelationship? ResolveHyperlinkRelationship(OpenXmlElement element, string relId)
+    {
+        var host = ResolveHostPart(element);
+        var rel = host.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId);
+        if (rel != null) return rel;
+        // Fallback: scan MainDocumentPart and all header/footer parts (handles
+        // documents authored with rels in unexpected places).
+        var main = _doc.MainDocumentPart!;
+        if (!ReferenceEquals(host, main))
+        {
+            rel = main.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId);
+            if (rel != null) return rel;
+        }
+        foreach (var hp in main.HeaderParts)
+        {
+            if (ReferenceEquals(hp, host)) continue;
+            rel = hp.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId);
+            if (rel != null) return rel;
+        }
+        foreach (var fp in main.FooterParts)
+        {
+            if (ReferenceEquals(fp, host)) continue;
+            rel = fp.HyperlinkRelationships.FirstOrDefault(r => r.Id == relId);
+            if (rel != null) return rel;
+        }
+        return null;
+    }
+
     // ==================== Private Helpers ====================
 
     /// <summary>

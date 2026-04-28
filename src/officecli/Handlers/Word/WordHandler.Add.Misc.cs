@@ -327,10 +327,13 @@ public partial class WordHandler
         string? hlRelId = null;
         if (hasUrl)
         {
-            var mainDocPart = _doc.MainDocumentPart!;
+            // BUG-FIX(B1): hyperlinks inside header/footer/footnote/endnote
+            // must add the rel to the enclosing host part (e.g. header1.xml.rels),
+            // not document.xml.rels. Otherwise Word can't resolve the rId.
+            var hostPart = ResolveHostPart(hlPara);
             if (!Uri.TryCreate(hlUrl, UriKind.Absolute, out var hlUri))
                 throw new ArgumentException($"Invalid hyperlink URL '{hlUrl}'. Expected a valid absolute URI (e.g. 'https://example.com').");
-            hlRelId = mainDocPart.AddHyperlinkRelationship(hlUri, isExternal: true).Id;
+            hlRelId = hostPart.AddHyperlinkRelationship(hlUri, isExternal: true).Id;
         }
 
         var hlRProps = new RunProperties();

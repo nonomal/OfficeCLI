@@ -290,6 +290,15 @@ public partial class WordHandler
             {
                 int lvlIdx = int.Parse(absMatch.Groups[2].Value);
                 var lvl = abs.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == lvlIdx);
+                // R8-2: follow numStyleLink when the abstractNum carries no own
+                // levels — its definition lives on the linked paragraph style's
+                // numbering, which points at a different abstractNum.
+                if (lvl == null && abs.GetFirstChild<NumberingStyleLink>()?.Val?.Value is { } nslId)
+                {
+                    var resolved = ResolveAbstractNumViaStyleLink(nslId);
+                    if (resolved != null)
+                        lvl = resolved.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == lvlIdx);
+                }
                 if (lvl == null)
                     return new DocumentNode { Path = path, Type = "error", Text = $"level[{lvlIdx}] not found in abstractNum {aid}" };
                 var lNode = new DocumentNode { Path = path, Type = "level" };
@@ -2756,5 +2765,27 @@ public partial class WordHandler
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Walk an abstractNum's <c>numStyleLink</c> to the resolved abstractNum
+    /// that actually carries the level definitions. The link points at a
+    /// paragraph style id; that style's <c>numPr/numId</c> picks a
+    /// NumberingInstance, whose <c>abstractNumId</c> is the real owner of
+    /// the levels. Returns null when any link in the chain is missing.
+    /// R8-2.
+    /// </summary>
+    private AbstractNum? ResolveAbstractNumViaStyleLink(string styleId)
+    {
+        var nb = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+        if (nb == null) return null;
+        var styles = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles;
+        var style = styles?.Elements<Style>().FirstOrDefault(s => s.StyleId?.Value == styleId);
+        var styleNumId = style?.StyleParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value;
+        if (styleNumId == null) return null;
+        var inst = nb.Elements<NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == styleNumId);
+        var targetAbsId = inst?.AbstractNumId?.Val?.Value;
+        if (targetAbsId == null) return null;
+        return nb.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == targetAbsId);
     }
 }

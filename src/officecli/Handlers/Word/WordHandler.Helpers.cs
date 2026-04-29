@@ -99,6 +99,22 @@ public partial class WordHandler
         ParseHelpers.IsTruthy(value);
 
     /// <summary>
+    /// Read a w:val OnOff attribute defensively. Returns null when the
+    /// attribute is absent OR when the stored text is not a valid OnOff
+    /// token (e.g. <c>&lt;w:bidi w:val="garbage"/&gt;</c>). Default-on
+    /// elements (BiDi, Bold, etc.) are conventionally treated as true
+    /// when Val is null. R8-fuzz-5: prevents OnOffValue.Parse from
+    /// crashing Get/HtmlPreview on a document that loaded fine but
+    /// disk-stored a malformed attribute.
+    /// </summary>
+    internal static bool? TryReadOnOff(DocumentFormat.OpenXml.OnOffValue? val)
+    {
+        if (val == null) return true; // default-on: <w:bidi/> with no Val
+        try { return val.Value; }
+        catch (FormatException) { return null; }
+    }
+
+    /// <summary>
     /// Normalize a user-provided underline token to a valid Word OOXML UnderlineValues enum string.
     /// Accepts common aliases (wavy → wave, dashdot → dotDash, etc.) plus truthy/none.
     /// </summary>

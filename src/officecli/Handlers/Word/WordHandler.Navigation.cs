@@ -1085,8 +1085,15 @@ public partial class WordHandler
                     // <w:bidi/> default Val is true; explicit Val=false toggles
                     // it off. Emit canonical 'direction' so writers can clone
                     // the paragraph with the same key they used to set it.
-                    var bidiVal = pProps.BiDi.Val;
-                    node.Format["direction"] = (bidiVal == null || bidiVal.Value) ? "rtl" : "ltr";
+                    // R8-fuzz-5: pProps.BiDi.Val.Value invokes OnOffValue.Parse
+                    // and throws FormatException on garbage attribute text
+                    // (e.g. <w:bidi w:val="garbage"/>). Skip the key on
+                    // unparseable input — Get must never crash on a doc that
+                    // disk-loaded fine, even when validate would flag the same
+                    // attribute as schema-invalid.
+                    bool? bidiOn = TryReadOnOff(pProps.BiDi.Val);
+                    if (bidiOn.HasValue)
+                        node.Format["direction"] = bidiOn.Value ? "rtl" : "ltr";
                 }
                 if (pProps.ContextualSpacing != null)
                 {

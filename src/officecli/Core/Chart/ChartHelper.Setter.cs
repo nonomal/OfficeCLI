@@ -1968,6 +1968,41 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // CONSISTENCY(rtl-cascade): chart-level reading direction.
+                // Stamps rtl="1" on chartSpace c:txPr → a:lstStyle a:lvl1pPr
+                // so default chart text bodies (axis labels, data labels)
+                // render right-to-left for Arabic / Hebrew. Mirrors the
+                // direction surface on shapes/textboxes.
+                case "direction" or "rtl":
+                {
+                    bool rtlOn = value.ToLowerInvariant() switch
+                    {
+                        "rtl" or "righttoleft" or "right-to-left" or "true" or "1" => true,
+                        "ltr" or "lefttoright" or "left-to-right" or "false" or "0" or "" => false,
+                        _ => throw new ArgumentException(
+                            $"Invalid direction value: '{value}'. Valid values: rtl, ltr.")
+                    };
+                    var txPr = chartSpace!.GetFirstChild<C.TextProperties>();
+                    if (txPr == null)
+                    {
+                        txPr = new C.TextProperties(
+                            new Drawing.BodyProperties(),
+                            new Drawing.ListStyle(),
+                            new Drawing.Paragraph(new Drawing.EndParagraphRunProperties { Language = "en-US" }));
+                        chartSpace.AppendChild(txPr);
+                    }
+                    var lstStyle = txPr.GetFirstChild<Drawing.ListStyle>()
+                        ?? txPr.AppendChild(new Drawing.ListStyle());
+                    var lvl1 = lstStyle.GetFirstChild<Drawing.Level1ParagraphProperties>();
+                    if (lvl1 == null)
+                    {
+                        lvl1 = new Drawing.Level1ParagraphProperties();
+                        lstStyle.AppendChild(lvl1);
+                    }
+                    lvl1.RightToLeft = rtlOn;
+                    break;
+                }
+
                 default:
                     // dataLabel{N}.{x|y|w|h} — individual data label layout (1-based point index, first series)
                     if (TryParseDataLabelLayoutKey(key, out var dlPointIdx, out var dlProp))

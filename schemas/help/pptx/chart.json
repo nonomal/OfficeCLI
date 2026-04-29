@@ -113,6 +113,7 @@
     "legend":         { "type": "string", "add": true, "set": true, "get": true },
     "legendfont":     { "type": "string", "aliases": ["legend.font"], "add": true, "set": true, "get": false },
     "legendoverlay":  { "type": "bool", "aliases": ["legend.overlay"], "add": true, "set": true, "get": false },
+    "direction":      { "type": "string", "aliases": ["rtl"], "add": false, "set": true, "get": false, "examples": ["--prop direction=rtl"], "readback": "rtl|ltr", "description": "Chart-level reading direction. rtl stamps a:rtl=\"1\" on chartSpace c:txPr lvl1pPr so default text bodies (axis labels, data labels) render right-to-left for Arabic / Hebrew." },
 
     "datalabels":     { "type": "string", "aliases": ["labels"], "add": true, "set": true, "get": false },
     "labelpos":       { "type": "string", "aliases": ["labelposition"], "add": true, "set": true, "get": false },

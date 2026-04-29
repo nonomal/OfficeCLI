@@ -181,6 +181,31 @@ public partial class WordHandler
         ParseHelpers.SanitizeColorForOoxml(value).Rgb;
 
     /// <summary>
+    /// Sanitize a font name input for the per-script font slots. Currently
+    /// just normalizes empty/null. Extended in follow-up commits.
+    /// </summary>
+    private static string SanitizeFontTokenInput(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        return value!;
+    }
+
+    /// <summary>
+    /// True when a w:rFonts element carries no value-bearing attribute and
+    /// can be safely removed from its parent rPr / rPrChange.
+    /// </summary>
+    private static bool RunFontsIsEmpty(RunFonts rf) =>
+        string.IsNullOrEmpty(rf.Ascii?.Value)
+        && string.IsNullOrEmpty(rf.HighAnsi?.Value)
+        && string.IsNullOrEmpty(rf.EastAsia?.Value)
+        && string.IsNullOrEmpty(rf.ComplexScript?.Value)
+        && string.IsNullOrEmpty(rf.AsciiTheme?.InnerText)
+        && string.IsNullOrEmpty(rf.HighAnsiTheme?.InnerText)
+        && string.IsNullOrEmpty(rf.EastAsiaTheme?.InnerText)
+        && string.IsNullOrEmpty(rf.ComplexScriptTheme?.InnerText)
+        && string.IsNullOrEmpty(rf.Hint?.InnerText);
+
+    /// <summary>
     /// Parse a highlight color name, throwing ArgumentException with valid options on failure.
     /// </summary>
     private static readonly HashSet<string> ValidHighlightColors = new(StringComparer.OrdinalIgnoreCase)
@@ -993,24 +1018,71 @@ public partial class WordHandler
                 // Bare 'font' targets ASCII+HighAnsi+EastAsia. Use 'font.latin',
                 // 'font.ea', 'font.cs' for per-script control (e.g. Japanese,
                 // Korean, Arabic — the CS slot owns Arabic/Hebrew typefaces).
-                var existingRf = props.GetFirstChild<RunFonts>();
-                if (existingRf != null) { existingRf.Ascii = value; existingRf.HighAnsi = value; existingRf.EastAsia = value; }
-                else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = value, HighAnsi = value, EastAsia = value });
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var existingRf = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (existingRf != null)
+                        {
+                            existingRf.Ascii = null; existingRf.HighAnsi = null; existingRf.EastAsia = null;
+                            if (RunFontsIsEmpty(existingRf)) existingRf.Remove();
+                        }
+                    }
+                    else if (existingRf != null) { existingRf.Ascii = fv; existingRf.HighAnsi = fv; existingRf.EastAsia = fv; }
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv, HighAnsi = fv, EastAsia = fv });
+                }
                 return true;
             case "font.latin":
-                var rfLatin = props.GetFirstChild<RunFonts>();
-                if (rfLatin != null) { rfLatin.Ascii = value; rfLatin.HighAnsi = value; }
-                else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = value, HighAnsi = value });
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfLatin = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfLatin != null)
+                        {
+                            rfLatin.Ascii = null; rfLatin.HighAnsi = null;
+                            if (RunFontsIsEmpty(rfLatin)) rfLatin.Remove();
+                        }
+                    }
+                    else if (rfLatin != null) { rfLatin.Ascii = fv; rfLatin.HighAnsi = fv; }
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { Ascii = fv, HighAnsi = fv });
+                }
                 return true;
             case "font.ea" or "font.eastasia" or "font.eastasian":
-                var rfEa = props.GetFirstChild<RunFonts>();
-                if (rfEa != null) { rfEa.EastAsia = value; }
-                else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsia = value });
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfEa = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        if (rfEa != null)
+                        {
+                            rfEa.EastAsia = null;
+                            if (RunFontsIsEmpty(rfEa)) rfEa.Remove();
+                        }
+                    }
+                    else if (rfEa != null) { rfEa.EastAsia = fv; }
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { EastAsia = fv });
+                }
                 return true;
             case "font.cs" or "font.complexscript" or "font.complex":
-                var rfCs = props.GetFirstChild<RunFonts>();
-                if (rfCs != null) { rfCs.ComplexScript = value; }
-                else InsertRunPropInSchemaOrder(props, new RunFonts { ComplexScript = value });
+                {
+                    var fv = SanitizeFontTokenInput(value);
+                    var rfCs = props.GetFirstChild<RunFonts>();
+                    if (string.IsNullOrEmpty(fv))
+                    {
+                        // CONSISTENCY(empty-clears): empty value clears the
+                        // attribute, mirroring direction=. Stub <w:rFonts cs=""/>
+                        // is invalid OOXML and confuses Get readback.
+                        if (rfCs != null)
+                        {
+                            rfCs.ComplexScript = null;
+                            if (RunFontsIsEmpty(rfCs)) rfCs.Remove();
+                        }
+                    }
+                    else if (rfCs != null) { rfCs.ComplexScript = fv; }
+                    else InsertRunPropInSchemaOrder(props, new RunFonts { ComplexScript = fv });
+                }
                 return true;
             case "bold":
             case "font.bold":

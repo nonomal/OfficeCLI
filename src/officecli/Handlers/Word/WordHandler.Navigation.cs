@@ -1236,10 +1236,10 @@ public partial class WordHandler
                         if (!node.Format.ContainsKey("font.latin"))
                             node.Format["font.latin"] = hAnsi;
                     }
-                    if (pRunFonts.EastAsia?.Value != null && !node.Format.ContainsKey("font.ea"))
-                        node.Format["font.ea"] = pRunFonts.EastAsia.Value;
-                    if (pRunFonts.ComplexScript?.Value != null && !node.Format.ContainsKey("font.cs"))
-                        node.Format["font.cs"] = pRunFonts.ComplexScript.Value;
+                    if (!string.IsNullOrEmpty(pRunFonts.EastAsia?.Value) && !node.Format.ContainsKey("font.ea"))
+                        node.Format["font.ea"] = pRunFonts.EastAsia!.Value!;
+                    if (!string.IsNullOrEmpty(pRunFonts.ComplexScript?.Value) && !node.Format.ContainsKey("font.cs"))
+                        node.Format["font.cs"] = pRunFonts.ComplexScript!.Value!;
                 }
 
                 var fsVal = rp?.FontSize?.Val?.Value ?? markRp?.GetFirstChild<FontSize>()?.Val?.Value;
@@ -1313,8 +1313,8 @@ public partial class WordHandler
                 // `font.latin` (canonical per schema docx/run.json) when they
                 // match — the round-trip case for `font.latin=` Set. Differing
                 // slots fall back to legacy `font.ascii` / `font.hAnsi` keys.
-                var ascii = rFonts.Ascii?.Value;
-                var hAnsi = rFonts.HighAnsi?.Value;
+                var ascii = string.IsNullOrEmpty(rFonts.Ascii?.Value) ? null : rFonts.Ascii!.Value;
+                var hAnsi = string.IsNullOrEmpty(rFonts.HighAnsi?.Value) ? null : rFonts.HighAnsi!.Value;
                 if (ascii != null && hAnsi != null && ascii == hAnsi)
                     node.Format["font.latin"] = ascii;
                 else
@@ -1327,8 +1327,8 @@ public partial class WordHandler
                     else if (ascii != null) node.Format["font.latin"] = ascii;
                     else if (hAnsi != null) node.Format["font.latin"] = hAnsi;
                 }
-                if (rFonts.EastAsia?.Value != null) node.Format["font.ea"] = rFonts.EastAsia.Value;
-                if (rFonts.ComplexScript?.Value != null) node.Format["font.cs"] = rFonts.ComplexScript.Value;
+                if (!string.IsNullOrEmpty(rFonts.EastAsia?.Value)) node.Format["font.ea"] = rFonts.EastAsia!.Value!;
+                if (!string.IsNullOrEmpty(rFonts.ComplexScript?.Value)) node.Format["font.cs"] = rFonts.ComplexScript!.Value!;
             }
             // <w:lang/> three slots: val (latin) / eastAsia / bidi (cs).
             // CONSISTENCY(canonical-keys): mirror font.latin/font.ea/font.cs vocabulary.

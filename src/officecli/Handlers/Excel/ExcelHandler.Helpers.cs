@@ -1342,6 +1342,20 @@ public partial class ExcelHandler
         }
         if (string.IsNullOrEmpty(displayText) && formula == null) node.Format["empty"] = true;
 
+        // R8-3: phonetic guide readback. Surface the first <rPh>'s text so
+        // CJK / Japanese authors writing furigana through `add cell --prop
+        // phonetic=…` can verify the value round-trips.
+        if (cell.DataType?.Value == CellValues.SharedString
+            && int.TryParse(cell.CellValue?.Text, out var phSstIdx))
+        {
+            var phSst = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
+            var phSsi = phSst?.SharedStringTable?
+                .Elements<SharedStringItem>().ElementAtOrDefault(phSstIdx);
+            var firstRPh = phSsi?.Elements<PhoneticRun>().FirstOrDefault();
+            if (firstRPh?.Text?.Text is { Length: > 0 } phText)
+                node.Format["phonetic"] = phText;
+        }
+
         // Hyperlink readback
         if (part != null)
         {

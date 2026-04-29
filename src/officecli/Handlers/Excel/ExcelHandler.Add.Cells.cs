@@ -439,6 +439,21 @@ public partial class ExcelHandler
             cell.CellFormula = null;
         }
 
+        // R8-3: phonetic guides (Japanese furigana, CJK ruby). The cell's
+        // base text is promoted into the shared-string table with an <rPh>
+        // child carrying the phonetic reading; the worksheet's default
+        // <phoneticPr> is created if absent. Stamps a single phonetic run
+        // spanning the entire base text (sb=0 / eb=len) — sufficient for
+        // the canonical use case (one reading per cell). Multi-segment
+        // phonetic runs are out of scope for the minimum viable surface;
+        // callers that need them can submit raw OOXML through extension
+        // attrs in a follow-up.
+        if (properties.TryGetValue("phonetic", out var phoneticText)
+            && !string.IsNullOrEmpty(phoneticText))
+        {
+            ApplyPhoneticToCell(cell, cellWorksheet, phoneticText, properties);
+        }
+
         // Array formula support during Add
         if (properties.TryGetValue("arrayformula", out var arrFormula))
         {
@@ -1023,4 +1038,112 @@ public partial class ExcelHandler
         cell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
     }
 
+    /// <summary>
+    /// Stamp a phonetic guide (furigana / CJK ruby) on a cell. Promotes the
+    /// cell's base text into the shared-string table (existing SST entry
+    /// is reused when one with the same base text is found) and appends an
+    /// <c>&lt;rPh&gt;</c> run carrying the phonetic reading. Also seeds
+    /// the worksheet's <c>&lt;phoneticPr&gt;</c> default block — without
+    /// it, Excel suppresses the rendered guide regardless of what the
+    /// SSI contains. R8-3.
+    /// </summary>
+    private void ApplyPhoneticToCell(Cell cell, WorksheetPart wsPart,
+        string phoneticText, Dictionary<string, string> properties)
+    {
+        // 1) Resolve the cell's base text.
+        string baseText;
+        if (cell.DataType?.Value == CellValues.SharedString
+            && int.TryParse(cell.CellValue?.Text, out var existingIdx))
+        {
+            var existingSstPart = _doc.WorkbookPart?.GetPartsOfType<SharedStringTablePart>().FirstOrDefault();
+            var existingSsi = existingSstPart?.SharedStringTable?
+                .Elements<SharedStringItem>().ElementAtOrDefault(existingIdx);
+            baseText = existingSsi?.Text?.Text
+                ?? string.Concat(existingSsi?.Elements<Run>().Select(r => r.Text?.Text ?? "")
+                    ?? Enumerable.Empty<string>());
+        }
+        else
+        {
+            baseText = cell.CellValue?.Text ?? "";
+        }
+        if (string.IsNullOrEmpty(baseText))
+            throw new ArgumentException(
+                "phonetic requires a non-empty cell value (the base text the phonetic guide annotates).");
+
+        // 2) Build a fresh SSI: <si><t>baseText</t><rPh sb=0 eb=len><t>phonetic</t></rPh></si>
+        var wbPart = _doc.WorkbookPart
+            ?? throw new InvalidOperationException("Workbook not found");
+        var sstPart = wbPart.GetPartsOfType<SharedStringTablePart>().FirstOrDefault()
+            ?? wbPart.AddNewPart<SharedStringTablePart>();
+        var sst = sstPart.SharedStringTable ??= new SharedStringTable();
+
+        var ssi = new SharedStringItem(
+            new Text(baseText) { Space = SpaceProcessingModeValues.Preserve });
+        var rPh = new PhoneticRun(
+                new Text(phoneticText) { Space = SpaceProcessingModeValues.Preserve })
+        {
+            BaseTextStartIndex = 0u,
+            EndingBaseIndex = (uint)baseText.Length,
+        };
+        ssi.AppendChild(rPh);
+
+        sst.AppendChild(ssi);
+        sst.Count = (uint)sst.Elements<SharedStringItem>().Count();
+        sst.UniqueCount = sst.Count;
+
+        var newIdx = sst.Elements<SharedStringItem>().Count() - 1;
+        cell.CellValue = new CellValue(newIdx.ToString());
+        cell.DataType = new EnumValue<CellValues>(CellValues.SharedString);
+
+        // 3) Ensure the worksheet has a <phoneticPr> block — Excel only
+        // renders <rPh> when the worksheet supplies a default font / type.
+        var ws = GetSheet(wsPart);
+        if (ws.GetFirstChild<PhoneticProperties>() == null)
+        {
+            var phoneticPr = new PhoneticProperties
+            {
+                FontId = 1u,
+                Type = PhoneticValues.FullWidthKatakana,
+                Alignment = PhoneticAlignmentValues.Distributed,
+            };
+            // Schema position: phoneticPr lives between mergeCells and
+            // conditionalFormatting (CT_Worksheet — see ordering comment in
+            // ExcelHandler.Set.cs:2004). Use the schema-aware sheet child
+            // inserter rather than a plain AppendChild.
+            InsertPhoneticPropertiesInOrder(ws, phoneticPr);
+        }
+    }
+
+    /// <summary>
+    /// Insert a <c>&lt;phoneticPr&gt;</c> at its CT_Worksheet schema slot.
+    /// Predecessors (mergeCells / customSheetViews / dataConsolidate /
+    /// sortState / autoFilter / scenarios / protectedRanges /
+    /// sheetProtection / sheetCalcPr / sheetData) come before; successors
+    /// (conditionalFormatting / dataValidations / hyperlinks / printOptions /
+    /// pageMargins / pageSetup / drawing / etc.) come after.
+    /// </summary>
+    private static void InsertPhoneticPropertiesInOrder(Worksheet ws, PhoneticProperties pr)
+    {
+        OpenXmlElement? after = null;
+        Type[] preds =
+        [
+            typeof(SheetData),
+            typeof(SheetCalculationProperties),
+            typeof(SheetProtection),
+            typeof(ProtectedRanges),
+            typeof(Scenarios),
+            typeof(AutoFilter),
+            typeof(SortState),
+            typeof(DataConsolidate),
+            typeof(CustomSheetViews),
+            typeof(MergeCells),
+        ];
+        foreach (var t in preds)
+        {
+            var hit = ws.ChildElements.FirstOrDefault(c => c.GetType() == t);
+            if (hit != null) after = hit; // last match wins — schema-latest predecessor
+        }
+        if (after != null) ws.InsertAfter(pr, after);
+        else ws.PrependChild(pr);
+    }
 }

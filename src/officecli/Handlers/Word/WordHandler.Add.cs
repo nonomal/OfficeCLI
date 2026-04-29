@@ -17,6 +17,14 @@ public partial class WordHandler
 {
     public string Add(string parentPath, string type, InsertPosition? position, Dictionary<string, string> properties)
     {
+        // The signature is non-nullable, but the body uses `type?.Equals(...)`
+        // below to short-circuit header/footer routing — that null-conditional
+        // makes the C# flow analyzer treat `type` as nullable from that point
+        // on, surfacing CS8604 at the ValidateParentChild call. Validate up
+        // front so the analyzer (and any caller violating the signature) gets
+        // a clean failure instead of a NRE down the line.
+        ArgumentNullException.ThrowIfNull(type);
+
         // CONSISTENCY(prop-key-case): property keys are case-insensitive
         // ("SRC"/"src"/"Src" all resolve the same). Normalize once at the
         // dispatch entry so every AddXxx helper can rely on TryGetValue("src").
@@ -69,8 +77,8 @@ public partial class WordHandler
             parent = fnBody!;
             parentPath = canonicalPath!;
         }
-        else if ((type?.Equals("header", StringComparison.OrdinalIgnoreCase) ?? false)
-                 || (type?.Equals("footer", StringComparison.OrdinalIgnoreCase) ?? false))
+        else if (type.Equals("header", StringComparison.OrdinalIgnoreCase)
+                 || type.Equals("footer", StringComparison.OrdinalIgnoreCase))
         {
             // /section[N] for header/footer add: NavigateToElement only
             // resolves break-paragraph carriers (n <= sectParas.Count); the

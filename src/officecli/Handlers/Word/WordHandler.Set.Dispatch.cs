@@ -610,7 +610,7 @@ public partial class WordHandler
         // — multi-prop set on /section[N] must be all-or-nothing. Snapshot the whole
         // Document tree on entry; any throw inside the loop restores it before re-throw
         // so partial writes are not visible to the next read in the resident process.
-        var atomicSnapshot = _doc.MainDocumentPart!.Document.OuterXml;
+        var atomicSnapshot = _doc.MainDocumentPart!.Document!.OuterXml;
         try
         {
         foreach (var (key, value) in properties)

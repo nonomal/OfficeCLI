@@ -54,13 +54,14 @@
       "readback": "top-left cell ref of frozen pane (e.g. A2); absent when no freeze",
       "enforcement": "report"
     },
-    "rightToLeft": {
-      "type": "bool",
-      "description": "RTL sheet layout (Arabic / Hebrew) — column A renders on the right, column scroll direction inverts. Maps to <sheetView rightToLeft=...>.",
-      "aliases": ["rtl", "direction", "sheet.direction"],
+    "direction": {
+      "type": "enum",
+      "values": ["rtl", "ltr"],
+      "description": "RTL sheet layout (Arabic / Hebrew) — column A renders on the right, column scroll direction inverts. Maps to <sheetView rightToLeft=...>. Canonical key matches Word/PPT.",
+      "aliases": ["rtl", "rightToLeft", "righttoleft", "sheet.direction"],
       "add": false, "set": true, "get": true,
-      "examples": ["--prop rightToLeft=true", "--prop direction=rtl"],
-      "readback": "true when set; absent when default (false)",
+      "examples": ["--prop direction=rtl", "--prop rightToLeft=true"],
+      "readback": "rtl when set; absent when default (ltr)",
       "enforcement": "report"
     }
   },

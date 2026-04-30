@@ -122,6 +122,10 @@ public partial class WordHandler
             if (sectPr.GetFirstChild<BiDi>() != null)
                 node.Format["direction"] = "rtl";
 
+            // <w:rtlGutter/> places the binding gutter on the right side.
+            if (sectPr.GetFirstChild<GutterOnRight>() != null)
+                node.Format["rtlGutter"] = true;
+
             var lnNum = sectPr.GetFirstChild<LineNumberType>();
             if (lnNum != null)
             {

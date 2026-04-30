@@ -817,6 +817,10 @@ public partial class WordHandler
         if (sectPr.GetFirstChild<BiDi>() != null)
             secNode.Format["direction"] = "rtl";
 
+        // <w:rtlGutter/> places the binding gutter on the right side.
+        if (sectPr.GetFirstChild<GutterOnRight>() != null)
+            secNode.Format["rtlGutter"] = true;
+
         // Header / footer references — expose so users can debug inheritance
         var mainPart = _doc.MainDocumentPart;
         if (mainPart != null)

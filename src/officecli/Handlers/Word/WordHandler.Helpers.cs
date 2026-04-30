@@ -2454,8 +2454,7 @@ public partial class WordHandler
         TitlePage => 15,
         TextDirection => 16,
         BiDi => 17,
-        // (rtlGutter would be rank 18 here, but the SDK type isn't surfaced;
-        // unknown elements fall through to the default and append at the end.)
+        GutterOnRight => 18,
         DocGrid => 19,
         PrinterSettingsReference => 20,
         SectionPropertiesChange => 21,

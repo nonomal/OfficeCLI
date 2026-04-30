@@ -117,6 +117,16 @@ public partial class WordHandler
                 if (ParseDirectionRtl(value)) InsertSectPrChildInOrder(sectPr, new BiDi());
                 return true;
             }
+            case "rtlgutter":
+            {
+                // <w:rtlGutter/> places the gutter (binding margin) on the right
+                // side, used in conjunction with RTL page layout (Arabic/Hebrew).
+                var sectPr = EnsureSectionProperties();
+                sectPr.RemoveAllChildren<GutterOnRight>();
+                if (IsTruthy(value))
+                    InsertSectPrChildInOrder(sectPr, new GutterOnRight());
+                return true;
+            }
             case "pagestart" or "pagenumberstart" or "pagenumstart":
             {
                 var sectPr = EnsureSectionProperties();

@@ -486,7 +486,7 @@ public partial class PowerPointHandler
                       // run-property attributes must reach SetRunOrShapeProperties
                       // so the long-tail rPr-attribute branch routes them to the
                       // first run instead of dropping them on the <p:sp> element.
-                      "lang", "altLang", "altlang", "spc", "kern", "cap",
+                      "lang", "lang.latin", "altLang", "altlang", "spc", "kern", "cap",
                       "kumimoji", "normalizeH", "normalizeh", "noProof", "noproof",
                       "dirty", "smtClean", "smtclean", "smtId", "smtid", "err" };
                 var effectProps = properties

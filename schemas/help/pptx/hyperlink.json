@@ -11,33 +11,37 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/slide[N]/shape[M]/hyperlink", "/slide[N]/shape[M]/p[K]/r[L]/hyperlink"]
+    "positional": [
+      "/slide[N]/shape[M]/hyperlink",
+      "/slide[N]/shape[M]/p[K]/r[L]/hyperlink"
+    ]
   },
   "note": "Aliases: link. Attached to a shape (shape-wide link) or to a run (inline link). Exactly one of 'url' or 'slide' is required.",
+  "extends": "_shared/hyperlink",
   "properties": {
-    "url": {
-      "type": "string",
-      "aliases": ["href"],
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop url=https://example.com"],
-      "readback": "n/a — hyperlink targets are surfaced on the parent shape/run as `link`",
-      "enforcement": "report"
-    },
     "slide": {
       "type": "int",
       "description": "internal target slide index (1-based).",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop slide=3"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop slide=3"
+      ],
       "readback": "target slide index",
       "enforcement": "report"
     },
     "tooltip": {
       "type": "string",
-      "description": "hover tooltip.",
-      "add": true, "set": true, "get": false,
-      "examples": ["--prop tooltip=\"Next section\""],
-      "readback": "n/a — tooltip is not surfaced back today",
-      "enforcement": "report"
+      "description": "hover tooltip. Readback only here; set via cell `tooltip=` property.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "tooltip text",
+      "enforcement": "report",
+      "examples": [
+        "--prop tooltip=\"Next section\""
+      ]
     }
   }
 }

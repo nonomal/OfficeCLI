@@ -11,67 +11,83 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/slide[N]/comment[M]"]
+    "positional": [
+      "/slide[N]/comment[M]"
+    ]
   },
   "note": "Comments live in CommentsPart with an author list. Anchored at x/y EMU on the slide.",
+  "extends": "_shared/comment",
   "properties": {
-    "text": {
-      "type": "string",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop text=\"Reword this bullet\""],
-      "readback": "comment text",
-      "enforcement": "report"
-    },
-    "author": {
-      "type": "string",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop author=\"Alice\""],
-      "readback": "author name",
-      "enforcement": "report"
-    },
     "initials": {
       "type": "string",
       "description": "author initials. Defaults to derived from author name when omitted.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop initials=AT"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop initials=AT",
+        "--prop initials=AW"
+      ],
       "readback": "initials",
       "enforcement": "report"
     },
     "date": {
       "type": "string",
-      "description": "ISO 8601 timestamp. Defaults to UtcNow.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop date=2025-01-15T10:30:00Z"],
-      "readback": "ISO timestamp",
+      "description": "ISO-8601 timestamp. Defaults to DateTime.UtcNow.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop date=2025-01-15T10:30:00Z",
+        "--prop date=2025-01-15T10:00:00Z"
+      ],
+      "readback": "Date attribute",
       "enforcement": "report"
     },
     "index": {
       "type": "int",
       "description": "Per-author monotonic index, assigned by the engine.",
-      "add": false, "set": false, "get": true,
+      "add": false,
+      "set": false,
+      "get": true,
       "readback": "comment index",
       "enforcement": "report"
     },
     "x": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop x=2cm"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop x=2cm"
+      ],
       "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "y": {
       "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop y=2cm"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop y=2cm"
+      ],
       "readback": "length in cm (e.g. \"2cm\")",
       "enforcement": "report"
     },
     "direction": {
       "type": "string",
-      "aliases": ["dir", "rtl"],
+      "aliases": [
+        "dir",
+        "rtl"
+      ],
       "description": "Reading direction for the comment text. rtl prepends U+200F (RIGHT-TO-LEFT MARK) so Arabic / Hebrew comments render with proper bidi context. p:cm has no native rtl attribute, so this is the standard pure-text convention.",
-      "add": true, "set": false, "get": false,
-      "examples": ["--prop direction=rtl"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop direction=rtl"
+      ],
       "readback": "rtl|ltr",
       "enforcement": "report"
     }

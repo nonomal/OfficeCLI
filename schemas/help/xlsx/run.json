@@ -11,53 +11,36 @@
     "remove": true
   },
   "paths": {
-    "positional": ["/SheetName/CellRef/r[N]"]
+    "positional": [
+      "/SheetName/CellRef/r[N]"
+    ]
   },
   "note": "Rich-text run inside an inline-string cell. Adds an rPh/r element with font properties on the run.",
+  "extends": "_shared/run",
   "properties": {
-    "text": {
-      "type": "string",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop text=\"bold word\""],
-      "readback": "run text",
-      "enforcement": "report"
-    },
-    "font": {
-      "type": "string",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop font=Calibri"],
-      "readback": "font name",
-      "enforcement": "report"
-    },
-    "size": {
-      "type": "length",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop size=11"],
-      "readback": "unit-qualified pt",
-      "enforcement": "report"
-    },
-    "bold": {
+    "subscript": {
       "type": "bool",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop bold=true"],
-      "readback": "true/false",
-      "enforcement": "report"
+      "description": "vertical alignment = subscript. Mutually exclusive with superscript.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop subscript=true"
+      ],
+      "readback": "true | false",
+      "enforcement": "strict"
     },
-    "italic": {
+    "superscript": {
       "type": "bool",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop italic=true"],
-      "readback": "true/false",
-      "enforcement": "report"
-    },
-    "color": {
-      "type": "color",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop color=#FF0000"],
-      "readback": "#-prefixed uppercase hex",
-      "enforcement": "report"
-    },
-    "subscript":   { "type":"bool", "add":false, "set":false, "get":true, "description":"run vertical-alignment subscript flag (CT_RPrElt @vertAlign=subscript).", "readback":"true|false", "enforcement":"report" },
-    "superscript": { "type":"bool", "add":false, "set":false, "get":true, "description":"run vertical-alignment superscript flag (CT_RPrElt @vertAlign=superscript).", "readback":"true|false", "enforcement":"report" }
+      "description": "vertical alignment = superscript. Mutually exclusive with subscript.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop superscript=true"
+      ],
+      "readback": "true | false",
+      "enforcement": "strict"
+    }
   }
 }

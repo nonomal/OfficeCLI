@@ -16,26 +16,11 @@
     ]
   },
   "note": "Aliases: link. Exactly one of 'url' (external) or 'anchor' (internal bookmark ref) is required. Colors default to theme Hyperlink (or 0563C1 fallback) with single underline.",
+  "extends": "_shared/hyperlink",
   "properties": {
-    "url": {
-      "type": "string",
-      "description": "absolute external URL. Parsed as Uri.TryCreate(UriKind.Absolute).",
-      "aliases": [
-        "href",
-        "link"
-      ],
-      "add": true,
-      "set": true,
-      "get": true,
-      "examples": [
-        "--prop url=https://example.com"
-      ],
-      "readback": "target URL for external links",
-      "enforcement": "report"
-    },
     "anchor": {
       "type": "string",
-      "description": "bookmark name for internal links. Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper).",
+      "description": "bookmark name for internal links. Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper).",
       "aliases": [
         "bookmark"
       ],
@@ -62,7 +47,7 @@
     },
     "color": {
       "type": "color",
-      "description": "override link color (default: theme Hyperlink or 0563C1). Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper).",
+      "description": "override link color (default: theme Hyperlink or 0563C1). Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper).",
       "add": true,
       "set": false,
       "get": true,
@@ -82,7 +67,7 @@
       ],
       "readback": "font name",
       "enforcement": "report",
-      "description": " Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
+      "description": " Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
     },
     "size": {
       "type": "length",
@@ -94,7 +79,7 @@
       ],
       "readback": "unit-qualified pt",
       "enforcement": "report",
-      "description": " Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
+      "description": " Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
     },
     "bold": {
       "type": "bool",
@@ -106,7 +91,7 @@
       ],
       "readback": "true/false",
       "enforcement": "report",
-      "description": " Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
+      "description": " Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
     },
     "italic": {
       "type": "bool",
@@ -118,7 +103,7 @@
       ],
       "readback": "true/false",
       "enforcement": "report",
-      "description": " Set after Add not supported \u2014 formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
+      "description": " Set after Add not supported — formatting lives on inner runs (Set the run, not the hyperlink wrapper)."
     }
   }
 }

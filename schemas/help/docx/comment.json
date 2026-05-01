@@ -3,7 +3,10 @@
   "format": "docx",
   "element": "comment",
   "parent": "paragraph|run",
-  "addParent": ["/body/p[N]", "/body/p[N]/r[M]"],
+  "addParent": [
+    "/body/p[N]",
+    "/body/p[N]/r[M]"
+  ],
   "operations": {
     "add": true,
     "set": true,
@@ -12,53 +15,57 @@
     "remove": true
   },
   "paths": {
-    "stable":     ["/comments/comment[@commentId=N]"],
-    "positional": ["/comments/comment[N]"]
+    "stable": [
+      "/comments/comment[@commentId=N]"
+    ],
+    "positional": [
+      "/comments/comment[N]"
+    ]
   },
   "note": "Comments live in WordprocessingCommentsPart. Anchor: CommentRangeStart/End surround the target run or paragraph; CommentReference marks the inline anchor.",
+  "extends": "_shared/comment",
   "properties": {
-    "text": {
-      "type": "string",
-      "description": "comment body. Required.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop text=\"Review this\""],
-      "readback": "concatenated text",
-      "enforcement": "report"
-    },
-    "author": {
-      "type": "string",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop author=\"Alice\""],
-      "readback": "Author attribute",
-      "enforcement": "report"
-    },
     "initials": {
       "type": "string",
-      "description": "author initials. Defaults to first char of author.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop initials=AW"],
-      "readback": "Initials attribute",
+      "description": "author initials. Defaults to derived from author name when omitted.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop initials=AT",
+        "--prop initials=AW"
+      ],
+      "readback": "initials",
       "enforcement": "report"
     },
     "date": {
       "type": "string",
       "description": "ISO-8601 timestamp. Defaults to DateTime.UtcNow.",
-      "add": true, "set": true, "get": true,
-      "examples": ["--prop date=2025-01-15T10:00:00Z"],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop date=2025-01-15T10:30:00Z",
+        "--prop date=2025-01-15T10:00:00Z"
+      ],
       "readback": "Date attribute",
       "enforcement": "report"
     },
     "id": {
       "type": "number",
       "description": "OOXML comment id (w:comment/@w:id). Assigned by the writer; surfaces only on Get/Query.",
-      "add": false, "set": false, "get": true,
+      "add": false,
+      "set": false,
+      "get": true,
       "readback": "integer comment ID",
       "enforcement": "report"
     },
     "anchoredTo": {
       "type": "string",
       "description": "path of the paragraph or run the comment is anchored to (resolved from CommentRangeStart).",
-      "add": false, "set": false, "get": true,
+      "add": false,
+      "set": false,
+      "get": true,
       "readback": "path of anchored paragraph/run",
       "enforcement": "report"
     }

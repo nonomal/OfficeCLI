@@ -361,8 +361,9 @@
       "type": "length",
       "description": "hanging indent (pairs with left indent). Routed through SpacingConverter.",
       "aliases": ["hangingindent", "hanging"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop hangingIndent=0.5cm"],
+      "readback": "unit-qualified length (e.g. \"28.35pt\")",
       "enforcement": "report"
     },
     "keepNext": {

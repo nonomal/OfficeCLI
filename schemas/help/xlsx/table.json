@@ -113,9 +113,9 @@
     "columns": {
       "type": "string",
       "description": "comma-separated column header names overriding A1, B1, ... defaults.",
-      "add": true, "set": false, "get": false,
+      "add": true, "set": false, "get": true,
       "examples": ["--prop columns=Name,Qty,Price"],
-      "readback": "applied at Add time",
+      "readback": "comma-separated column names as stored (e.g. \"Name,Qty,Price\")",
       "enforcement": "report"
     },
     "totalsRowFunction": {

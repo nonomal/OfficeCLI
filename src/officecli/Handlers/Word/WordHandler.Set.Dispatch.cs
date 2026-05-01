@@ -335,6 +335,13 @@ public partial class WordHandler
 
     private List<string> SetTocPath(System.Text.RegularExpressions.Match tocMatch, Dictionary<string, string> properties)
     {
+        // CONSISTENCY(case-insensitive-props): mirror SetSectionPath/SetStylePath
+        // which lowercase keys before TryGetValue. Without this, CLI callers
+        // passing `--prop pageNumbers=true` are silently ignored (Set returns
+        // Updated but the field code is never rewritten).
+        properties = properties.ToDictionary(
+            kv => kv.Key.ToLowerInvariant(),
+            kv => kv.Value);
         var unsupported = new List<string>();
         var tocIdx = tocMatch.Groups[1].Success ? int.Parse(tocMatch.Groups[1].Value) : 1;
         var tocParas = FindTocParagraphs();

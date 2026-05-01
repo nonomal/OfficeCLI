@@ -5,7 +5,7 @@
   "properties": {
     "indent": {
       "type": "length",
-      "description": "left indentation. Routed through SpacingConverter — accepts twips int or unit-qualified (2cm/0.5in/24pt). Aliases: leftindent/leftIndent. Get canonical key is 'leftIndent'.",
+      "description": "left indentation. Routed through SpacingConverter — accepts twips int or unit-qualified (2cm/0.5in/24pt). Aliases: leftindent/leftIndent/indentleft.",
       "aliases": [
         "leftindent",
         "leftIndent"
@@ -16,7 +16,7 @@
       "examples": [
         "--prop indent=2cm"
       ],
-      "readback": "under canonical key 'leftIndent'",
+      "readback": "length string (cm or twips, format-dependent)",
       "enforcement": "report"
     },
     "lineSpacing": {

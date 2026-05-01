@@ -306,9 +306,17 @@
     },
     "dataField{N}": {
       "type": "string",
-      "description": "per-data-field readback (1-indexed: dataField1, dataField2, …) packed as 'name:aggFunc:fieldIdx'.",
+      "description": "per-data-field readback (1-indexed: dataField1, dataField2, …) packed as 'name:aggFunc:fieldIdx'. Get also returns `dataField{N}.showAs` when ShowDataAs != normal.",
       "add": false, "set": false, "get": true,
       "readback": "packed as 'name:aggFunc:fieldIdx'; name reflects Excel's stored DataField/@name which includes auto-prefixes (e.g. 'Sum of Revenue:sum:1')",
+      "enforcement": "report"
+    },
+    "dataField{N}.showAs": {
+      "type": "enum",
+      "values": ["percent_of_total", "percent_of_row", "percent_of_col", "running_total", "difference", "percent_diff", "index"],
+      "description": "data field showAs token (read-only). Values are canonicalized from OOXML ShowDataAs.",
+      "add": false, "set": false, "get": true,
+      "readback": "showAs canonical token",
       "enforcement": "report"
     }
   }

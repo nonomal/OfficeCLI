@@ -45,6 +45,7 @@
     },
     "title": {
       "type": "string",
+      "description": "chart title text. Get also returns sub-keys title.font, title.size, title.color, title.bold when set; these are get-only readback fields surfaced from chart title runs.",
       "add": true,
       "set": true,
       "get": true,
@@ -52,6 +53,10 @@
       "readback": "plain text of chart title",
       "enforcement": "strict"
     },
+    "title.font":  { "type": "string",    "add": false, "set": false, "get": true, "description": "title font name (readback only)", "readback": "font name", "enforcement": "report" },
+    "title.size":  { "type": "font-size", "add": false, "set": false, "get": true, "description": "title font size (readback only, e.g. 14pt)", "readback": "Npt", "enforcement": "report" },
+    "title.color": { "type": "color",     "add": false, "set": false, "get": true, "description": "title font color (readback only, #RRGGBB)", "readback": "#RRGGBB", "enforcement": "report" },
+    "title.bold":  { "type": "bool",      "add": false, "set": false, "get": true, "description": "title bold flag (readback only)", "readback": "true | false", "enforcement": "report" },
     "x":      { "type": "length", "add": true, "set": true, "get": true, "examples": ["--prop x=2cm"], "readback": "length in cm", "enforcement": "strict" },
     "y":      { "type": "length", "add": true, "set": true, "get": true, "examples": ["--prop y=3cm"], "readback": "length in cm", "enforcement": "strict" },
     "width":  { "type": "length", "add": true, "set": true, "get": true, "examples": ["--prop width=18cm"], "readback": "length in cm", "enforcement": "strict" },
@@ -148,8 +153,15 @@
     "crossbetween":   { "type": "string", "add": true, "set": true, "get": false, "description": "value-axis crossing style. Values: between (default), midcat|midpoint.", "examples": ["--prop crossbetween=midcat"] },
     "dispunits":      { "type": "string", "aliases": ["displayunits"], "add": true, "set": true, "get": false, "description": "value-axis display units divisor. Values: none, hundreds, thousands, tenThousands|10000, hundredThousands|100000, millions, tenMillions|10000000, hundredMillions|100000000, billions, trillions.", "examples": ["--prop dispunits=thousands"] },
 
-    "gridlines":      { "type": "bool", "aliases": ["majorgridlines"], "add": true, "set": true, "get": false, "description": "value-axis major gridlines. true|false toggle, or line spec 'color', 'color:width', 'color:width:dash' to style; 'none' removes.", "examples": ["--prop gridlines=true", "--prop gridlines=E0E0E0:0.3", "--prop gridlines=none"] },
-    "minorgridlines": { "type": "bool", "add": true, "set": true, "get": false, "description": "value-axis minor gridlines; same format as gridlines.", "examples": ["--prop minorgridlines=true", "--prop minorgridlines=F0F0F0:0.25"] },
+    "gridlines":      { "type": "bool", "aliases": ["majorgridlines"], "add": true, "set": true, "get": true, "description": "value-axis major gridlines. true|false toggle, or line spec 'color', 'color:width', 'color:width:dash' to style; 'none' removes.", "examples": ["--prop gridlines=true", "--prop gridlines=E0E0E0:0.3", "--prop gridlines=none"], "readback": "true | false" },
+    "minorgridlines": { "type": "bool", "add": true, "set": true, "get": true, "description": "value-axis minor gridlines; same format as gridlines.", "examples": ["--prop minorgridlines=true", "--prop minorgridlines=F0F0F0:0.25"], "readback": "true | false" },
+    "majorTickMark": { "type": "string", "add": false, "set": true, "get": true, "description": "major tick mark style (out / in / cross / none).", "examples": ["--prop majorTickMark=out"], "readback": "tick mark token", "enforcement": "report" },
+    "minorTickMark": { "type": "string", "add": false, "set": true, "get": true, "description": "minor tick mark style (out / in / cross / none).", "examples": ["--prop minorTickMark=none"], "readback": "tick mark token", "enforcement": "report" },
+    "tickLabelPos":  { "type": "string", "add": false, "set": true, "get": true, "description": "tick label position (high / low / nextTo / none).", "examples": ["--prop tickLabelPos=nextTo"], "readback": "tick label position token", "enforcement": "report" },
+    "crossBetween":  { "type": "string", "add": false, "set": true, "get": true, "description": "category axis cross-between behavior (between / midCat).", "examples": ["--prop crossBetween=between"], "readback": "crossBetween token", "enforcement": "report" },
+    "dispBlanksAs":  { "type": "enum", "values": ["gap", "zero", "span"], "add": false, "set": true, "get": true, "description": "how empty cells render (gap leaves a hole, zero plots as 0, span connects across).", "examples": ["--prop dispBlanksAs=gap"], "readback": "dispBlanksAs token", "enforcement": "report" },
+    "varyColors":    { "type": "bool", "add": false, "set": true, "get": true, "description": "vary colors by data point (single-series charts).", "examples": ["--prop varyColors=true"], "readback": "true | false", "enforcement": "report" },
+    "showMarker":    { "type": "bool", "add": false, "set": true, "get": true, "description": "show markers on line/scatter series at chart level.", "examples": ["--prop showMarker=true"], "readback": "true | false", "enforcement": "report" },
 
     "plotareafill":   { "type": "string", "aliases": ["plotfill"], "add": true, "set": true, "get": false, "description": "plot-area background fill. Solid color, gradient 'c1-c2[:angle]', or 'none'.", "examples": ["--prop plotareafill=FAFAFA", "--prop plotfill=none"] },
     "chartareafill":  { "type": "string", "aliases": ["chartfill"], "add": true, "set": true, "get": false, "description": "chart-area background fill. Solid color, gradient, or 'none'.", "examples": ["--prop chartareafill=FFFFFF"] },

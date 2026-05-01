@@ -368,9 +368,9 @@
     "pattern": {
       "type": "string",
       "description": "pattern fill: 'preset' or 'preset:fg' or 'preset:fg:bg' (defaults: fg=000000, bg=FFFFFF).",
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop pattern=\"diagBrick:FF0000:FFFFFF\""],
-      "readback": "n/a",
+      "readback": "preset:fg_color[:bg_color] e.g. diagBrick:#FF0000:#FFFFFF",
       "enforcement": "report"
     },
     "image": {

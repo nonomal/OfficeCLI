@@ -73,6 +73,24 @@
       "examples": ["--prop markerSize=8"],
       "readback": "integer",
       "enforcement": "report"
+    },
+    "lineWidth": {
+      "type": "number",
+      "set": true, "get": true,
+      "description": "series line width in points (e.g. 1.5).",
+      "examples": ["--prop lineWidth=1.5"],
+      "readback": "numeric width in points",
+      "enforcement": "report"
+    },
+    "lineDash": {
+      "type": "enum",
+      "values": ["solid", "sysDash", "sysDot", "sysDashDot", "lgDash", "lgDashDot", "lgDashDotDot", "dash", "dashDot", "dot", "longDash"],
+      "set": true, "get": true,
+      "aliases": ["dash"],
+      "description": "series line dash style. Set accepts user-friendly aliases (dash/dot/dashDot/longDash); Get returns OOXML token (sysDash/sysDot/sysDashDot/lgDash). 'solid' is the only round-trip-stable value.",
+      "examples": ["--prop lineDash=dash", "--prop lineDash=solid"],
+      "readback": "OOXML preset dash token",
+      "enforcement": "report"
     }
   }
 }

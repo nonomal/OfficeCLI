@@ -1543,7 +1543,11 @@ public partial class PowerPointHandler
             : "onClick";
 
         var dur = 500;
-        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var dd)) dur = dd;
+        if (int.TryParse(animEffect?.CommonBehavior?.CommonTimeNode?.Duration, out var d)) dur = d;
+        else if (int.TryParse(effectCTn.Descendants<AnimateScale>().FirstOrDefault()?.CommonBehavior?.CommonTimeNode?.Duration, out var d2)) dur = d2;
+        else if (int.TryParse(effectCTn.Descendants<AnimateRotation>().FirstOrDefault()?.CommonBehavior?.CommonTimeNode?.Duration, out var d3)) dur = d3;
+        else if (int.TryParse(effectCTn.Descendants<Animate>().FirstOrDefault()?.CommonBehavior?.CommonTimeNode?.Duration, out var d4)) dur = d4;
+        else if (int.TryParse(effectCTn.Duration, out var d5)) dur = d5;
         animNode.Format["duration"] = dur;
 
         if (effectCTn.Acceleration?.HasValue == true && effectCTn.Acceleration.Value > 0)

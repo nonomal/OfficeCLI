@@ -24,6 +24,7 @@ public partial class PowerPointHandler
         path = NormalizePptxPathSegmentCasing(path);
         path = NormalizeCellPath(path);
         path = ResolveIdPath(path);
+        path = ResolveLastPredicates(path);
 
         // BUG-R36-B11: /slide[N]/comment[M] removal.
         var cmtRemoveMatch = Regex.Match(path, @"^/slide\[(\d+)\]/comment\[(\d+)\]$");
@@ -341,7 +342,12 @@ public partial class PowerPointHandler
     {
         var index = position?.Index;
         sourcePath = ResolveIdPath(sourcePath);
-        if (targetParentPath != null) targetParentPath = ResolveIdPath(targetParentPath);
+        sourcePath = ResolveLastPredicates(sourcePath);
+        if (targetParentPath != null)
+        {
+            targetParentPath = ResolveIdPath(targetParentPath);
+            targetParentPath = ResolveLastPredicates(targetParentPath);
+        }
 
         // Infer --to from --after/--before full path if not specified
         var anchorFullPath = position?.After ?? position?.Before;
@@ -541,6 +547,8 @@ public partial class PowerPointHandler
     {
         path1 = ResolveIdPath(path1);
         path2 = ResolveIdPath(path2);
+        path1 = ResolveLastPredicates(path1);
+        path2 = ResolveLastPredicates(path2);
         var presentationPart = _doc.PresentationPart
             ?? throw new InvalidOperationException("Presentation not found");
         var slideParts = GetSlideParts().ToList();
@@ -631,6 +639,8 @@ public partial class PowerPointHandler
         var index = position?.Index;
         sourcePath = ResolveIdPath(sourcePath);
         targetParentPath = ResolveIdPath(targetParentPath);
+        sourcePath = ResolveLastPredicates(sourcePath);
+        targetParentPath = ResolveLastPredicates(targetParentPath);
         var slideParts = GetSlideParts().ToList();
 
         // Whole-slide clone: --from /slide[N] to / (or null == "duplicate in

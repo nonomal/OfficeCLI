@@ -22,6 +22,7 @@ public partial class PowerPointHandler
         path = NormalizePptxPathSegmentCasing(path);
         path = NormalizeCellPath(path);
         path = ResolveIdPath(path);
+        path = ResolveLastPredicates(path);
         if (path == "/")
         {
             var node = new DocumentNode { Path = "/", Type = "presentation" };

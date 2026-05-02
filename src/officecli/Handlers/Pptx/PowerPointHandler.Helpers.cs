@@ -200,6 +200,152 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Resolve [last()] predicates to numeric indices by walking the path
+    /// left-to-right and counting siblings of that element type at the
+    /// resolved prefix. Mirrors XPath last() semantics so all downstream
+    /// regex-based dispatch only ever sees numeric indices.
+    /// CONSISTENCY(path-stability): handles slide root + shape-tree types
+    /// (shape/picture/table/chart/connector/group/placeholder) + table tr/tc.
+    /// Unrecognized parent contexts pass through unchanged so the existing
+    /// "Invalid path index 'last()'" error still fires for unsupported cases.
+    /// </summary>
+    private string ResolveLastPredicates(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !path.Contains("[last()]", StringComparison.OrdinalIgnoreCase))
+            return path;
+
+        var segments = path.TrimStart('/').Split('/');
+        var rebuilt = new System.Text.StringBuilder();
+        for (int i = 0; i < segments.Length; i++)
+        {
+            var seg = segments[i];
+            var bracket = seg.IndexOf('[');
+            if (bracket > 0 && seg.EndsWith("]", StringComparison.Ordinal))
+            {
+                var name = seg[..bracket];
+                var idx = seg[(bracket + 1)..^1];
+                if (idx.Equals("last()", StringComparison.OrdinalIgnoreCase))
+                {
+                    var prefix = rebuilt.ToString(); // already-resolved prefix, "" or "/slide[3]/..."
+                    var count = CountLastSiblings(prefix, name.ToLowerInvariant());
+                    if (count <= 0)
+                        throw new ArgumentException($"Cannot resolve [last()] in segment '{seg}': no '{name}' siblings found at '{(prefix.Length == 0 ? "/" : prefix)}'.");
+                    seg = $"{name}[{count}]";
+                }
+            }
+            rebuilt.Append('/').Append(seg);
+        }
+        return rebuilt.ToString();
+    }
+
+    /// <summary>
+    /// Count siblings of <paramref name="elementType"/> at the resolved
+    /// <paramref name="prefix"/>. Prefix is empty (root) or a fully numeric
+    /// path. Returns 0 when no count rule applies.
+    /// </summary>
+    private int CountLastSiblings(string prefix, string elementType)
+    {
+        // Root scope: /slide, /slidemaster, /slidelayout
+        if (prefix.Length == 0)
+        {
+            return elementType switch
+            {
+                "slide" => GetSlideParts().Count(),
+                "slidemaster" => _doc.PresentationPart?.SlideMasterParts?.Count() ?? 0,
+                _ => 0,
+            };
+        }
+
+        // Slide-scoped: /slide[N]
+        var slideMatch = System.Text.RegularExpressions.Regex.Match(prefix, @"^/slide\[(\d+)\](.*)$");
+        if (slideMatch.Success)
+        {
+            var slideIdx = int.Parse(slideMatch.Groups[1].Value);
+            var slideParts = GetSlideParts().ToList();
+            if (slideIdx < 1 || slideIdx > slideParts.Count) return 0;
+            var slidePart = slideParts[slideIdx - 1];
+            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+            if (shapeTree == null) return 0;
+
+            var rest = slideMatch.Groups[2].Value;
+            // Direct slide children (no further nesting in prefix)
+            if (string.IsNullOrEmpty(rest))
+                return CountInShapeContainer(shapeTree, elementType);
+
+            // /slide[N]/group[M]/...[last()]
+            OpenXmlElement scope = shapeTree;
+            var groupMatches = System.Text.RegularExpressions.Regex.Matches(rest, @"/group\[(\d+)\]");
+            int consumed = 0;
+            foreach (System.Text.RegularExpressions.Match gm in groupMatches)
+            {
+                if (gm.Index != consumed) break; // non-contiguous; bail
+                var gIdx = int.Parse(gm.Groups[1].Value);
+                var groups = scope.Elements<GroupShape>().ToList();
+                if (gIdx < 1 || gIdx > groups.Count) return 0;
+                scope = groups[gIdx - 1];
+                consumed = gm.Index + gm.Length;
+            }
+            var tail = rest[consumed..];
+            if (string.IsNullOrEmpty(tail))
+                return CountInShapeContainer(scope, elementType);
+
+            // /slide[N]/.../table[M]/{tr|tc}[last()]
+            var tblMatch = System.Text.RegularExpressions.Regex.Match(tail, @"^/table\[(\d+)\](.*)$");
+            if (tblMatch.Success)
+            {
+                var tblIdx = int.Parse(tblMatch.Groups[1].Value);
+                var tables = scope.Elements<DocumentFormat.OpenXml.Presentation.GraphicFrame>()
+                    .Where(gf => gf.Descendants<Drawing.Table>().Any())
+                    .ToList();
+                if (tblIdx < 1 || tblIdx > tables.Count) return 0;
+                var table = tables[tblIdx - 1].Descendants<Drawing.Table>().FirstOrDefault();
+                if (table == null) return 0;
+                var tableTail = tblMatch.Groups[2].Value;
+                if (string.IsNullOrEmpty(tableTail))
+                {
+                    return elementType switch
+                    {
+                        "tr" or "row" => table.Elements<Drawing.TableRow>().Count(),
+                        _ => 0,
+                    };
+                }
+                // /tr[K]
+                var trMatch = System.Text.RegularExpressions.Regex.Match(tableTail, @"^/tr\[(\d+)\]$");
+                if (trMatch.Success && (elementType == "tc" || elementType == "cell"))
+                {
+                    var trIdx = int.Parse(trMatch.Groups[1].Value);
+                    var rows = table.Elements<Drawing.TableRow>().ToList();
+                    if (trIdx < 1 || trIdx > rows.Count) return 0;
+                    return rows[trIdx - 1].Elements<Drawing.TableCell>().Count();
+                }
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// Count direct children of <paramref name="container"/> matching the
+    /// PPTX element-type vocabulary used by paths (shape, picture, table,
+    /// chart, connector, group, placeholder, textbox, title).
+    /// </summary>
+    private static int CountInShapeContainer(OpenXmlElement container, string elementType)
+    {
+        return elementType switch
+        {
+            "shape" or "textbox" or "title" or "equation" => container.Elements<Shape>().Count(),
+            "picture" or "pic" or "image" => container.Elements<Picture>().Count(),
+            "table" => container.Elements<GraphicFrame>().Count(gf => gf.Descendants<Drawing.Table>().Any()),
+            "chart" => container.Elements<GraphicFrame>().Count(gf =>
+                gf.Descendants<DocumentFormat.OpenXml.Drawing.Charts.ChartReference>().Any() || IsExtendedChartFrame(gf)),
+            "connector" or "connection" => container.Elements<ConnectionShape>().Count(),
+            "group" => container.Elements<GroupShape>().Count(),
+            "placeholder" or "ph" => container.Elements<Shape>()
+                .Count(s => s.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties?.PlaceholderShape != null),
+            _ => 0,
+        };
+    }
+
+    /// <summary>
     /// Find the 1-based positional index of an element within its type group by @id= or @name=.
     /// </summary>
     private static int FindElementByAttr(ShapeTree shapeTree, string elementType, string attrName, string attrValue)

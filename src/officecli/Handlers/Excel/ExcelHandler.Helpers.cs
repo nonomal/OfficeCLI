@@ -1092,9 +1092,13 @@ public partial class ExcelHandler
     private static readonly System.Text.RegularExpressions.Regex SheetIndexPattern =
         new(@"^sheet\[(\d+)\]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    private static readonly System.Text.RegularExpressions.Regex SheetLastPattern =
+        new(@"^sheet\[last\(\)\]$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
     /// <summary>
     /// Resolve a sheet name that may be a 1-based index reference like "sheet[1]"
-    /// to the actual sheet name. Returns the original name if not an index pattern.
+    /// or the XPath-style "sheet[last()]" predicate to the actual sheet name.
+    /// Returns the original name if not an index pattern.
     /// </summary>
     private string ResolveSheetName(string sheetName)
     {
@@ -1104,6 +1108,14 @@ public partial class ExcelHandler
             var sheets = GetWorksheets();
             if (idx <= sheets.Count)
                 return sheets[idx - 1].Name;
+        }
+        // CONSISTENCY(path-stability): align with Word's p[last()] support
+        // (commit 5b03d7a7) so sheet[last()] resolves to the last worksheet.
+        if (SheetLastPattern.IsMatch(sheetName))
+        {
+            var sheets = GetWorksheets();
+            if (sheets.Count > 0)
+                return sheets[^1].Name;
         }
         return sheetName;
     }

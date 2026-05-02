@@ -139,6 +139,15 @@ public partial class ExcelHandler
         var worksheet = FindWorksheet(sheetNameFromPath);
         if (worksheet == null)
             throw SheetNotFoundException(sheetNameFromPath);
+        // CONSISTENCY(path-stability): if the path used sheet[N] / sheet[last()],
+        // rebuild the canonical path with the resolved sheet name so the returned
+        // node.Path reflects the actual sheet (matches Word's last() echo behavior).
+        var resolvedSheetName = ResolveSheetName(sheetNameFromPath);
+        if (!resolvedSheetName.Equals(sheetNameFromPath, StringComparison.Ordinal))
+        {
+            sheetNameFromPath = resolvedSheetName;
+            path = segments.Length == 1 ? $"/{resolvedSheetName}" : $"/{resolvedSheetName}/{segments[1]}";
+        }
 
         var data = GetSheet(worksheet).GetFirstChild<SheetData>();
         if (data == null)

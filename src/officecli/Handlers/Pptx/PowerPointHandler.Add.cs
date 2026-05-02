@@ -28,6 +28,7 @@ public partial class PowerPointHandler
         parentPath = NormalizePptxPathSegmentCasing(parentPath);
         parentPath = NormalizeCellPath(parentPath);
         parentPath = ResolveIdPath(parentPath);
+        parentPath = ResolveLastPredicates(parentPath);
 
         // Resolve --after/--before to index (handles find: prefix)
         var index = ResolveAnchorPosition(parentPath, position);

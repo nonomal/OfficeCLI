@@ -564,12 +564,11 @@ public static class McpServer
             }
             case "load_skill":
             {
-                // Return the embedded SKILL.md content for the named skill. Pure read
-                // — no install side-effect. CLI counterpart `officecli skill <name>`
-                // *also* installs to all detected agents, but in MCP context the
-                // caller IS an agent and writing to its peers' skill dirs would be
-                // an unrequested side-effect. Agents that want disk-resident skills
-                // run `officecli skills install` themselves.
+                // Return the embedded SKILL.md content for the named skill. Pure
+                // read — no install side-effect. Identical semantics to the CLI
+                // `officecli load_skill <name>` command (both share LoadSkillContent).
+                // Agents that want disk-resident skills run `officecli skills install`
+                // themselves.
                 var skill = Arg("name");
                 if (string.IsNullOrEmpty(skill))
                     throw new ArgumentException($"name= required. Available: {OfficeCli.Core.SkillInstaller.KnownSkillsList()}");

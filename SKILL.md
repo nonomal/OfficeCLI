@@ -366,9 +366,9 @@ officecli add-part <file> <parent>                   # create new document part 
 
 Load a specialized skill on demand:
 
-    officecli skill <name>
+    officecli load_skill <name>
 
-That single command ensures the skill is installed (idempotent) and prints its full SKILL.md to stdout — read the output and follow its rules. No need to know on-disk paths.
+Prints the skill's full SKILL.md to stdout — read the output and follow its rules. Pure read, no disk write; if you also want the skill installed for later sessions, run `officecli skills install <name>` separately.
 
 Skills are organized as **base layer + scene layer**: scene-layer skills inherit every rule from their base — pick the most specific one that fits the user's ask; if none fits, fall back to the base.
 
@@ -396,7 +396,7 @@ Skills are organized as **base layer + scene layer**: scene-layer skills inherit
 | `financial-model` | Financial models, scenarios, projections | scene (inherits excel) |
 | `data-dashboard` | CSV/tabular data → KPI / analytics / executive dashboards with charts and sparklines | scene (inherits excel) |
 
-Example: a fundraising deck task → `officecli skill pitch-deck` → use the printed rules.
+Example: a fundraising deck task → `officecli load_skill pitch-deck` → use the printed rules.
 
 ---
 

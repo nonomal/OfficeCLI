@@ -130,16 +130,15 @@ internal static class SkillInstaller
         if (key == "install")
             return InstallBaseToAll();
 
-        // Check if it's a known skill name → install that skill to all detected agents
-        if (SkillMap.ContainsKey(key))
-            return InstallSkillToAll(key);
-
         // Check if second arg after "install" was passed via Program.cs
         // "all" → base SKILL.md to all detected agents
         if (key == "all")
             return InstallBaseToAll();
 
-        // Otherwise treat as agent target name (legacy: officecli skills claude)
+        // Otherwise treat as agent target name (legacy: officecli skills claude).
+        // The previous `officecli skills <skill>` shorthand for "install that
+        // skill to all agents" was removed — use the explicit `skills install
+        // <name>` form, or `load_skill <name>` if you only want the content.
         return InstallBaseToAgent(key);
     }
 
@@ -152,17 +151,15 @@ internal static class SkillInstaller
         return InstallSkillToAll(skillName);
     }
 
-    /// <summary>True if <paramref name="key"/> is a known skill alias (in <see cref="SkillMap"/>).</summary>
-    public static bool IsKnownSkill(string key) => SkillMap.ContainsKey(key);
-
     /// <summary>All known skill aliases, sorted, comma-joined for error messages.</summary>
     public static string KnownSkillsList() => string.Join(", ", SkillMap.Keys.OrderBy(k => k));
 
     /// <summary>
-    /// Read-only counterpart of <see cref="LoadSkill"/> for MCP / programmatic use:
-    /// return the embedded SKILL.md content for <paramref name="skillName"/> with NO
-    /// install side-effect and NO stdout writes. Throws <see cref="ArgumentException"/>
-    /// on unknown skill or missing embedded resource.
+    /// Return the embedded SKILL.md content for <paramref name="skillName"/> with
+    /// no side-effects and no stdout writes. Throws <see cref="ArgumentException"/>
+    /// on unknown skill or missing embedded resource. Used by both the CLI
+    /// `officecli load_skill &lt;name&gt;` command and the MCP `load_skill` tool —
+    /// shared so the two surfaces have identical semantics.
     /// </summary>
     public static string LoadSkillContent(string skillName)
     {
@@ -172,42 +169,6 @@ internal static class SkillInstaller
         if (content == null)
             throw new ArgumentException($"Embedded SKILL.md not found for '{skillName}'");
         return content;
-    }
-
-    /// <summary>
-    /// Agent-friendly facade: ensure the skill is installed to all detected
-    /// agents (idempotent, install summary on stderr) and print the SKILL.md
-    /// content to stdout. One command, agent doesn't need to know per-agent
-    /// skill paths or track install state.
-    /// Called as: officecli skill pitch-deck
-    /// </summary>
-    public static int LoadSkill(string skillName)
-    {
-        if (!SkillMap.TryGetValue(skillName, out var folder))
-        {
-            Console.Error.WriteLine($"Unknown skill: {skillName}");
-            Console.Error.WriteLine($"Available: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
-            return 1;
-        }
-
-        // Side-effect install (idempotent). Redirect stdout → stderr so
-        // install banners don't contaminate the SKILL.md content the agent
-        // is expected to consume from stdout.
-        var origOut = Console.Out;
-        Console.SetOut(Console.Error);
-        try { InstallSkillToAll(skillName); }
-        finally { Console.SetOut(origOut); }
-
-        // Pull SKILL.md from the embedded copy — same content the install
-        // just wrote, so agent never has to know the on-disk path.
-        var content = LoadEmbeddedResource($"skills/{folder}/SKILL.md");
-        if (content == null)
-        {
-            Console.Error.WriteLine($"  Embedded SKILL.md not found for '{skillName}'");
-            return 1;
-        }
-        Console.Out.Write(content);
-        return 0;
     }
 
     /// <summary>
@@ -311,8 +272,14 @@ internal static class SkillInstaller
         }
 
         Console.Error.WriteLine($"Unknown target: {agentKey}");
-        Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all");
-        Console.Error.WriteLine($"Or a skill name: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
+        Console.Error.WriteLine("Supported agents: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, hermes, all");
+        if (SkillMap.ContainsKey(agentKey))
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"'{agentKey}' is a skill name, not an agent. Did you mean:");
+            Console.Error.WriteLine($"  officecli skills install {agentKey}    (install to disk)");
+            Console.Error.WriteLine($"  officecli load_skill {agentKey}        (print SKILL.md to stdout)");
+        }
         return installed;
     }
 

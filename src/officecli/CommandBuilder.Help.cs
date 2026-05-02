@@ -66,6 +66,14 @@ static partial class CommandBuilder
                 "Skills: pptx, word, excel, morph-ppt, pitch-deck, academic-paper, data-dashboard, financial-model",
                 "Agents: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, hermes, all",
             },
+            ["load_skill"] = new[]
+            {
+                "Usage:",
+                "  officecli load_skill <name>   Print the named skill's SKILL.md to stdout (no install)",
+                "",
+                "Skills: pptx, word, excel, morph-ppt, morph-ppt-3d, pitch-deck, academic-paper, data-dashboard, financial-model",
+                "To install a skill on disk, run: officecli skills install <name>",
+            },
             ["install"] = new[]
             {
                 "Usage:",

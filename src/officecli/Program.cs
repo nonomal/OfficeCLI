@@ -120,15 +120,38 @@ if (args.Length >= 1 && (args[0] == "skills" || args[0] == "skill"))
     }
     if (args.Length == 2)
     {
-        // 2-arg form, second token disambiguates:
-        //   <skill-name>  → agent-friendly facade (ensure-install + print SKILL.md)
-        //   <agent-alias> → legacy: install base SKILL.md to that specific agent
-        if (OfficeCli.Core.SkillInstaller.IsKnownSkill(args[1]))
-            return OfficeCli.Core.SkillInstaller.LoadSkill(args[1]);
+        // 2-arg form: install base SKILL.md to a specific agent
+        // (officecli skills <agent-alias>). The previous "if it's a known skill
+        // name → ensure-install + print" branch was removed in favor of the
+        // dedicated `officecli load_skill <name>` command, so CLI matches MCP:
+        // load = pure read, install = explicit `skills install <name>`.
         var result = OfficeCli.Core.SkillInstaller.Install(args[1]);
         return result.Count > 0 ? 0 : 1;
     }
     OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("skills", Console.Error);
+    return 1;
+}
+
+// load_skill: read-only counterpart of `skills install <name>`. Prints the
+// embedded SKILL.md content for a named skill to stdout with no install
+// side-effect. Mirrors the MCP `load_skill` tool exactly so CLI and MCP have
+// the same semantics.
+if (args.Length >= 1 && args[0] == "load_skill")
+{
+    if (args.Length == 2)
+    {
+        try
+        {
+            Console.Out.Write(OfficeCli.Core.SkillInstaller.LoadSkillContent(args[1]));
+            return 0;
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+    }
+    OfficeCli.CommandBuilder.WriteEarlyDispatchUsage("load_skill", Console.Error);
     return 1;
 }
 

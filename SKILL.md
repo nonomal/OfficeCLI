@@ -368,7 +368,7 @@ Load a specialized skill on demand:
 
     officecli load_skill <name>
 
-Prints the skill's full SKILL.md to stdout — read the output and follow its rules. Pure read, no disk write; if you also want the skill installed for later sessions, run `officecli skills install <name>` separately.
+Prints the skill's full SKILL.md to stdout — read the output and follow its rules. Always use `load_skill` for the skills below; do not install them to disk. The base `officecli` SKILL.md (this file) is the only one that needs to be preloaded into your session.
 
 Skills are organized as **base layer + scene layer**: scene-layer skills inherit every rule from their base — pick the most specific one that fits the user's ask; if none fits, fall back to the base.
 

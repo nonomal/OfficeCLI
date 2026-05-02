@@ -667,26 +667,15 @@ Color convention: red path = stop/escalate, blue path = standard-action, green t
 
 ## QA (Required)
 
-**Assume there are problems.** First render is almost never correct. If you found zero issues, you were not looking hard enough. The Delivery Gate below is the real work; treat the minimum cycle as warmup.
+**Assume there are problems.** First render is almost never correct. If you found zero issues, you were not looking hard enough.
 
-### Minimum cycle before "done"
+### Pre-flight
 
-1. `officecli view "$FILE" issues` + `view annotated` — empty slides, overflow hints, size violations (< 36pt title, < 18pt body). `"Slide has no title"` on `layout=blank` is expected, not a defect.
-2. `officecli view "$FILE" html` — Read the returned HTML path for a per-slide visual audit. Walk every slide for alignment, overflow, placeholder leaks, one clear focal point.
-3. Query for known defect classes:
-   ```bash
-   officecli query "$FILE" 'shape:contains("lorem")'
-   officecli query "$FILE" 'shape:contains("{{")'
-   officecli query "$FILE" 'shape:contains("TODO")'
-   officecli query "$FILE" 'picture:no-alt'
-   ```
-4. `officecli close "$FILE" && officecli validate "$FILE"` — schema check. NEVER run validate against a resident-open file (spurious errors).
-5. **Open the deck in the target presentation viewer before shipping.** `view html` (Read the returned HTML path) catches overflow and placeholders; the target viewer is ground truth for chart colors, fonts, zoom, and animations (these are runtime features). For human preview, run `officecli watch "$FILE"` — the user opens the live preview at their own discretion — or have them open the `.pptx` directly in PowerPoint / Keynote / WPS.
-6. If anything failed, fix, then **rerun the full cycle**. One fix commonly creates another problem.
+`officecli view "$FILE" annotated` — surfaces overflow hints, font/size violations (< 36pt title, < 18pt body), missing pieces. `"Slide has no title"` on `layout=blank` is expected, not a defect. Fix what it shows before running gates.
 
 ### Delivery Gate (any failure = REJECT, do NOT deliver)
 
-Five checks. Gates 1–2 are schema/token-grep defenses; Gate 3 catches build-order bugs; Gate 4 is static contrast; Gate 5 is the only visual-assembly check. **None of Gates 1–4 can see a rendered slide.** Refuse to declare done until every gate prints its OK message.
+Four checks. Gates 1–2 are schema/token-grep defenses; Gate 3 catches build-order bugs; Gate 4 is the only visual-assembly check. **None of Gates 1–3 can see a rendered slide.** Refuse to declare done until every gate prints its OK message.
 
 ```bash
 FILE="deck.pptx"
@@ -716,19 +705,12 @@ officecli query "$FILE" 'shape[@name=Title]' --format 'path: %p text: %t' 2>/dev
 # REJECT if sequence (cover first, dividers before their sections, closing last) doesn't match your plan.
 echo "Gate 3: review above — REJECT if order wrong, else OK"
 
-# Gate 4 — static contrast pre-check. Dark-fill shapes must declare near-white text.
-DARK_HIT=$(officecli query "$FILE" 'shape[fill=1E2761],shape[fill=0A1628],shape[fill=8B1A1A],shape[fill=2C5F2D],shape[fill=36454F]' --json 2>/dev/null | \
-  jq -r '.data.results[]? | select((.format.textColor // "") | tostring | test("^#?(F[0-9A-F]{5}|FFFFFF)$") | not) | .path' 2>/dev/null)
-[ -z "$DARK_HIT" ] && echo "Gate 4 OK" || { echo "REJECT Gate 4: dark-on-dark candidates below"; echo "$DARK_HIT"; exit 1; }
-
-echo "Delivery Gate 1–4 PASS — proceed to Gate 5 (fresh-eyes visual audit)"
+echo "Delivery Gate 1–3 PASS — proceed to Gate 4 (fresh-eyes visual audit)"
 ```
 
-Each grep catches a real failure class: `$...$` = shell-escape leaks, `{{...}}` = unmigrated tokens, `()` / `[]` = chart-title unit placeholders, `\$`/`\t`/`\n` = shell-escape literals, Gate 3 = scrambled slide order, Gate 4 = dark-on-dark contrast.
+### Gate 4 — Visual audit via HTML preview (MANDATORY, not optional)
 
-### Gate 5 — Visual audit via HTML preview (MANDATORY, not optional)
-
-You are reading the same deck you wrote. **Gates 1–4 cannot see rendered slides.** This step is the only visual-assembly check. Do not skip.
+You are reading the same deck you wrote. **Gates 1–3 cannot see rendered slides.** This step is the only visual-assembly check. Do not skip.
 
 Run `officecli view "$FILE" html` and Read the returned HTML path. For every slide, answer:
 
@@ -738,13 +720,15 @@ Run `officecli view "$FILE" html` and Read the returned HTML path. For every sli
 - **order sanity**: does the slide sequence match the narrative outline (cover → agenda → dividers-before-their-sections → closing)?
 - **missing arrowheads**: do flowchart/decision-tree connectors show direction, or plain lines?
 
-REJECT the delivery if ANY of the above is present; list every instance with its slide number. If none, report "Gate 5 PASS".
+REJECT the delivery if ANY of the above is present; list every instance with its slide number. If none, report "Gate 4 PASS".
 
-`validate` catches schema, not design — Gates 2–5 are how you catch 14pt body, gray-on-navy, and placeholder leaks that schema-validation never flags.
+### After all gates pass
 
-## Known Issues & Pitfalls
+Open the deck in the target presentation viewer before shipping — chart colors, font substitution, animations, and zoom are runtime features that only render there. For human preview, `officecli watch "$FILE"` and let the human open it.
 
-When something looks broken, attribute it first: **[AGENT-ERROR]** (deck itself is wrong — fix the deck), **[RENDERER-BUG]** (deck is correct; a specific viewer renders it differently — don't chase), or **[SKILL gap]** (rule missing — open an issue).
+If a gate fails, fix and **rerun the full Delivery Gate** — one fix commonly creates another problem.
+
+`validate` catches schema, not design — Gates 2–4 are how you catch 14pt body, gray-on-navy, and placeholder leaks that schema-validation never flags.
 
 ## Common Pitfalls
 

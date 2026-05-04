@@ -173,8 +173,13 @@ public partial class WordHandler
             {
                 var cellText = tableData != null && r < tableData.Length && c < tableData[r].Length
                     ? tableData[r][c] : (properties.TryGetValue($"r{r + 1}c{c + 1}", out var rc) ? rc : "");
-                var cellPara = new Paragraph(new ParagraphProperties(
-                    new SpacingBetweenLines { After = "0", Line = "240", LineRule = LineSpacingRuleValues.Auto }));
+                // CONSISTENCY(table-cell-defaults): do not stamp explicit
+                // spaceAfter=0 / lineSpacing=240 Auto on freshly-created cell
+                // paragraphs — let them inherit from style/docDefaults like
+                // regular body paragraphs. Otherwise dump→batch round-trip
+                // grows 67 extra `set spaceAfter=0pt lineSpacing=1x` commands
+                // per cell (BUG-R3-3).
+                var cellPara = new Paragraph();
                 AssignParaId(cellPara);
                 if (!string.IsNullOrEmpty(cellText))
                     cellPara.AppendChild(new Run(new Text(cellText) { Space = SpaceProcessingModeValues.Preserve }));

@@ -28,6 +28,15 @@ public partial class PowerPointHandler
         var cx = extents.Cx?.Value ?? 0;
         var cy = extents.Cy?.Value ?? 0;
 
+        // PowerPoint stores the graphicFrame's declared layout height in <p:xfrm>,
+        // but tables auto-grow vertically to fit explicit row heights — declared cy
+        // can underreport actual rendered height. With overflow:hidden on the
+        // container, this clips trailing rows (slide 6 of test-samples/07.pptx
+        // declared 72pt for a 5×30.2pt = 151pt table). Honor the larger of the
+        // two so all rows render.
+        var rowHeightSum = table.Elements<Drawing.TableRow>().Sum(r => r.Height?.Value ?? 0);
+        if (rowHeightSum > cy) cy = rowHeightSum;
+
         // Detect table style for style-based coloring
         var tblPr = table.GetFirstChild<Drawing.TableProperties>();
         var tableStyleId = tblPr?.GetFirstChild<Drawing.TableStyleId>()?.InnerText;

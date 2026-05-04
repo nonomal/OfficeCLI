@@ -22,6 +22,18 @@ public partial class PowerPointHandler
         Dictionary<string, string> themeColors, (long x, long y, long cx, long cy)? overridePos = null,
         string? dataPath = null, bool suppressText = false)
     {
+        // prst="line" auto-shapes are line-segment geometry; render as SVG
+        // through the connector pipeline so they don't degrade to a div with
+        // border (which fakes a thin filled rect and loses zero-width/height
+        // line semantics — observed on slide 2 of test-samples/07.pptx).
+        var prstGeomEarly = shape.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
+        if (overridePos == null && prstGeomEarly?.Preset?.HasValue == true
+            && prstGeomEarly.Preset.InnerText == "line")
+        {
+            RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath);
+            return;
+        }
+
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var xfrm = shape.ShapeProperties?.Transform2D;
 
@@ -253,7 +265,13 @@ public partial class PowerPointHandler
             }
         }
 
-        styles.Add($"padding:{Units.EmuToPt(tIns)}pt {Units.EmuToPt(rIns)}pt {Units.EmuToPt(bIns)}pt {Units.EmuToPt(lIns)}pt");
+        // Skip text-frame padding for shapes with no real text content. With
+        // box-sizing:border-box, when default padding (~7.2pt L/R) exceeds the
+        // shape's outer width, Chromium expands the rendered box to fit the
+        // padding instead of clamping content to 0 — turning small decorative
+        // shapes (e.g. 5.76pt vertex-marker ellipses) into wide pills.
+        if (!string.IsNullOrWhiteSpace(GetShapeText(shape)))
+            styles.Add($"padding:{Units.EmuToPt(tIns)}pt {Units.EmuToPt(rIns)}pt {Units.EmuToPt(bIns)}pt {Units.EmuToPt(lIns)}pt");
 
         // Vertical alignment class
         var valign = "top";
@@ -817,8 +835,14 @@ public partial class PowerPointHandler
     // ==================== Connector Rendering ====================
 
     private static void RenderConnector(StringBuilder sb, ConnectionShape cxn, Dictionary<string, string> themeColors, string? dataPath = null)
+        => RenderConnector(sb, cxn.ShapeProperties, themeColors, dataPath);
+
+    // Shared SVG line/polyline/path renderer for both <p:cxnSp> connectors and
+    // <p:sp> shapes with prst="line". Reads geometry + outline from a
+    // ShapeProperties and emits a connector-style div.
+    private static void RenderConnector(StringBuilder sb, ShapeProperties? spPr, Dictionary<string, string> themeColors, string? dataPath = null)
     {
-        var xfrm = cxn.ShapeProperties?.Transform2D;
+        var xfrm = spPr?.Transform2D;
         if (xfrm?.Offset == null || xfrm?.Extents == null) return;
 
         var x = xfrm.Offset.X?.Value ?? 0;
@@ -830,7 +854,7 @@ public partial class PowerPointHandler
         var flipV = xfrm.VerticalFlip?.Value == true;
 
         // SVG line
-        var outline = cxn.ShapeProperties?.GetFirstChild<Drawing.Outline>();
+        var outline = spPr?.GetFirstChild<Drawing.Outline>();
         var defaultLineColor = themeColors.TryGetValue("tx1", out var txc) ? $"#{txc}"
             : themeColors.TryGetValue("dk1", out var dkc) ? $"#{dkc}" : "#000000";
         var lineColor = defaultLineColor;
@@ -937,7 +961,7 @@ public partial class PowerPointHandler
 
         // Branch on preset geometry: straightConnectorN -> line; bentConnectorN -> polyline;
         // curvedConnectorN -> cubic bezier path. Falls back to straight line for unknown presets.
-        var prstGeom = cxn.ShapeProperties?.GetFirstChild<Drawing.PresetGeometry>();
+        var prstGeom = spPr?.GetFirstChild<Drawing.PresetGeometry>();
         var preset = prstGeom?.Preset?.HasValue == true ? (prstGeom.Preset.InnerText ?? "straightConnector1") : "straightConnector1";
 
         // CONSISTENCY(shape-stroke-unit): stroke-width in pt matches CSS border path (see R3 fix).
@@ -959,7 +983,7 @@ public partial class PowerPointHandler
                 "bentConnector4" or "bentConnector5" => "0,0 25,0 25,50 75,50 75,100 100,100",
                 _ => "0,0 50,0 50,100 100,100", // bentConnector3
             };
-            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible;display:block\">");
             if (!string.IsNullOrEmpty(markerDefs))
                 sb.AppendLine($"        {markerDefs}");
             sb.AppendLine($"        <polyline points=\"{points}\" {strokeAttrs}/>");
@@ -975,7 +999,7 @@ public partial class PowerPointHandler
                 "curvedConnector4" or "curvedConnector5" => "M 0,0 C 25,0 25,50 50,50 C 75,50 75,100 100,100",
                 _ => "M 0,0 C 50,0 50,100 100,100", // curvedConnector3
             };
-            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" viewBox=\"0 0 100 100\" preserveAspectRatio=\"none\" style=\"overflow:visible;display:block\">");
             if (!string.IsNullOrEmpty(markerDefs))
                 sb.AppendLine($"        {markerDefs}");
             sb.AppendLine($"        <path d=\"{d}\" {strokeAttrs}/>");
@@ -983,7 +1007,7 @@ public partial class PowerPointHandler
         }
         else
         {
-            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" style=\"overflow:visible\">");
+            sb.AppendLine("      <svg width=\"100%\" height=\"100%\" preserveAspectRatio=\"none\" style=\"overflow:visible;display:block\">");
             if (!string.IsNullOrEmpty(markerDefs))
                 sb.AppendLine($"        {markerDefs}");
             sb.AppendLine($"        <line x1=\"{svgX1}\" y1=\"{svgY1}\" x2=\"{svgX2}\" y2=\"{svgY2}\" {strokeAttrs}/>");

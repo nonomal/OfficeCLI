@@ -249,6 +249,14 @@ public partial class PowerPointHandler
     {
         if (outline.GetFirstChild<Drawing.NoFill>() != null) return null;
 
+        // Empty <a:ln/> (no fill child, no width) means "inherit/default" — for text
+        // shapes PowerPoint treats this as no line. Without this guard we fall through
+        // to dk1 default + 0.5pt and paint a phantom border on every plain text box.
+        if (outline.GetFirstChild<Drawing.SolidFill>() == null
+            && outline.GetFirstChild<Drawing.GradientFill>() == null
+            && outline.Width?.HasValue != true)
+            return null;
+
         var color = ResolveFillColor(outline.GetFirstChild<Drawing.SolidFill>(), themeColors)
             ?? (themeColors.TryGetValue("dk1", out var dk1Hex) ? $"#{dk1Hex}" : "#000000");
         var widthPt = outline.Width?.HasValue == true ? outline.Width.Value / 12700.0 : 1.0;

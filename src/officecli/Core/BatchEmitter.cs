@@ -37,8 +37,41 @@ public static class BatchEmitter
         // Phase order matters: resources first so body refs (style=Heading1,
         // numId=3, etc.) resolve when the paragraph adds reach them on replay.
         EmitStyles(word, items);
+        EmitSection(word, items);
         EmitBody(word, items);
         return items;
+    }
+
+    // Section-level keys that root.Format exposes. Theme / docDefaults /
+    // settings / protection live on root too but each gets its own emit
+    // phase, so this list intentionally omits them.
+    private static readonly HashSet<string> SectionKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "pageWidth", "pageHeight", "orientation",
+        "marginTop", "marginBottom", "marginLeft", "marginRight",
+        "pageStart", "pageNumFmt",
+        "titlePage", "direction", "rtlGutter",
+        "lineNumbers", "lineNumberCountBy",
+    };
+
+    private static void EmitSection(WordHandler word, List<BatchItem> items)
+    {
+        var root = word.Get("/");
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in root.Format)
+        {
+            if (!SectionKeys.Contains(k)) continue;
+            if (v == null) continue;
+            var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
+            if (s.Length > 0) props[k] = s;
+        }
+        if (props.Count == 0) return;
+        items.Add(new BatchItem
+        {
+            Command = "set",
+            Path = "/",
+            Props = props
+        });
     }
 
     private static void EmitStyles(WordHandler word, List<BatchItem> items)

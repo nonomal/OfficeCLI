@@ -733,6 +733,12 @@ public static class BatchEmitter
         var bookmarks = (pNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "bookmark")
             .ToList();
+        // BUG-DUMP4-06: inline SdtRun (content control) children. Navigation
+        // surfaces these as type="sdt" with alias/tag/type/items so AddSdt
+        // can rebuild the wrapper on replay.
+        var inlineSdts = (pNode.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "sdt")
+            .ToList();
 
         // Single-run / no-run paragraph: collapse run formatting into the
         // paragraph's prop bag (the schema-reflection layer accepts run-level
@@ -790,7 +796,8 @@ public static class BatchEmitter
             !singleRunHasW14 &&
             !singleRunIsField &&
             breaks.Count == 0 &&
-            bookmarks.Count == 0;
+            bookmarks.Count == 0 &&
+            inlineSdts.Count == 0;
         // Pull paragraph-level tab stops out for per-stop `add tab` emit
         // (FilterEmittableProps already drops the `tabs` scalar).
         pNode.Format.TryGetValue("tabs", out var pTabs);
@@ -897,6 +904,30 @@ public static class BatchEmitter
                 Parent = paraTargetPath,
                 Type = "bookmark",
                 Props = bmProps
+            });
+        }
+
+        // BUG-DUMP4-06: emit inline SdtRun children. Mirror EmitSdt's whitelist
+        // — AddSdt consumes type/alias/tag/items/format and the visible text.
+        foreach (var sdt in inlineSdts)
+        {
+            var sdtProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in new[] { "type", "alias", "tag", "items", "format" })
+            {
+                if (sdt.Format.TryGetValue(key, out var v) && v != null)
+                {
+                    var s = v.ToString() ?? "";
+                    if (s.Length > 0) sdtProps[key] = s;
+                }
+            }
+            if (!string.IsNullOrEmpty(sdt.Text))
+                sdtProps["text"] = sdt.Text!;
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "sdt",
+                Props = sdtProps
             });
         }
 

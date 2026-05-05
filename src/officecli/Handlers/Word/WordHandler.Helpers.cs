@@ -536,6 +536,12 @@ public partial class WordHandler
     {
         return para.Descendants<Run>()
             .Where(r => r.GetFirstChild<CommentReference>() == null)
+            // BUG-DUMP4-06: skip runs nested inside an inline SdtRun. Those
+            // runs are surfaced separately as a typed `sdt` paragraph child so
+            // alias/tag/type metadata round-trips. Without this filter the
+            // inner run was emitted twice — once unwrapped (losing metadata)
+            // and once via the sdt branch.
+            .Where(r => r.Ancestors<SdtRun>().FirstOrDefault() == null)
             .ToList();
     }
 

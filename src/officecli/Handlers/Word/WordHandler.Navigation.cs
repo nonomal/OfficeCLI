@@ -1459,6 +1459,17 @@ public partial class WordHandler
                     node.Children.Add(ElementToNode(bm, $"{path}/bookmark[{bmIdx + 1}]", depth - 1));
                     bmIdx++;
                 }
+                // BUG-DUMP4-06: surface inline SdtRun (content control) children
+                // so BatchEmitter can re-emit a typed `add sdt` row carrying
+                // alias/tag/type metadata. Without this, GetAllRuns unwrapped
+                // the SdtRun's inner Run as a plain `add r` and the metadata
+                // was silently dropped on dump round-trip.
+                int sdtRunIdx = 0;
+                foreach (var sdtR in para.Elements<SdtRun>())
+                {
+                    node.Children.Add(ElementToNode(sdtR, $"{path}/sdt[{sdtRunIdx + 1}]", depth - 1));
+                    sdtRunIdx++;
+                }
             }
         }
         else if (element is Run run)

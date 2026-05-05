@@ -464,10 +464,19 @@ public partial class WordHandler
                    ?? properties.GetValueOrDefault("styleName")
                    ?? properties.GetValueOrDefault("stylename")
                    ?? "CustomStyle";
+        // BUG-R7-08: when the caller passes only `id` (no name), AddStyle used
+        // to default the name to the id. That mutated the round-trip output
+        // for any docx whose original style had an `id` but no `<w:name>`
+        // (or empty name) — the next dump showed `name=<id>`. Preserve the
+        // "no explicit name" intent by emitting an empty <w:name w:val=""/>
+        // (still schema-valid; matches the original).
+        var explicitName = properties.ContainsKey("name")
+            || properties.ContainsKey("styleName")
+            || properties.ContainsKey("stylename");
         var styleName = properties.GetValueOrDefault("name")
                      ?? properties.GetValueOrDefault("styleName")
                      ?? properties.GetValueOrDefault("stylename")
-                     ?? styleId;
+                     ?? (explicitName ? styleId : "");
         var styleType = properties.GetValueOrDefault("type", "paragraph").ToLowerInvariant() switch
         {
             "character" or "char" => StyleValues.Character,
@@ -527,7 +536,10 @@ public partial class WordHandler
         // that users could not tell apart (BUG-R17-02).
         bool NameTaken(string candidate) => stylesPart.Styles.Elements<Style>()
             .Any(s => string.Equals(s.StyleName?.Val?.Value, candidate, StringComparison.Ordinal));
-        if (NameTaken(styleName))
+        // BUG-R7-08: empty styleName (id-only style, see styleName fallback
+        // above) is allowed to repeat — multiple unnamed styles round-trip
+        // from real docx files where the author left out the display name.
+        if (!string.IsNullOrEmpty(styleName) && NameTaken(styleName))
             throw new ArgumentException(
                 $"Style with name '{styleName}' already exists. Pick a unique --prop name.");
 

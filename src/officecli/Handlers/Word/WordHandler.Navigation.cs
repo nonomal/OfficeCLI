@@ -1449,6 +1449,43 @@ public partial class WordHandler
                     node.Children.Add(ElementToNode(run, $"{path}/r[{runIdx + 1}]", depth - 1));
                     runIdx++;
                 }
+                // BUG-DUMP5-06/07: <w:ruby> and <w:smartTag> aren't registered
+                // as typed paragraph children in the OpenXml SDK schema set we
+                // load — RawSet-injected fragments and SDK-untracked content
+                // from real-world docx files surface them as
+                // OpenXmlUnknownElement, so Descendants<Run>() inside
+                // GetAllRuns skips every nested run (the inner <w:r> is also
+                // an unknown element, not a typed Run). Walk the unknown
+                // subtrees and synthesize plain `run` DocumentNodes from any
+                // <w:r>/<w:t> children we find so the inner text round-trips
+                // through dump→batch instead of vanishing.
+                const string wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                foreach (var unkRun in para.Descendants<DocumentFormat.OpenXml.OpenXmlUnknownElement>())
+                {
+                    if (unkRun.LocalName != "r" || unkRun.NamespaceUri != wNs) continue;
+                    // Only surface runs whose direct parent is an unknown
+                    // wrapper (ruby/rt/rubyBase/smartTag/customXml). Runs
+                    // whose parent is a typed Paragraph would already be
+                    // typed Runs and reached via GetAllRuns above; if they
+                    // somehow surface as unknown here it's because the
+                    // entire paragraph is malformed and we'd duplicate.
+                    if (unkRun.Parent is not DocumentFormat.OpenXml.OpenXmlUnknownElement) continue;
+                    var sbInner = new System.Text.StringBuilder();
+                    foreach (var tEl in unkRun.Descendants<DocumentFormat.OpenXml.OpenXmlUnknownElement>())
+                    {
+                        if (tEl.LocalName == "t" && tEl.NamespaceUri == wNs)
+                            sbInner.Append(tEl.InnerText);
+                    }
+                    if (sbInner.Length == 0) continue;
+                    var synthNode = new DocumentNode
+                    {
+                        Type = "run",
+                        Text = sbInner.ToString(),
+                        Path = $"{path}/r[{runIdx + 1}]",
+                    };
+                    node.Children.Add(synthNode);
+                    runIdx++;
+                }
                 // CONSISTENCY(bookmark-roundtrip): surface BookmarkStart
                 // children so BatchEmitter can re-emit `add bookmark` rows.
                 // Without this, dump silently dropped every bookmark on a

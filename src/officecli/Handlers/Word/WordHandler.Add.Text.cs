@@ -1628,10 +1628,24 @@ public partial class WordHandler
         if (properties.TryGetValue("leader", out var leaderStr) && !string.IsNullOrEmpty(leaderStr))
         {
             var leaderNorm = leaderStr.ToLowerInvariant();
-            var knownLeaders = new[] { "none", "dot", "heavy", "hyphen", "middledot", "underscore" };
-            if (!knownLeaders.Contains(leaderNorm))
-                throw new ArgumentException($"Invalid tab leader '{leaderStr}'. Valid: {string.Join(", ", knownLeaders)}.");
-            tabStop.Leader = new EnumValue<TabStopLeaderCharValues>(new TabStopLeaderCharValues(leaderNorm));
+            // BUG-DUMP10-06: TabStopLeaderCharValues enum strings are camelCase
+            // ("middleDot"), not lowercase. Constructing
+            // `new TabStopLeaderCharValues("middledot")` throws
+            // ArgumentOutOfRangeException, which the outer dispatcher caught
+            // and surfaced as the misleading "Invalid index or anchor" error.
+            // Map explicitly to the SDK enum members instead — same pattern as
+            // ptab leader resolution in WordHandler.Helpers.cs:858.
+            tabStop.Leader = leaderNorm switch
+            {
+                "none"       => TabStopLeaderCharValues.None,
+                "dot"        => TabStopLeaderCharValues.Dot,
+                "heavy"      => TabStopLeaderCharValues.Heavy,
+                "hyphen"     => TabStopLeaderCharValues.Hyphen,
+                "middledot"  => TabStopLeaderCharValues.MiddleDot,
+                "underscore" => TabStopLeaderCharValues.Underscore,
+                _ => throw new ArgumentException(
+                    $"Invalid tab leader '{leaderStr}'. Valid: none, dot, heavy, hyphen, middleDot, underscore."),
+            };
         }
 
         // pPr children have schema order; Tabs sits early. PrependChild

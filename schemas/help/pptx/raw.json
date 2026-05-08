@@ -1,0 +1,26 @@
+{
+  "$schema": "../_schema.json",
+  "format": "pptx",
+  "element": "raw",
+  "operations": {
+    "add": false,
+    "set": false,
+    "get": false,
+    "query": false,
+    "remove": false
+  },
+  "properties": {},
+  "description": "Raw OOXML access via the `raw` (read) and `raw-set` (write) commands. Use only when L2 DOM operations cannot express what you need. Part paths are semantic — pass /slide[1], not /ppt/slides/slide1.xml.",
+  "parts": [
+    { "name": "/presentation",   "desc": "Presentation part (slide list, sizing, defaults)" },
+    { "name": "/slide[N]",       "desc": "Nth slide (1-based)" },
+    { "name": "/slideMaster[N]", "desc": "Nth slide master (raw-set only)" },
+    { "name": "/slideLayout[N]", "desc": "Nth slide layout (raw-set only)" },
+    { "name": "/noteSlide[N]",   "desc": "Notes slide attached to slide N (raw-set only)" }
+  ],
+  "examples": [
+    "officecli raw deck.pptx /presentation",
+    "officecli raw deck.pptx '/slide[1]'",
+    "officecli raw-set deck.pptx '/slide[1]' --xpath \"//p:sp[1]\" --action remove"
+  ]
+}

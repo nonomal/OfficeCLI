@@ -117,6 +117,22 @@ internal static class SchemaHelpLoader
         var canonical = NormalizeFormat(format);
         var elements = ListElements(canonical);
 
+        // CONSISTENCY(root-path): set/get/query use `/` to mean the document
+        // root. Mirror that in help so `help xlsx /` ≡ `help xlsx workbook`,
+        // `help docx /` ≡ `help docx document`, `help pptx /` ≡ `help pptx
+        // presentation`. Without this alias agents reasonably extrapolate
+        // `/` from the set/get vocabulary and hit "unknown element '/'".
+        if (element == "/")
+        {
+            element = canonical switch
+            {
+                "xlsx" => "workbook",
+                "docx" => "document",
+                "pptx" => "presentation",
+                _ => element
+            };
+        }
+
         // 1. Exact filename match (case-insensitive).
         var match = elements.FirstOrDefault(
             e => string.Equals(e, element, StringComparison.OrdinalIgnoreCase));

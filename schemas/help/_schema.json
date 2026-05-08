@@ -78,6 +78,28 @@
       "type": "array",
       "description": "declared child element types addressable under this element in CLI paths",
       "items":       { "$ref": "#/$defs/childRef" }
+    },
+    "parts": {
+      "type": "array",
+      "description": "for the synthetic `raw` element only: enumerates the raw OOXML parts addressable via the `raw` and `raw-set` commands (e.g. /workbook, /Sheet1, /styles). Rendered as a 'Parts' section by the help renderer. Not used by other elements.",
+      "items": {
+        "type": "object",
+        "required": ["name", "desc"],
+        "properties": {
+          "name": { "type": "string", "description": "part path as accepted by `officecli raw <file> <part>` (e.g. /workbook, /Sheet1)" },
+          "desc": { "type": "string", "description": "one-line description of what this part contains" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "examples": {
+      "type": "array",
+      "description": "element-level command examples (in addition to per-property examples). Used primarily by the synthetic `raw` element.",
+      "items": { "type": "string" }
+    },
+    "description": {
+      "type": "string",
+      "description": "element-level description (in addition to per-property descriptions). Used primarily by the synthetic `raw` element."
     }
   },
   "additionalProperties": false,

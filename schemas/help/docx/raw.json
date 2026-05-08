@@ -1,0 +1,30 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "raw",
+  "operations": {
+    "add": false,
+    "set": false,
+    "get": false,
+    "query": false,
+    "remove": false
+  },
+  "properties": {},
+  "description": "Raw OOXML access via the `raw` (read) and `raw-set` (write) commands. Use only when L2 DOM operations cannot express what you need. Part paths are semantic — pass /document, not /word/document.xml (both are accepted but the short form is canonical).",
+  "parts": [
+    { "name": "/document",  "desc": "Main document body" },
+    { "name": "/styles",    "desc": "Style definitions" },
+    { "name": "/settings",  "desc": "Document-level settings (compatibility, view, protection)" },
+    { "name": "/numbering", "desc": "Numbering / list definitions" },
+    { "name": "/comments",  "desc": "Comments part" },
+    { "name": "/theme",     "desc": "Theme (color scheme, font scheme)" },
+    { "name": "/header[N]", "desc": "Nth header part (1-based)" },
+    { "name": "/footer[N]", "desc": "Nth footer part (1-based)" },
+    { "name": "/chart[N]",  "desc": "Nth embedded chart" }
+  ],
+  "examples": [
+    "officecli raw report.docx /document",
+    "officecli raw report.docx /styles",
+    "officecli raw-set report.docx /document --xpath \"//w:p[1]\" --action remove"
+  ]
+}

@@ -60,6 +60,13 @@ internal static class SchemaHelpRenderer
         if (isContainer)
             sb.AppendLine("Read-only container (never created or removed via CLI).");
 
+        if (root.TryGetProperty("description", out var topDesc)
+            && topDesc.ValueKind == JsonValueKind.String
+            && topDesc.GetString() is { Length: > 0 } descStr)
+        {
+            sb.AppendLine(descStr);
+        }
+
         if (root.TryGetProperty("parent", out var parent))
         {
             var parentStr = parent.ValueKind switch
@@ -125,7 +132,8 @@ internal static class SchemaHelpRenderer
         }
 
         if (root.TryGetProperty("properties", out var props)
-            && props.ValueKind == JsonValueKind.Object)
+            && props.ValueKind == JsonValueKind.Object
+            && props.EnumerateObject().Any())
         {
             sb.AppendLine();
             sb.AppendLine(verbFilter == null
@@ -146,6 +154,26 @@ internal static class SchemaHelpRenderer
             }
             if (verbFilter != null && shown == 0)
                 sb.AppendLine($"  (no properties participate in '{verbFilter}' for this element)");
+        }
+
+        if (root.TryGetProperty("parts", out var parts)
+            && parts.ValueKind == JsonValueKind.Array
+            && parts.GetArrayLength() > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Parts:");
+            int padTo = 0;
+            foreach (var pt in parts.EnumerateArray())
+            {
+                if (pt.TryGetProperty("name", out var nm) && nm.GetString() is { } ns)
+                    padTo = Math.Max(padTo, ns.Length);
+            }
+            foreach (var pt in parts.EnumerateArray())
+            {
+                var name = pt.TryGetProperty("name", out var nm) ? nm.GetString() ?? "" : "";
+                var desc = pt.TryGetProperty("desc", out var ds) ? ds.GetString() ?? "" : "";
+                sb.AppendLine($"  {name.PadRight(padTo)}  {desc}");
+            }
         }
 
         if (root.TryGetProperty("children", out var children)

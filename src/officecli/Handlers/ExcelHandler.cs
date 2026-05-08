@@ -57,8 +57,10 @@ public partial class ExcelHandler : IDocumentHandler
 
         if (partPath == "/styles")
         {
-            var styleManager = new ExcelStyleManager(workbookPart);
-            return styleManager.EnsureStylesPart().Stylesheet!.OuterXml;
+            // Raw is read-only; do not create the part if missing (would fail
+            // when the package is opened read-only).
+            var stylesPart = workbookPart.WorkbookStylesPart;
+            return stylesPart?.Stylesheet?.OuterXml ?? "(no styles)";
         }
 
         if (partPath == "/sharedstrings")

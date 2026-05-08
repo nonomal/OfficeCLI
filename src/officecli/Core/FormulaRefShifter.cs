@@ -151,15 +151,40 @@ public static class FormulaRefShifter
             if (!isRange) return $"{sheetPrefix}{c1}{newR1}";
 
             string newR2 = RemapRow(r2, oldToNewRow);
-            // If both endpoints came from the map and the range inverts, the
-            // post-renumber range is no longer expressible as a contiguous
-            // A1 region — fall back to the original text rather than write
-            // a malformed ref.
+            // The range covers a contiguous SET of rows [r1..r2]. After
+            // renumber, that set must remain contiguous (and represent
+            // the same row content) for the new range to be a faithful
+            // rewrite. If the mapped set is not contiguous or doesn't
+            // match [min..max] of the new endpoints, fall back to the
+            // original text rather than write a misleading ref.
             int Parse(string s) => int.Parse(s.StartsWith('$') ? s[1..] : s);
-            if (Parse(newR1) > Parse(newR2)) return m.Value;
+            int oldR1 = Parse(r1), oldR2 = Parse(r2);
+            int newR1Int = Parse(newR1), newR2Int = Parse(newR2);
+            if (!RangeRemapStillContiguous(oldR1, oldR2, newR1Int, newR2Int, oldToNewRow))
+                return m.Value;
 
             return $"{sheetPrefix}{c1}{newR1}:{c2}{newR2}";
         });
+    }
+
+    private static bool RangeRemapStillContiguous(
+        int oldStart, int oldEnd, int newStart, int newEnd,
+        IReadOnlyDictionary<int, int> map)
+    {
+        if (oldStart > oldEnd) return false;
+        int newMin = Math.Min(newStart, newEnd);
+        int newMax = Math.Max(newStart, newEnd);
+        // Build the mapped set and check it equals [newMin..newMax] exactly.
+        var mappedSet = new HashSet<int>();
+        for (int i = oldStart; i <= oldEnd; i++)
+        {
+            int mapped = map.TryGetValue(i, out var n) ? n : i;
+            mappedSet.Add(mapped);
+        }
+        if (mappedSet.Count != (newMax - newMin + 1)) return false;
+        for (int i = newMin; i <= newMax; i++)
+            if (!mappedSet.Contains(i)) return false;
+        return newStart <= newEnd;
     }
 
     private static string RemapRow(string rowPart, IReadOnlyDictionary<int, int> map)
@@ -168,6 +193,108 @@ public static class FormulaRefShifter
         int oldNum = int.Parse(abs ? rowPart[1..] : rowPart);
         if (!map.TryGetValue(oldNum, out var newNum)) return rowPart;
         return (abs ? "$" : "") + newNum;
+    }
+
+    /// <summary>
+    /// Column-axis variant of <see cref="ApplyRowRenumberMap"/>. Same skip
+    /// rules, sheet scope, and contiguity guard. Map keys/values are 1-based
+    /// column indices (A=1, B=2, ...).
+    /// </summary>
+    public static string ApplyColRenumberMap(
+        string formula,
+        string currentSheet,
+        string modifiedSheet,
+        IReadOnlyDictionary<int, int> oldToNewCol)
+    {
+        if (string.IsNullOrEmpty(formula) || oldToNewCol.Count == 0) return formula;
+
+        var sb = new StringBuilder(formula.Length);
+        int i = 0;
+        while (i < formula.Length)
+        {
+            char ch = formula[i];
+            if (ch == '"')
+            {
+                sb.Append(ch); i++;
+                while (i < formula.Length)
+                {
+                    sb.Append(formula[i]);
+                    if (formula[i] == '"')
+                    {
+                        if (i + 1 < formula.Length && formula[i + 1] == '"')
+                        { sb.Append(formula[i + 1]); i += 2; continue; }
+                        i++; break;
+                    }
+                    i++;
+                }
+            }
+            else if (ch == '[')
+            {
+                int depth = 0;
+                while (i < formula.Length)
+                {
+                    char c = formula[i];
+                    sb.Append(c);
+                    if (c == '[') depth++;
+                    else if (c == ']') { depth--; if (depth == 0) { i++; break; } }
+                    i++;
+                }
+            }
+            else
+            {
+                int start = i;
+                while (i < formula.Length && formula[i] != '"' && formula[i] != '[') i++;
+                sb.Append(RenumberColRefsInChunk(
+                    formula.AsSpan(start, i - start).ToString(),
+                    currentSheet, modifiedSheet, oldToNewCol));
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string RenumberColRefsInChunk(
+        string chunk, string currentSheet, string modifiedSheet,
+        IReadOnlyDictionary<int, int> oldToNewCol)
+    {
+        return CellRefPattern.Replace(chunk, m =>
+        {
+            var sheetGroup = m.Groups["sheet"].Value;
+            string targetSheet = string.IsNullOrEmpty(sheetGroup)
+                ? currentSheet
+                : (sheetGroup.StartsWith('\'') && sheetGroup.EndsWith('\'')
+                    ? sheetGroup[1..^1].Replace("''", "'")
+                    : sheetGroup);
+            if (!targetSheet.Equals(modifiedSheet, StringComparison.OrdinalIgnoreCase))
+                return m.Value;
+
+            string c1 = m.Groups["c1"].Value;
+            string r1 = m.Groups["r1"].Value;
+            string c2 = m.Groups["c2"].Value;
+            string r2 = m.Groups["r2"].Value;
+            bool isRange = !string.IsNullOrEmpty(c2);
+            string sheetPrefix = string.IsNullOrEmpty(sheetGroup) ? "" : sheetGroup + "!";
+
+            string newC1 = RemapCol(c1, oldToNewCol);
+            if (!isRange) return $"{sheetPrefix}{newC1}{r1}";
+
+            string newC2 = RemapCol(c2, oldToNewCol);
+            int Idx(string s) => ColumnLettersToIndex(s.StartsWith('$') ? s[1..] : s);
+            int oldC1Idx = Idx(c1), oldC2Idx = Idx(c2);
+            int newC1Idx = Idx(newC1), newC2Idx = Idx(newC2);
+            if (!RangeRemapStillContiguous(oldC1Idx, oldC2Idx, newC1Idx, newC2Idx, oldToNewCol))
+                return m.Value;
+
+            return $"{sheetPrefix}{newC1}{r1}:{newC2}{r2}";
+        });
+    }
+
+    private static string RemapCol(string colPart, IReadOnlyDictionary<int, int> map)
+    {
+        bool abs = colPart.StartsWith('$');
+        string letters = abs ? colPart[1..] : colPart;
+        int oldIdx = ColumnLettersToIndex(letters);
+        if (!map.TryGetValue(oldIdx, out var newIdx)) return colPart;
+        return (abs ? "$" : "") + IndexToColumnLetters(newIdx);
     }
 
     /// <summary>

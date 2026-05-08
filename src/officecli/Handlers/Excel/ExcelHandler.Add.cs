@@ -339,7 +339,131 @@ public partial class ExcelHandler
             return $"{effectiveParentPath}/row[{newRowIndex}]";
         }
 
-        throw new ArgumentException($"Move not supported for: {elementRef}. Supported: row[N]");
+        // Move col[L]: shuffle cells across the affected column band, renumber
+        // <col> metadata, and remap formulas + range refs via FormulaRefShifter
+        // ApplyColRenumberMap. Same scope rules as row move (single sheet,
+        // anchor must be col[L] in same sheet).
+        var colMatch = Regex.Match(elementRef, @"^col\[([A-Za-z]+)\]$", RegexOptions.IgnoreCase);
+        if (colMatch.Success)
+        {
+            var srcColLetter = colMatch.Groups[1].Value.ToUpperInvariant();
+            var srcColIdx = ColumnNameToIndex(srcColLetter);
+
+            // Resolve target. Default behavior (no position): append after the
+            // last used column.
+            int? targetColIdx = null;
+            if (position?.Index.HasValue == true)
+                targetColIdx = position.Index!.Value;
+            else if (position?.Before != null || position?.After != null)
+            {
+                int FindAnchorColIdx(string anchorPath)
+                {
+                    var aSegs = anchorPath.TrimStart('/').Split('/', 2);
+                    if (aSegs.Length < 2)
+                        throw new ArgumentException(
+                            $"Anchor must be a col path like /{sheetName}/col[L], got: {anchorPath}");
+                    if (!aSegs[0].Equals(sheetName, StringComparison.OrdinalIgnoreCase))
+                        throw new ArgumentException(
+                            $"Anchor sheet '{aSegs[0]}' must match source sheet '{sheetName}'");
+                    var am = Regex.Match(aSegs[1], @"^col\[([A-Za-z]+)\]$", RegexOptions.IgnoreCase);
+                    if (!am.Success)
+                        throw new ArgumentException(
+                            $"Anchor must be a col path like /{sheetName}/col[L], got: {anchorPath}");
+                    return ColumnNameToIndex(am.Groups[1].Value.ToUpperInvariant());
+                }
+                if (position.Before != null) targetColIdx = FindAnchorColIdx(position.Before);
+                else targetColIdx = FindAnchorColIdx(position.After!) + 1;
+            }
+            else
+            {
+                // Append after last used column.
+                int maxCol = 1;
+                foreach (var r in sheetData.Elements<Row>())
+                    foreach (var c in r.Elements<Cell>())
+                        if (c.CellReference?.Value != null)
+                            maxCol = Math.Max(maxCol, ColumnNameToIndex(ParseCellReference(c.CellReference.Value).Column));
+                targetColIdx = maxCol + 1;
+            }
+
+            int target = targetColIdx!.Value;
+            if (target == srcColIdx || target == srcColIdx + 1)
+            {
+                // No-op: moving a col to its own slot or right after itself.
+                return $"/{sheetName}/col[{srcColLetter}]";
+            }
+
+            // Build the col renumber map. Two cases:
+            //   src < target: cols (src+1)..(target-1) shift left by 1; src moves to (target-1).
+            //   src > target: cols target..(src-1) shift right by 1; src moves to target.
+            var colMap = new Dictionary<int, int>();
+            if (srcColIdx < target)
+            {
+                for (int i = srcColIdx + 1; i < target; i++) colMap[i] = i - 1;
+                colMap[srcColIdx] = target - 1;
+            }
+            else
+            {
+                for (int i = target; i < srcColIdx; i++) colMap[i] = i + 1;
+                colMap[srcColIdx] = target;
+            }
+
+            // Apply map to cell references in sheetData.
+            foreach (var r in sheetData.Elements<Row>())
+            {
+                foreach (var c in r.Elements<Cell>())
+                {
+                    if (c.CellReference?.Value == null) continue;
+                    var (col, row) = ParseCellReference(c.CellReference.Value);
+                    var oldIdx = ColumnNameToIndex(col);
+                    if (colMap.TryGetValue(oldIdx, out var newIdx))
+                        c.CellReference = $"{IndexToColumnName(newIdx)}{row}";
+                }
+                // After remap, cells in a row may be out of left-to-right order;
+                // OOXML expects ascending CellReference within a row.
+                var sortedCells = r.Elements<Cell>()
+                    .OrderBy(c => c.CellReference?.Value == null ? 0 : ColumnNameToIndex(ParseCellReference(c.CellReference.Value).Column))
+                    .ToList();
+                r.RemoveAllChildren<Cell>();
+                foreach (var c in sortedCells) r.AppendChild(c);
+            }
+
+            // Apply map to <col> metadata (width/style entries).
+            var ws = GetSheet(worksheet);
+            var columns = ws.GetFirstChild<Columns>();
+            if (columns != null)
+            {
+                foreach (var colEl in columns.Elements<Column>().ToList())
+                {
+                    var minOld = (int)(colEl.Min?.Value ?? 0);
+                    var maxOld = (int)(colEl.Max?.Value ?? 0);
+                    // Only handle the simple case of single-column entries
+                    // (min == max). Multi-col runs spanning the moved band are
+                    // left as-is — user-meaningful collisions are rare and
+                    // post-renumber a multi-col run can't always be expressed
+                    // as a single Column element either.
+                    if (minOld == maxOld && colMap.TryGetValue(minOld, out var newIdx))
+                    {
+                        colEl.Min = (uint)newIdx;
+                        colEl.Max = (uint)newIdx;
+                    }
+                }
+                // Sort col entries ascending for OOXML schema validity.
+                var sortedCols = columns.Elements<Column>()
+                    .OrderBy(c => c.Min?.Value ?? 0).ToList();
+                columns.RemoveAllChildren<Column>();
+                foreach (var c in sortedCols) columns.AppendChild(c);
+            }
+
+            // Remap formulas + range-bearing structures via the col shifter.
+            ApplyColRenumberToSheet(worksheet, sheetName, colMap);
+
+            DeleteCalcChainIfPresent();
+            SaveWorksheet(worksheet);
+            int newSrcIdx = colMap[srcColIdx];
+            return $"/{sheetName}/col[{IndexToColumnName(newSrcIdx)}]";
+        }
+
+        throw new ArgumentException($"Move not supported for: {elementRef}. Supported: row[N], col[L]");
     }
 
     /// <summary>
@@ -451,6 +575,162 @@ public partial class ExcelHandler
             }
             tbl.Save();
         }
+
+        // Workbook-level definedNames may reference rows on this sheet.
+        // Pass each defined-name expression through the same shifter; the
+        // sheet-scope guard inside ApplyRowRenumberMap leaves cross-sheet
+        // refs alone.
+        ApplyRowRenumberToWorkbookDefinedNames(sheetName, map);
+    }
+
+    private void ApplyColRenumberToSheet(WorksheetPart worksheet, string sheetName, IReadOnlyDictionary<int, int> map)
+    {
+        if (map.Count == 0) return;
+        var ws = GetSheet(worksheet);
+
+        // Cell formulas + shared/array ref attribute
+        var sheetData = ws.GetFirstChild<SheetData>();
+        if (sheetData != null)
+        {
+            foreach (var r in sheetData.Elements<Row>())
+            {
+                foreach (var c in r.Elements<Cell>())
+                {
+                    if (c.CellFormula == null) continue;
+                    if (!string.IsNullOrEmpty(c.CellFormula.Text))
+                        c.CellFormula.Text = Core.FormulaRefShifter.ApplyColRenumberMap(
+                            c.CellFormula.Text, sheetName, sheetName, map);
+                    if (c.CellFormula.Reference?.Value != null)
+                        c.CellFormula.Reference = RemapColsInRangeRef(c.CellFormula.Reference.Value, map) ?? c.CellFormula.Reference.Value;
+                }
+            }
+        }
+
+        var mergeCells = ws.GetFirstChild<MergeCells>();
+        if (mergeCells != null)
+            foreach (var mc in mergeCells.Elements<MergeCell>())
+                if (mc.Reference?.Value != null)
+                    mc.Reference = RemapColsInRangeRef(mc.Reference.Value, map) ?? mc.Reference.Value;
+
+        foreach (var cf in ws.Elements<ConditionalFormatting>())
+        {
+            if (cf.SequenceOfReferences?.HasValue != true) continue;
+            var newRefs = cf.SequenceOfReferences.Items
+                .Select(r => RemapColsInRangeRef(r.Value, map) ?? r.Value).ToList();
+            cf.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
+        }
+
+        var dvs = ws.GetFirstChild<DataValidations>();
+        if (dvs != null)
+            foreach (var dv in dvs.Elements<DataValidation>())
+            {
+                if (dv.SequenceOfReferences?.HasValue != true) continue;
+                var newRefs = dv.SequenceOfReferences.Items
+                    .Select(r => RemapColsInRangeRef(r.Value, map) ?? r.Value).ToList();
+                dv.SequenceOfReferences = new ListValue<StringValue>(newRefs.Select(r => new StringValue(r)));
+            }
+
+        var af = ws.GetFirstChild<AutoFilter>();
+        if (af?.Reference?.Value != null)
+        {
+            var s = RemapColsInRangeRef(af.Reference.Value, map);
+            if (s != null) af.Reference = s;
+        }
+
+        var hyperlinks = ws.GetFirstChild<Hyperlinks>();
+        if (hyperlinks != null)
+            foreach (var hl in hyperlinks.Elements<Hyperlink>())
+                if (hl.Reference?.Value != null)
+                {
+                    var s = RemapColsInRangeRef(hl.Reference.Value, map);
+                    if (s != null) hl.Reference = s;
+                }
+
+        foreach (var tablePart in worksheet.TableDefinitionParts)
+        {
+            var tbl = tablePart.Table;
+            if (tbl == null) continue;
+            if (tbl.Reference?.Value != null)
+            {
+                var s = RemapColsInRangeRef(tbl.Reference.Value, map);
+                if (s != null) tbl.Reference = s;
+            }
+            if (tbl.AutoFilter?.Reference?.Value != null)
+            {
+                var s = RemapColsInRangeRef(tbl.AutoFilter.Reference.Value, map);
+                if (s != null) tbl.AutoFilter.Reference = s;
+            }
+            tbl.Save();
+        }
+
+        // Workbook definedNames may reference columns on this sheet.
+        ApplyColRenumberToWorkbookDefinedNames(sheetName, map);
+    }
+
+    private static string? RemapColsInRangeRef(string? refStr, IReadOnlyDictionary<int, int> map)
+    {
+        if (string.IsNullOrEmpty(refStr)) return null;
+        var parts = refStr.Split(':');
+        var shifted = new List<string>(parts.Length);
+        var colVals = new List<int>(parts.Length);
+        foreach (var part in parts)
+        {
+            try
+            {
+                var match = System.Text.RegularExpressions.Regex.Match(part, @"^([A-Z]+)(\d+)$");
+                if (!match.Success) { shifted.Add(part); colVals.Add(-1); continue; }
+                var col = match.Groups[1].Value;
+                var oldColIdx = ColumnNameToIndex(col);
+                var row = match.Groups[2].Value;
+                var newCol = map.TryGetValue(oldColIdx, out var n) ? IndexToColumnName(n) : col;
+                shifted.Add($"{newCol}{row}");
+                colVals.Add(map.TryGetValue(oldColIdx, out var ni) ? ni : oldColIdx);
+            }
+            catch { shifted.Add(part); colVals.Add(-1); }
+        }
+        if (colVals.Count == 2 && colVals[0] > 0 && colVals[1] > 0 && colVals[0] > colVals[1])
+            return null;
+        return string.Join(":", shifted);
+    }
+
+    private void ApplyColRenumberToWorkbookDefinedNames(string sheetName, IReadOnlyDictionary<int, int> map)
+    {
+        if (map.Count == 0) return;
+        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
+        if (definedNames == null) return;
+        bool changed = false;
+        foreach (var dn in definedNames.Elements<DefinedName>())
+        {
+            if (dn.Text == null) continue;
+            var newText = Core.FormulaRefShifter.ApplyColRenumberMap(
+                dn.Text, sheetName, sheetName, map);
+            if (!string.Equals(newText, dn.Text, StringComparison.Ordinal))
+            {
+                dn.Text = newText;
+                changed = true;
+            }
+        }
+        if (changed) GetWorkbook().Save();
+    }
+
+    private void ApplyRowRenumberToWorkbookDefinedNames(string sheetName, IReadOnlyDictionary<int, int> map)
+    {
+        if (map.Count == 0) return;
+        var definedNames = GetWorkbook().GetFirstChild<DefinedNames>();
+        if (definedNames == null) return;
+        bool changed = false;
+        foreach (var dn in definedNames.Elements<DefinedName>())
+        {
+            if (dn.Text == null) continue;
+            var newText = Core.FormulaRefShifter.ApplyRowRenumberMap(
+                dn.Text, sheetName, sheetName, map);
+            if (!string.Equals(newText, dn.Text, StringComparison.Ordinal))
+            {
+                dn.Text = newText;
+                changed = true;
+            }
+        }
+        if (changed) GetWorkbook().Save();
     }
 
     /// <summary>

@@ -13,7 +13,7 @@
   "paths": {
     "positional": ["/SheetName/col[X]"]
   },
-  "note": "X may be a column letter (A,B,...) or a 1-based numeric index. Width is in Excel character units via ParseColWidthChars. Type name 'col' and 'column' are both accepted. Position can be specified with --prop name=L (column letter), --prop col=N or --index N (1-based index), --before /SheetName/col[L], or --after /SheetName/col[L]; when the slot is occupied, all columns at or past the slot shift right by one and every range-bearing structure on the sheet is adjusted (mergeCells, CF/DV sqref, autoFilter, hyperlink/table refs, named ranges, and formula cell-refs across the sheet via FormulaRefShifter).",
+  "note": "X may be a column letter (A,B,...) or a 1-based numeric index. Width is in Excel character units via ParseColWidthChars. Type name 'col' and 'column' are both accepted. Position can be specified with --prop name=L (column letter), --prop col=N or --index N (1-based index), --before /SheetName/col[L], or --after /SheetName/col[L]; when the slot is occupied, all columns at or past the slot shift right by one and every range-bearing structure on the sheet is adjusted (mergeCells, CF/DV sqref, autoFilter, hyperlink/table refs, named ranges, and formula cell-refs across the sheet via FormulaRefShifter). 'move /SheetName/col[L]' is also supported with --before/--after anchors and remaps cells, <col> metadata, formulas, range refs, and workbook definedNames so cross-column references follow the moved content.",
   "properties": {
     "name": {
       "type": "string",

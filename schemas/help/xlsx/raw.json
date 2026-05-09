@@ -15,6 +15,7 @@
     { "name": "/workbook",      "desc": "Workbook part (sheet refs, defined names, calc properties)" },
     { "name": "/styles",        "desc": "Stylesheet (fonts, fills, borders, numFmts, cellXfs)" },
     { "name": "/sharedStrings", "desc": "Shared string table" },
+    { "name": "/theme",         "desc": "Theme (color scheme, font scheme)" },
     { "name": "/<SheetName>",   "desc": "Worksheet by name, e.g. /Sheet1" },
     { "name": "/<SheetName>/drawing", "desc": "Drawing part for that sheet (shapes, charts, pictures)" },
     { "name": "/<SheetName>/chart[N]", "desc": "Nth chart on the named sheet" },

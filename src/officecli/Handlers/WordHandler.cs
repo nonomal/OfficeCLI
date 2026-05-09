@@ -146,14 +146,26 @@ public partial class WordHandler : IDocumentHandler
         var mainPart = _doc.MainDocumentPart;
         if (mainPart == null) return "(no main part)";
 
+        // CONSISTENCY(zip-uri-lookup): see RawXmlHelper. Any path ending in
+        // .xml is resolved against the package's part tree directly.
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"Use semantic paths (/document, /styles, /header[N]) for stable identification.");
+            return RawXmlHelper.ReadPartXml(part);
+        }
+
         return partPath.ToLowerInvariant() switch
         {
-            "/document" or "/word/document.xml" => mainPart.Document?.OuterXml ?? "",
-            "/styles" or "/word/styles.xml" => mainPart.StyleDefinitionsPart?.Styles?.OuterXml ?? "(no styles)",
-            "/settings" or "/word/settings.xml" => mainPart.DocumentSettingsPart?.Settings?.OuterXml ?? "(no settings)",
-            "/numbering" or "/word/numbering.xml" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
+            "/document" => mainPart.Document?.OuterXml ?? "",
+            "/styles" => mainPart.StyleDefinitionsPart?.Styles?.OuterXml ?? "(no styles)",
+            "/settings" => mainPart.DocumentSettingsPart?.Settings?.OuterXml ?? "(no settings)",
+            "/numbering" => mainPart.NumberingDefinitionsPart?.Numbering?.OuterXml ?? "(no numbering)",
             "/comments" => mainPart.WordprocessingCommentsPart?.Comments?.OuterXml ?? "(no comments)",
-            "/theme" or "/word/theme/theme1.xml" => mainPart.ThemePart?.Theme?.OuterXml ?? "(no theme)",
+            "/theme" => mainPart.ThemePart?.Theme?.OuterXml ?? "(no theme)",
             _ when partPath.StartsWith("/header") => GetHeaderRawXml(partPath),
             _ when partPath.StartsWith("/footer") => GetFooterRawXml(partPath),
             _ when partPath.StartsWith("/chart") => GetChartRawXml(partPath),
@@ -165,6 +177,16 @@ public partial class WordHandler : IDocumentHandler
     {
         var mainPart = _doc.MainDocumentPart
             ?? throw new InvalidOperationException("No main document part");
+
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package.");
+            RawXmlHelper.Execute(part, xpath, action, xml);
+            return;
+        }
 
         OpenXmlPartRootElement rootElement;
         var lowerPath = partPath.ToLowerInvariant();

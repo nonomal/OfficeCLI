@@ -47,31 +47,29 @@ public partial class ExcelHandler : IDocumentHandler
 
     // ==================== Raw Layer ====================
 
-    // CONSISTENCY(zip-path-alias): mirror WordHandler.Raw's accept-both-forms
-    // pattern — agents trained on OOXML / ECMA-376 reach for the standard
-    // zip-internal part name (e.g. /xl/workbook.xml). Map those to the
-    // canonical short name only for unambiguous global parts; sheet-scoped
-    // parts (/xl/worksheets/sheet1.xml) are intentionally NOT aliased,
-    // because the internal sheet1.xml numbering can drift from sheet display
-    // name/order after rename/reorder/delete.
-    private static readonly Dictionary<string, string> ZipPartAliases =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["/xl/workbook.xml"] = "/workbook",
-            ["/xl/styles.xml"] = "/styles",
-            ["/xl/sharedStrings.xml"] = "/sharedstrings",
-            ["/xl/theme/theme1.xml"] = "/theme",
-        };
-
-    private static string NormalizeZipPath(string partPath) =>
-        ZipPartAliases.TryGetValue(partPath, out var canonical) ? canonical : partPath;
+    // CONSISTENCY(zip-uri-lookup): any partPath ending in `.xml` is treated
+    // as a literal zip-internal URI and resolved via `RawXmlHelper.FindPartByZipUri`.
+    // This replaces the old hand-curated alias table (workbook/styles/...) which
+    // could never cover everything — sheet/slide-scoped parts, footnotes,
+    // custom XML, etc. were all unreachable. Semantic short names (`/workbook`,
+    // `/Sheet1`, `/chart[N]`) continue to route through the switch below.
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
         var workbookPart = _doc.WorkbookPart;
         if (workbookPart == null) return "(empty)";
 
-        partPath = NormalizeZipPath(partPath);
+        // Zip-URI form: any path ending in .xml is resolved literally against
+        // the package's part tree. No alias table needed.
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"Use semantic paths (/workbook, /Sheet1, /chart[N]) for stable identification.");
+            return RawXmlHelper.ReadPartXml(part);
+        }
 
         if (partPath == "/" || partPath == "/workbook")
             return workbookPart.Workbook?.OuterXml ?? "(empty)";
@@ -225,7 +223,18 @@ public partial class ExcelHandler : IDocumentHandler
         var workbookPart = _doc.WorkbookPart
             ?? throw new InvalidOperationException("No workbook part");
 
-        partPath = NormalizeZipPath(partPath);
+        // Zip-URI form: resolve via package part tree, mutate the part's XML
+        // stream directly (no SDK typed root needed — handles arbitrary XML
+        // parts like footnotes, customXml, untyped sheet1.xml, etc.).
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package.");
+            RawXmlHelper.Execute(part, xpath, action, xml);
+            return;
+        }
 
         OpenXmlPartRootElement rootElement;
         if (partPath is "/" or "/workbook")

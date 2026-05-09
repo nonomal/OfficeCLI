@@ -26,8 +26,44 @@ internal static class RawXmlHelper
     /// <returns>Number of elements affected</returns>
     public static int Execute(OpenXmlPartRootElement rootElement, string xpath, string action, string? xml)
     {
-        // Convert OpenXml tree to XDocument for XPath support
-        var xDoc = XDocument.Parse(rootElement.OuterXml);
+        var (xDoc, affected) = ExecuteOnXmlString(rootElement.OuterXml, xpath, action, xml);
+        if (affected == 0) return 0;
+        // Write modified XML back to the OpenXml element.
+        // Propagate namespace declarations from root to direct child elements,
+        // so that each child's ToString() produces self-contained XML with
+        // all necessary namespace bindings (otherwise inherited namespaces are lost).
+        var rootNsAttrs = xDoc.Root!.Attributes()
+            .Where(a => a.IsNamespaceDeclaration).ToList();
+        foreach (var child in xDoc.Root.Elements())
+        {
+            foreach (var nsAttr in rootNsAttrs)
+            {
+                if (child.Attribute(nsAttr.Name) == null)
+                    child.SetAttributeValue(nsAttr.Name, nsAttr.Value);
+            }
+        }
+        rootElement.InnerXml = string.Concat(xDoc.Root.Nodes().Select(n => n.ToString()));
+        return affected;
+    }
+
+    /// <summary>
+    /// Apply a raw XML operation directly on a part's stream (no SDK typed
+    /// root needed). Used for arbitrary XML parts addressed by zip URI —
+    /// sheet1.xml, footnotes.xml, customXml/item1.xml, etc.
+    /// </summary>
+    public static int Execute(OpenXmlPart part, string xpath, string action, string? xml)
+    {
+        var sourceXml = ReadPartXml(part);
+        var (xDoc, affected) = ExecuteOnXmlString(sourceXml, xpath, action, xml);
+        if (affected == 0) return 0;
+        WritePartXml(part, xDoc.ToString(SaveOptions.DisableFormatting));
+        return affected;
+    }
+
+    private static (XDocument xDoc, int affected) ExecuteOnXmlString(
+        string sourceXml, string xpath, string action, string? xml)
+    {
+        var xDoc = XDocument.Parse(sourceXml);
         var nsManager = BuildNamespaceManager(xDoc);
 
         var nodes = xDoc.XPathSelectElements(xpath, nsManager).ToList();
@@ -37,7 +73,7 @@ internal static class RawXmlHelper
             Console.Error.WriteLine("Hint: auto-registered namespace prefixes: " +
                 string.Join(", ", CommonNamespaces.Keys.Order()) +
                 ". No xmlns declarations needed in --xml fragments.");
-            return 0;
+            return (xDoc, 0);
         }
 
         int affected = 0;
@@ -121,23 +157,7 @@ internal static class RawXmlHelper
             }
         }
 
-        // Write modified XML back to the OpenXml element.
-        // Propagate namespace declarations from root to direct child elements,
-        // so that each child's ToString() produces self-contained XML with
-        // all necessary namespace bindings (otherwise inherited namespaces are lost).
-        var rootNsAttrs = xDoc.Root!.Attributes()
-            .Where(a => a.IsNamespaceDeclaration).ToList();
-        foreach (var child in xDoc.Root.Elements())
-        {
-            foreach (var nsAttr in rootNsAttrs)
-            {
-                if (child.Attribute(nsAttr.Name) == null)
-                    child.SetAttributeValue(nsAttr.Name, nsAttr.Value);
-            }
-        }
-        rootElement.InnerXml = string.Concat(xDoc.Root.Nodes().Select(n => n.ToString()));
-
-        return affected;
+        return (xDoc, affected);
     }
 
     private static readonly Dictionary<string, string> CommonNamespaces = new()
@@ -300,5 +320,80 @@ internal static class RawXmlHelper
         {
             nsManager.AddNamespace(prefix, uri);
         }
+    }
+
+    // ==================== Zip-URI part lookup ====================
+    //
+    // Rule: any partPath ending in `.xml` is treated as a literal zip-internal
+    // URI (e.g. `/xl/worksheets/sheet1.xml`, `/word/footnotes.xml`,
+    // `/ppt/slides/slide1.xml`). We walk the entire part tree of the package
+    // and match against `OpenXmlPart.Uri.OriginalString`.
+    //
+    // This supersedes the per-handler hand-curated alias tables, which could
+    // never be complete (only covered global parts like /xl/workbook.xml).
+    // Semantic paths (`/Sheet1`, `/workbook`, `/document`, `/header[1]`) still
+    // route through the handler's own switch — only `.xml`-suffixed inputs
+    // hit this lookup.
+
+    /// <summary>
+    /// Returns true if `partPath` should be resolved as a literal zip-internal
+    /// URI rather than a semantic short name. Currently: any path ending in
+    /// `.xml` (case-insensitive).
+    /// </summary>
+    public static bool IsZipUriPath(string partPath) =>
+        partPath != null && partPath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Walk the entire part tree of a package and return the part whose
+    /// `Uri.OriginalString` matches `partPath` (with leading-slash
+    /// normalization). Returns null if no part matches.
+    /// </summary>
+    public static OpenXmlPart? FindPartByZipUri(OpenXmlPackage package, string partPath)
+    {
+        // Normalize: ensure leading slash and lowercase compare per Open
+        // Packaging Conventions (URIs are case-insensitive in zip parts).
+        var target = partPath.StartsWith('/') ? partPath : "/" + partPath;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return Walk(package);
+
+        OpenXmlPart? Walk(OpenXmlPartContainer container)
+        {
+            foreach (var rel in container.Parts)
+            {
+                var p = rel.OpenXmlPart;
+                var uri = p.Uri.OriginalString;
+                if (!seen.Add(uri)) continue;
+                if (string.Equals(uri, target, StringComparison.OrdinalIgnoreCase))
+                    return p;
+                var nested = Walk(p);
+                if (nested != null) return nested;
+            }
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Read a part's XML content as a string. Prefer the typed
+    /// <see cref="OpenXmlPartRootElement"/> when available (preserves
+    /// canonical SDK serialization); fall back to the underlying stream for
+    /// untyped XML parts (e.g. CustomXml).
+    /// </summary>
+    public static string ReadPartXml(OpenXmlPart part)
+    {
+        if (part.RootElement is OpenXmlPartRootElement root && root != null)
+            return root.OuterXml;
+        using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
+    /// Write XML content into a part's stream, replacing prior contents.
+    /// </summary>
+    public static void WritePartXml(OpenXmlPart part, string xml)
+    {
+        using var stream = part.GetStream(FileMode.Create, FileAccess.Write);
+        using var writer = new StreamWriter(stream);
+        writer.Write(xml);
     }
 }

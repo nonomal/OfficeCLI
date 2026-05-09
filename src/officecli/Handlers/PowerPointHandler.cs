@@ -36,28 +36,24 @@ public partial class PowerPointHandler : IDocumentHandler
 
     // ==================== Raw Layer ====================
 
-    // CONSISTENCY(zip-path-alias): mirror WordHandler.Raw's accept-both-forms
-    // pattern — agents trained on OOXML / ECMA-376 reach for the standard
-    // zip-internal part name (e.g. /ppt/presentation.xml). Aliased only for
-    // unambiguous global parts; slide/master/layout/noteSlide are NOT
-    // aliased because the internal slide1.xml numbering can drift from
-    // visible slide order after reorder/delete.
-    private static readonly Dictionary<string, string> ZipPartAliases =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            ["/ppt/presentation.xml"] = "/presentation",
-            ["/ppt/theme/theme1.xml"] = "/theme",
-        };
-
-    private static string NormalizeZipPath(string partPath) =>
-        ZipPartAliases.TryGetValue(partPath, out var canonical) ? canonical : partPath;
+    // CONSISTENCY(zip-uri-lookup): see ExcelHandler.cs / RawXmlHelper —
+    // any partPath ending in `.xml` is resolved as a literal zip URI via
+    // the package's part tree, no per-handler alias table needed.
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
     {
         var presentationPart = _doc.PresentationPart;
         if (presentationPart == null) return "(empty)";
 
-        partPath = NormalizeZipPath(partPath);
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package. " +
+                    $"Use semantic paths (/presentation, /slide[N], /slideMaster[N]) for stable identification.");
+            return RawXmlHelper.ReadPartXml(part);
+        }
 
         if (partPath == "/" || partPath == "/presentation")
             return presentationPart.Presentation?.OuterXml ?? "(empty)";
@@ -121,7 +117,15 @@ public partial class PowerPointHandler : IDocumentHandler
         var presentationPart = _doc.PresentationPart
             ?? throw new InvalidOperationException("No presentation part");
 
-        partPath = NormalizeZipPath(partPath);
+        if (RawXmlHelper.IsZipUriPath(partPath))
+        {
+            var part = RawXmlHelper.FindPartByZipUri(_doc, partPath)
+                ?? throw new ArgumentException(
+                    $"Unknown part: {partPath}. The path was treated as a zip-internal URI " +
+                    $"because it ends in .xml, but no matching part exists in the package.");
+            RawXmlHelper.Execute(part, xpath, action, xml);
+            return;
+        }
 
         OpenXmlPartRootElement rootElement;
 

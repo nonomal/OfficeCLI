@@ -1516,6 +1516,26 @@ public partial class PowerPointHandler
                             var gsIdx = gsCells.IndexOf(cell);
                             for (int mi = gsIdx + 1; mi < gsIdx + span && mi < gsCells.Count; mi++)
                                 gsCells[mi].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                            // BUG-R5-table-merge BUG-8: when the anchor cell
+                            // already has rowSpan>1, the corner cells in each
+                            // continuation row need both hMerge=true (covered
+                            // by this gridSpan) and vMerge=true (covered by
+                            // the prior rowSpan). CONSISTENCY(table-merge-2d).
+                            int gsAnchorRowSpan = cell.RowSpan?.Value ?? 1;
+                            if (gsAnchorRowSpan > 1 && gsRow.Parent is Drawing.Table gsAnchorTbl)
+                            {
+                                var gsRows = gsAnchorTbl.Elements<Drawing.TableRow>().ToList();
+                                var gsRowIdx = gsRows.IndexOf(gsRow);
+                                for (int ri = gsRowIdx + 1; ri < gsRowIdx + gsAnchorRowSpan && ri < gsRows.Count; ri++)
+                                {
+                                    var rowCells = gsRows[ri].Elements<Drawing.TableCell>().ToList();
+                                    for (int ci = gsIdx + 1; ci < gsIdx + span && ci < rowCells.Count; ci++)
+                                    {
+                                        rowCells[ci].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                        rowCells[ci].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                    }
+                                }
+                            }
                         }
                     }
                     else
@@ -1562,11 +1582,21 @@ public partial class PowerPointHandler
                         var rsRowIdx2 = rsRows2.IndexOf(rsAnchorRow);
                         var rsCells2 = rsAnchorRow.Elements<Drawing.TableCell>().ToList();
                         var rsColIdx2 = rsCells2.IndexOf(cell);
+                        // BUG-R5-table-merge BUG-8: when anchor already has
+                        // gridSpan>1, corner continuation cells in each
+                        // below-row need both vMerge (this rowSpan) and
+                        // hMerge (the prior gridSpan). CONSISTENCY(table-merge-2d).
+                        int rsAnchorGridSpan = cell.GridSpan?.Value ?? 1;
                         for (int ri = rsRowIdx2 + 1; ri < rsRowIdx2 + rsSpan && ri < rsRows2.Count; ri++)
                         {
                             var belowCells = rsRows2[ri].Elements<Drawing.TableCell>().ToList();
                             if (rsColIdx2 < belowCells.Count)
                                 belowCells[rsColIdx2].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                            for (int ci = rsColIdx2 + 1; ci < rsColIdx2 + rsAnchorGridSpan && ci < belowCells.Count; ci++)
+                            {
+                                belowCells[ci].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                belowCells[ci].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                            }
                         }
                     }
                     break;

@@ -381,6 +381,54 @@ public partial class WordHandler
                     }
                 }
             }
+
+            // CONSISTENCY(ref-cleanup): mirror BUG-R3-09 hyperlink cleanup for
+            // comments. A removed paragraph that hosted a CommentReference (or
+            // a CommentRangeStart/End pair) leaves the matching <w:comment id=N>
+            // in comments.xml as an orphan — Word ignores it but validators and
+            // round-trip tools flag it, and the sidebar shows ghost comments.
+            // For each comment id referenced inside `element`, count outside
+            // refs (CommentReference/CommentRangeStart/CommentRangeEnd in the
+            // body that are NOT inside `element`); if zero, drop the matching
+            // <w:comment> entry.
+            var commentIdsInElement = element.Descendants<CommentReference>()
+                .Select(cr => cr.Id?.Value)
+                .Concat(element.Descendants<CommentRangeStart>().Select(rs => rs.Id?.Value))
+                .Concat(element.Descendants<CommentRangeEnd>().Select(re => re.Id?.Value))
+                .Where(id => !string.IsNullOrEmpty(id))
+                .Distinct()
+                .ToList();
+            if (commentIdsInElement.Count > 0
+                && mainPart2.WordprocessingCommentsPart?.Comments is { } commentsRoot)
+            {
+                bool IsInside(OpenXmlElement? n)
+                {
+                    for (var anc = n; anc != null; anc = anc.Parent)
+                        if (ReferenceEquals(anc, element)) return true;
+                    return false;
+                }
+                var bodyRoot = mainPart2.Document?.Body;
+                foreach (var cid in commentIdsInElement)
+                {
+                    int outsideRefs = 0;
+                    if (bodyRoot != null)
+                    {
+                        outsideRefs += bodyRoot.Descendants<CommentReference>()
+                            .Count(cr => cr.Id?.Value == cid && !IsInside(cr));
+                        outsideRefs += bodyRoot.Descendants<CommentRangeStart>()
+                            .Count(rs => rs.Id?.Value == cid && !IsInside(rs));
+                        outsideRefs += bodyRoot.Descendants<CommentRangeEnd>()
+                            .Count(re => re.Id?.Value == cid && !IsInside(re));
+                    }
+                    if (outsideRefs == 0)
+                    {
+                        var orphan = commentsRoot.Elements<Comment>()
+                            .FirstOrDefault(c => c.Id?.Value == cid);
+                        orphan?.Remove();
+                    }
+                }
+                commentsRoot.Save();
+            }
         }
 
         // If removing a Comment, also clean up dangling references in the body

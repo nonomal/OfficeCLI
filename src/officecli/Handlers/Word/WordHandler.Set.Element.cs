@@ -1481,6 +1481,18 @@ public partial class WordHandler
                 }
                 case "vmerge":
                     // ST_Merge schema only defines "restart" — continuation is bare <w:vMerge/>.
+                    // BUG-R5-table-merge BUG-9: continuation vMerge in the
+                    // first row has no restart anchor above it — Word renders
+                    // the cell as invisible / repairs the file. Reject up
+                    // front; users must set vmerge=restart instead.
+                    if (value.ToLowerInvariant() != "restart"
+                        && cell.Parent is TableRow vmRow0
+                        && vmRow0.Parent is Table vmTbl0
+                        && vmTbl0.Elements<TableRow>().FirstOrDefault() == vmRow0)
+                    {
+                        throw new ArgumentException(
+                            "Cannot set vmerge=continue on a cell in the first row: there is no restart anchor above it. Use vmerge=restart instead.");
+                    }
                     tcPr.VerticalMerge = value.ToLowerInvariant() == "restart"
                         ? new VerticalMerge { Val = MergedCellValues.Restart }
                         : new VerticalMerge();

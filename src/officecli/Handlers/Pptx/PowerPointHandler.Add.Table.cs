@@ -114,7 +114,26 @@ public partial class PowerPointHandler
 
                 // Build table
                 var table = new Drawing.Table();
-                var tblProps = new Drawing.TableProperties { FirstRow = true, BandRow = true };
+                var tblProps = new Drawing.TableProperties();
+
+                // tblLook props: read overrides from properties, with default firstRow/bandRow=true.
+                static bool? ReadBoolProp(Dictionary<string, string> p, params string[] keys)
+                {
+                    foreach (var k in keys)
+                        if (p.TryGetValue(k, out var v))
+                            return IsTruthy(v);
+                    return null;
+                }
+                tblProps.FirstRow    = ReadBoolProp(properties, "firstRow", "firstrow") ?? true;
+                tblProps.BandRow     = ReadBoolProp(properties, "bandedRows", "bandedrows", "bandRow", "bandrow") ?? true;
+                var lastRowProp      = ReadBoolProp(properties, "lastRow", "lastrow");
+                if (lastRowProp.HasValue) tblProps.LastRow = lastRowProp.Value;
+                var firstColProp     = ReadBoolProp(properties, "firstCol", "firstcol", "firstColumn", "firstcolumn");
+                if (firstColProp.HasValue) tblProps.FirstColumn = firstColProp.Value;
+                var lastColProp      = ReadBoolProp(properties, "lastCol", "lastcol", "lastColumn", "lastcolumn");
+                if (lastColProp.HasValue) tblProps.LastColumn = lastColProp.Value;
+                var bandColProp      = ReadBoolProp(properties, "bandedCols", "bandedcols", "bandCol", "bandcol", "bandColumn", "bandcolumn");
+                if (bandColProp.HasValue) tblProps.BandColumn = bandColProp.Value;
 
                 // Apply table style if specified
                 if (properties.TryGetValue("style", out var tblStyleVal))
@@ -125,9 +144,20 @@ public partial class PowerPointHandler
 
                 table.Append(tblProps);
 
+                // Optional explicit colWidths (semicolon- or comma-separated EMU/cm/pt values).
+                long[]? explicitColWidths = null;
+                if (properties.TryGetValue("colWidths", out var cwStr) || properties.TryGetValue("colwidths", out cwStr))
+                {
+                    var parts = cwStr.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    explicitColWidths = parts.Select(p => ParseEmu(p.Trim())).ToArray();
+                }
+
                 var tableGrid = new Drawing.TableGrid();
                 for (int c = 0; c < cols; c++)
-                    tableGrid.Append(new Drawing.GridColumn { Width = colWidth });
+                {
+                    var w = (explicitColWidths != null && c < explicitColWidths.Length) ? explicitColWidths[c] : colWidth;
+                    tableGrid.Append(new Drawing.GridColumn { Width = w });
+                }
                 table.Append(tableGrid);
 
                 // Parse optional fill colors for header/body rows

@@ -1394,39 +1394,45 @@ public partial class ExcelHandler
         if (formula != null)
         {
             node.Format["formula"] = formula;
-            // cachedValue + computedValue + evaluated — three independent
-            // signals so agents can detect stale caches.
-            //   cachedValue : raw <x:v> the producer persisted. Trusted as
-            //                 XML state, NOT verified against re-evaluation.
+            // Three Format keys for formula cells:
+            //   cachedValue   : raw <x:v> the producer persisted. Trusted as
+            //                   XML state, not verified against re-evaluation.
+            //                   Absent when <x:v> is missing (e.g. Add path
+            //                   before the file has been opened in Excel).
             //   computedValue : what officecli's evaluator produces for the
-            //                 same formula right now, in the current workbook
-            //                 state. Emitted whenever the evaluator succeeds,
-            //                 regardless of whether cachedValue is present —
-            //                 letting callers diff cached vs computed to spot
-            //                 stale writes (e.g. an imported file whose <v>
-            //                 was not refreshed after upstream edits).
-            //   evaluated : Excel-persisted-cache verdict. True iff <x:v>
-            //                 was written. Strict XML-state semantics so the
-            //                 field has one unambiguous meaning; agents
-            //                 wanting "did anyone produce a value?" should
-            //                 combine cachedValue OR computedValue.
-            // computedValue is suppressed for formulas whose ref points at a
-            // sheet that no longer exists — ResolveSheetCellResult silently
-            // returns 0 in that branch, and surfacing it would pollute the
-            // diff with a fake. view issues formula_not_evaluated handles
-            // that case separately.
+            //                   same formula right now, in the current
+            //                   workbook state. Emitted whenever the
+            //                   evaluator succeeds, regardless of cachedValue
+            //                   presence. Suppressed for formulas whose ref
+            //                   points at a sheet that no longer exists —
+            //                   ResolveSheetCellResult silently returns 0
+            //                   in that branch, and a fake would pollute the
+            //                   diff. view issues formula_not_evaluated
+            //                   handles that case separately.
+            //   evaluated     : cross-handler protocol verdict — true iff
+            //                   the cell has a trustworthy value available
+            //                   (cachedValue present OR computedValue
+            //                   produced). False iff neither is available.
+            //                   Agents can use this single bool to decide
+            //                   whether to trust the displayed value;
+            //                   diff cachedValue vs computedValue to detect
+            //                   stale caches (see view issues
+            //                   formula_cache_stale).
             var rawCached = cell.CellValue?.Text;
+            string? computedValue = null;
             if (!string.IsNullOrEmpty(rawCached))
                 node.Format["cachedValue"] = rawCached;
             if (evaluator != null && !FormulaReferencesMissingSheet(formula))
             {
                 var report = evaluator.EvaluateForReport(formula);
                 if (report.Status == Core.EvalReportStatus.Evaluated)
-                    node.Format["computedValue"] = report.Result!.ToCellValueText();
+                    computedValue = report.Result!.ToCellValueText();
                 else if (report.Status == Core.EvalReportStatus.Error)
-                    node.Format["computedValue"] = report.Result!.ErrorValue!;
+                    computedValue = report.Result!.ErrorValue!;
+                if (computedValue != null)
+                    node.Format["computedValue"] = computedValue;
             }
-            node.Format["evaluated"] = !string.IsNullOrEmpty(rawCached);
+            node.Format["evaluated"] = !string.IsNullOrEmpty(rawCached) || computedValue != null;
         }
         // Array formula readback — keys match Set input
         if (cell.CellFormula?.FormulaType?.Value == CellFormulaValues.Array)

@@ -480,18 +480,35 @@ public partial class ExcelHandler
                         });
                     }
                     else if (cell.CellFormula?.Text is { } fText
-                        && string.IsNullOrEmpty(cell.CellValue?.Text)
-                        && ShouldScan("formula_not_evaluated"))
+                        && (ShouldScan("formula_not_evaluated") || ShouldScan("formula_cache_stale")))
                     {
-                        // Route through the shared EvaluateForReport so view
-                        // text / view issues / Format["evaluated"] all agree on
-                        // what counts as "evaluator gave up".
+                        // Two-subtype scan on the same formula cell:
+                        //   formula_not_evaluated — neither cachedValue nor
+                        //     a successful evaluator result is available
+                        //     (Format["evaluated"]=false). Caller has no
+                        //     trustworthy value to read.
+                        //   formula_cache_stale  — cachedValue is present
+                        //     AND officecli's evaluator produced a different
+                        //     value. The XML cache is rot relative to the
+                        //     formula. Common after upstream edits to
+                        //     referenced cells when the file was not
+                        //     re-opened in Excel for recalc.
+                        // Both subtypes use the same gate semantics as the
+                        // BuildCellNode formula branch; keep them in lockstep.
+                        var rawCached = cell.CellValue?.Text;
+                        var hasCache = !string.IsNullOrEmpty(rawCached);
+                        var missingSheet = FormulaReferencesMissingSheet(fText);
                         var report = evaluator.EvaluateForReport(fText);
-                        // Also report when the formula references a sheet that
-                        // no longer exists — the Get path suppresses computedValue
-                        // there and sets evaluated=false, but view issues was silent.
-                        if (report.Status == Core.EvalReportStatus.NotEvaluated
-                            || FormulaReferencesMissingSheet(fText))
+                        string? computed = null;
+                        if (!missingSheet)
+                        {
+                            if (report.Status == Core.EvalReportStatus.Evaluated)
+                                computed = report.Result!.ToCellValueText();
+                            else if (report.Status == Core.EvalReportStatus.Error)
+                                computed = report.Result!.ErrorValue!;
+                        }
+
+                        if (!hasCache && computed == null && ShouldScan("formula_not_evaluated"))
                         {
                             issues.Add(new DocumentIssue
                             {
@@ -500,9 +517,24 @@ public partial class ExcelHandler
                                 Subtype = "formula_not_evaluated",
                                 Severity = IssueSeverity.Warning,
                                 Path = $"{sheetName}!{cellRef}",
-                                Message = FormulaReferencesMissingSheet(fText)
+                                Message = missingSheet
                                     ? "Formula references missing sheet (officecli evaluator silently returns 0; Excel would show #REF!)"
                                     : "Formula written but not evaluated (no cachedValue, evaluator unsupported)",
+                                Context = $"={fText}"
+                            });
+                        }
+                        else if (hasCache && computed != null
+                            && !string.Equals(rawCached, computed, StringComparison.Ordinal)
+                            && ShouldScan("formula_cache_stale"))
+                        {
+                            issues.Add(new DocumentIssue
+                            {
+                                Id = $"U{++issueNum}",
+                                Type = IssueType.Content,
+                                Subtype = "formula_cache_stale",
+                                Severity = IssueSeverity.Warning,
+                                Path = $"{sheetName}!{cellRef}",
+                                Message = $"Cached value disagrees with re-evaluation (cachedValue=\"{rawCached}\", computedValue=\"{computed}\"). Open in Excel to refresh, or call set to overwrite the formula.",
                                 Context = $"={fText}"
                             });
                         }
@@ -599,7 +631,7 @@ public partial class ExcelHandler
         // Because this is opt-in only, it is intentionally NOT part of the
         // `--type content` broad-bucket scan. Document this in help so the
         // omission is discoverable rather than surprising.
-        if (issueType == "chart_cache_stale")
+        if (issueType != null && string.Equals(issueType, "chart_cache_stale", StringComparison.OrdinalIgnoreCase))
         {
             foreach (var (slug, numRef) in EnumerateChartNumberRefs())
             {

@@ -368,6 +368,20 @@ public partial class ExcelHandler
                     // CONSISTENCY(escape-sequences): mirror PPTX/Word — interpret
                     // \n and \t two-char escapes as real newline / tab.
                     var cellValue = effectiveValue.Replace("\\n", "\n").Replace("\\t", "\t");
+                    // Warn when overwriting an existing formula with a literal value.
+                    // Without this, `set --prop value=N` on a formula cell silently
+                    // drops the formula — the same conflict-class as supplying both
+                    // value= and formula= in one call (handled above), but split
+                    // across two calls. Skipped when formula= is also in this call
+                    // (already warned above) and when the literal coerces into a
+                    // formula (value starting with '=', which gotos the formula case).
+                    if (cell.CellFormula != null
+                        && !properties.Any(p => p.Key.Equals("formula", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var oldFormula = cell.CellFormula.Text;
+                        Console.Error.WriteLine(
+                            $"Warning: Cell {cell.CellReference?.Value ?? cellRef} has formula \"={oldFormula}\"; replacing with literal value. Use --prop formula=… to update the formula instead.");
+                    }
                     cell.CellFormula = null; // Clear formula when explicit value is set
                     // If cell is already boolean type, convert true/false to 1/0
                     if (cell.DataType?.Value == CellValues.Boolean)

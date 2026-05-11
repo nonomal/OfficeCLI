@@ -506,7 +506,7 @@ public partial class ExcelHandler
                         });
                     }
                     else if (cell.CellFormula?.Text is { } fText
-                        && (ShouldScan("formula_not_evaluated") || ShouldScan("formula_cache_stale")))
+                        && (ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated) || ShouldScan(Core.IssueSubtypes.FormulaCacheStale)))
                     {
                         // Two-subtype scan on the same formula cell:
                         //   formula_not_evaluated — neither cachedValue nor
@@ -534,13 +534,13 @@ public partial class ExcelHandler
                                 computed = report.Result!.ErrorValue!;
                         }
 
-                        if (!hasCache && computed == null && ShouldScan("formula_not_evaluated"))
+                        if (!hasCache && computed == null && ShouldScan(Core.IssueSubtypes.FormulaNotEvaluated))
                         {
                             issues.Add(new DocumentIssue
                             {
                                 Id = $"U{++issueNum}",
                                 Type = IssueType.Content,
-                                Subtype = "formula_not_evaluated",
+                                Subtype = Core.IssueSubtypes.FormulaNotEvaluated,
                                 Severity = IssueSeverity.Warning,
                                 Path = $"{sheetName}!{cellRef}",
                                 Message = missingSheet
@@ -551,13 +551,13 @@ public partial class ExcelHandler
                         }
                         else if (hasCache && computed != null
                             && !CachedComputedAgree(rawCached!, computed)
-                            && ShouldScan("formula_cache_stale"))
+                            && ShouldScan(Core.IssueSubtypes.FormulaCacheStale))
                         {
                             issues.Add(new DocumentIssue
                             {
                                 Id = $"U{++issueNum}",
                                 Type = IssueType.Content,
-                                Subtype = "formula_cache_stale",
+                                Subtype = Core.IssueSubtypes.FormulaCacheStale,
                                 Severity = IssueSeverity.Warning,
                                 Path = $"{sheetName}!{cellRef}",
                                 Message = $"Cached value disagrees with re-evaluation (cachedValue=\"{rawCached}\", computedValue=\"{computed}\"). Open in Excel to refresh, or call set to overwrite the formula.",
@@ -599,7 +599,7 @@ public partial class ExcelHandler
                     {
                         Id = $"D{++issueNum}",
                         Type = IssueType.Content,
-                        Subtype = "definedname_broken",
+                        Subtype = Core.IssueSubtypes.DefinedNameBroken,
                         Severity = IssueSeverity.Error,
                         Path = $"/namedrange[{name}]",
                         Message = $"Defined name '{name}' has error body {body}",
@@ -613,7 +613,7 @@ public partial class ExcelHandler
                 {
                     Id = $"D{++issueNum}",
                     Type = IssueType.Content,
-                    Subtype = "definedname_target_missing",
+                    Subtype = Core.IssueSubtypes.DefinedNameTargetMissing,
                     Severity = IssueSeverity.Error,
                     Path = $"/namedrange[{name}]",
                     Message = $"Defined name '{name}' references missing sheet '{missingSheet}'",
@@ -638,7 +638,7 @@ public partial class ExcelHandler
             {
                 Id = $"R{++issueNum}",
                 Type = IssueType.Content,
-                Subtype = "chart_series_ref_missing_sheet",
+                Subtype = Core.IssueSubtypes.ChartSeriesRefMissingSheet,
                 Severity = IssueSeverity.Error,
                 Path = slug,
                 Message = $"Chart series references missing sheet '{missingSheet}'",
@@ -657,7 +657,7 @@ public partial class ExcelHandler
         // Because this is opt-in only, it is intentionally NOT part of the
         // `--type content` broad-bucket scan. Document this in help so the
         // omission is discoverable rather than surprising.
-        if (issueType != null && string.Equals(issueType, "chart_cache_stale", StringComparison.OrdinalIgnoreCase))
+        if (issueType != null && string.Equals(issueType, Core.IssueSubtypes.ChartCacheStale, StringComparison.OrdinalIgnoreCase))
         {
             foreach (var (slug, numRef) in EnumerateChartNumberRefs())
             {
@@ -686,7 +686,7 @@ public partial class ExcelHandler
                     {
                         Id = $"C{++issueNum}",
                         Type = IssueType.Content,
-                        Subtype = "chart_cache_stale",
+                        Subtype = Core.IssueSubtypes.ChartCacheStale,
                         Severity = IssueSeverity.Warning,
                         Path = slug,
                         Message = "Chart numCache out of sync with source cells",

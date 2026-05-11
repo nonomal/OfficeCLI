@@ -1370,7 +1370,7 @@ public partial class WordHandler
             {
                 Id = $"U{++issueNum}",
                 Type = IssueType.Content,
-                Subtype = isStale ? "field_cache_stale" : "field_not_evaluated",
+                Subtype = isStale ? Core.IssueSubtypes.FieldCacheStale : Core.IssueSubtypes.FieldNotEvaluated,
                 Severity = IssueSeverity.Warning,
                 Path = "/body",
                 Message = isStale
@@ -1413,7 +1413,7 @@ public partial class WordHandler
                 {
                     Id = $"U{++issueNum}",
                     Type = IssueType.Content,
-                    Subtype = isStale ? "field_cache_stale" : "field_not_evaluated",
+                    Subtype = isStale ? Core.IssueSubtypes.FieldCacheStale : Core.IssueSubtypes.FieldNotEvaluated,
                     Severity = IssueSeverity.Warning,
                     Path = "/body",
                     Message = isStale

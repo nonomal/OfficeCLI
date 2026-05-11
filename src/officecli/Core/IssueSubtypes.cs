@@ -22,9 +22,22 @@ public static class IssueSubtypes
     public const string DefinedNameBroken = "definedname_broken";
     public const string DefinedNameTargetMissing = "definedname_target_missing";
 
-    /// <summary>Broad IssueType buckets and their single-letter aliases.</summary>
+    /// <summary>Broad IssueType bucket names — the canonical surface shown
+    /// in error messages and help. Single-letter aliases (<see cref="BucketAliases"/>)
+    /// are accepted by Validate but kept out of the user-facing list so the
+    /// canonical-vs-alias distinction is visible.</summary>
+    public static readonly string[] BucketNames =
+        new[] { "format", "content", "structure" };
+
+    /// <summary>Single-letter aliases accepted in addition to the canonical
+    /// bucket names. Kept separate from <see cref="BucketNames"/> so error
+    /// listings don't expose them as first-class values.</summary>
+    public static readonly string[] BucketAliases =
+        new[] { "f", "c", "s" };
+
+    /// <summary>Combined accepted bucket inputs (canonical + aliases).</summary>
     public static readonly string[] ValidBuckets =
-        new[] { "format", "content", "structure", "f", "c", "s" };
+        BucketNames.Concat(BucketAliases).ToArray();
 
     /// <summary>Every subtype the <c>view issues</c> filter accepts by name.</summary>
     public static readonly string[] ValidSubtypes = new[]
@@ -53,11 +66,9 @@ public static class IssueSubtypes
         var canonical = trimmed.ToLowerInvariant();
         foreach (var v in ValidBuckets) if (v == canonical) return trimmed;
         foreach (var v in ValidSubtypes) if (v == canonical) return trimmed;
-        var all = new string[ValidBuckets.Length + ValidSubtypes.Length];
-        ValidBuckets.CopyTo(all, 0);
-        ValidSubtypes.CopyTo(all, ValidBuckets.Length);
+        var all = ValidBuckets.Concat(ValidSubtypes).ToArray();
         throw new CliException(
-            $"Invalid --type value: '{issueType}'. Valid buckets: format, content, structure (alias f, c, s). Valid subtypes: {string.Join(", ", ValidSubtypes)}.")
+            $"Invalid --type value: '{issueType}'. Valid buckets: {string.Join(", ", BucketNames)} (alias {string.Join(", ", BucketAliases)}). Valid subtypes: {string.Join(", ", ValidSubtypes)}.")
         { Code = "invalid_issue_type", ValidValues = all };
     }
 }

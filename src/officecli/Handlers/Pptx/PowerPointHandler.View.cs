@@ -557,7 +557,7 @@ public partial class PowerPointHandler
                     {
                         Id = $"U{++issueNum}",
                         Type = IssueType.Content,
-                        Subtype = "slide_field_not_evaluated",
+                        Subtype = Core.IssueSubtypes.SlideFieldNotEvaluated,
                         Severity = IssueSeverity.Warning,
                         Path = scope == "slide"
                             ? $"/slide[{slideNum}]"

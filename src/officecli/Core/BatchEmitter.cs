@@ -177,6 +177,56 @@ public static class BatchEmitter
     // declarations that match the root's declarations, re-serialize. The
     // first-pass emit (source's clean XML) and second-pass emit (target's
     // bloated XML) both collapse to the same canonical shape.
+    // Schema order for <w:ind>'s attributes. SDK serialises in this order
+    // on write, so source-side OuterXml (which mirrors the on-disk order
+    // from the original producer) and replay-target OuterXml (SDK's
+    // canonical) can disagree on attribute order alone. Re-sort to a fixed
+    // canonical order so both passes emit identical bytes.
+    private static readonly string[] s_indAttrOrder =
+    [
+        "start", "end", "left", "right",
+        "hanging", "firstLine",
+        "startChars", "endChars", "leftChars", "rightChars",
+        "hangingChars", "firstLineChars",
+    ];
+
+    private static void SortIndAttrs(System.Xml.Linq.XElement ind)
+    {
+        var attrs = ind.Attributes().ToList();
+        // Keep xmlns declarations first (in original order), then sort
+        // typed attrs by the schema-order table, then unknown attrs by name.
+        var nsDecls = attrs.Where(a => a.IsNamespaceDeclaration).ToList();
+        var typed = attrs.Where(a => !a.IsNamespaceDeclaration).ToList();
+        int OrderKey(System.Xml.Linq.XAttribute a)
+        {
+            var idx = Array.IndexOf(s_indAttrOrder, a.Name.LocalName);
+            return idx < 0 ? 99 : idx;
+        }
+        var sorted = typed.OrderBy(OrderKey).ThenBy(a => a.Name.LocalName, StringComparer.Ordinal).ToList();
+        ind.RemoveAttributes();
+        foreach (var a in nsDecls) ind.Add(a);
+        foreach (var a in sorted) ind.Add(a);
+    }
+
+    private static void RenameAttr(System.Xml.Linq.XElement el, string fromLocal, string toLocal, string ns)
+    {
+        var fromName = System.Xml.Linq.XName.Get(fromLocal, ns);
+        var toName = System.Xml.Linq.XName.Get(toLocal, ns);
+        var src = el.Attribute(fromName);
+        if (src == null) return;
+        if (el.Attribute(toName) != null) { src.Remove(); return; }
+        // Preserve attribute order: re-build the attribute list with the
+        // rename applied in-place. SetAttributeValue(newName) by itself would
+        // append the new attr at the tail and shift byte order.
+        var rebuilt = el.Attributes()
+            .Select(a => a.Name == fromName
+                ? new System.Xml.Linq.XAttribute(toName, a.Value)
+                : new System.Xml.Linq.XAttribute(a.Name, a.Value))
+            .ToList();
+        el.RemoveAttributes();
+        foreach (var a in rebuilt) el.Add(a);
+    }
+
     private static string CanonicalizeRawXml(string xml)
     {
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return xml;
@@ -195,6 +245,19 @@ public static class BatchEmitter
                                 && v == a.Value)
                     .ToList();
                 foreach (var a in toRemove) a.Remove();
+            }
+            // SDK normalises bidi-aware <w:ind w:start="…"> ↔ <w:ind w:left="…">
+            // (and end ↔ right) on serialisation depending on the document's
+            // bidi state. The two forms are byte-different but semantically
+            // equivalent in non-bidi documents. Canonicalise to the bidi-
+            // aware names AND fix the attribute order so the dump pair emits
+            // identical bytes regardless of SDK's choice.
+            var wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+            foreach (var ind in doc.Descendants(System.Xml.Linq.XName.Get("ind", wNs)))
+            {
+                RenameAttr(ind, "left", "start", wNs);
+                RenameAttr(ind, "right", "end", wNs);
+                SortIndAttrs(ind);
             }
             // Stabilise root attribute order: SDK serialises xmlns attrs in
             // an internal order that can shift when mc:Ignorable / other

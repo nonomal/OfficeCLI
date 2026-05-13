@@ -196,7 +196,25 @@ public static class BatchEmitter
                     .ToList();
                 foreach (var a in toRemove) a.Remove();
             }
-            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            // Stabilise root attribute order: SDK serialises xmlns attrs in
+            // an internal order that can shift when mc:Ignorable / other
+            // typed attrs change, so byte-equal round-trip needs a canonical
+            // ordering. Emit xmlns attrs first (sorted by prefix; default
+            // xmlns first if any), then non-xmlns attrs (sorted by name).
+            var root = doc.Root;
+            var allAttrs = root.Attributes().ToList();
+            foreach (var a in allAttrs) a.Remove();
+            var nsAttrs = allAttrs.Where(a => a.IsNamespaceDeclaration)
+                .OrderBy(a => a.Name == System.Xml.Linq.XNamespace.Xmlns + "xmlns" ? "" : a.Name.LocalName,
+                         StringComparer.Ordinal)
+                .ToList();
+            var otherAttrs = allAttrs.Where(a => !a.IsNamespaceDeclaration)
+                .OrderBy(a => a.Name.NamespaceName, StringComparer.Ordinal)
+                .ThenBy(a => a.Name.LocalName, StringComparer.Ordinal)
+                .ToList();
+            foreach (var a in nsAttrs) root.Add(a);
+            foreach (var a in otherAttrs) root.Add(a);
+            return root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
         }
         catch
         {

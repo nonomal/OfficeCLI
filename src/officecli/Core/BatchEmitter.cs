@@ -167,6 +167,44 @@ public static class BatchEmitter
         return items;
     }
 
+    // RawXmlHelper.Execute propagates the root's xmlns declarations onto every
+    // direct child so the SDK's InnerXml setter can resolve prefixes (SDK does
+    // not inherit root xmlns scope when parsing inner content). After replay,
+    // the part's XML carries redundant xmlns attrs on each child, which the
+    // next dump reads back verbatim — phantom bloat that breaks idempotency.
+    //
+    // Canonicalize on emit: parse the part's XML, drop child-element xmlns
+    // declarations that match the root's declarations, re-serialize. The
+    // first-pass emit (source's clean XML) and second-pass emit (target's
+    // bloated XML) both collapse to the same canonical shape.
+    private static string CanonicalizeRawXml(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var rootNsAttrs = doc.Root.Attributes()
+                .Where(a => a.IsNamespaceDeclaration)
+                .ToDictionary(a => a.Name, a => a.Value);
+            foreach (var desc in doc.Root.Descendants())
+            {
+                var toRemove = desc.Attributes()
+                    .Where(a => a.IsNamespaceDeclaration
+                                && rootNsAttrs.TryGetValue(a.Name, out var v)
+                                && v == a.Value)
+                    .ToList();
+                foreach (var a in toRemove) a.Remove();
+            }
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            // Malformed XML — leave as-is rather than corrupting.
+            return xml;
+        }
+    }
+
     private static void EmitThemeRaw(WordHandler word, List<BatchItem> items)
     {
         // Theme carries clrScheme + fontScheme + fmtScheme — pure structured
@@ -187,6 +225,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/theme"); }
         catch { xml = ""; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
             // name="Office Theme" matches what Open XML SDK's Theme class
             // auto-stamps on save. Without it, dump-2's read-back picks up
@@ -224,6 +263,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/settings"); }
         catch { xml = ""; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<"))
             xml = "<w:settings xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" />";
 
@@ -248,6 +288,7 @@ public static class BatchEmitter
         string xml;
         try { xml = word.Raw("/numbering"); }
         catch { return; }
+        xml = CanonicalizeRawXml(xml);
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return;
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))

@@ -650,6 +650,18 @@ public partial class WordHandler
             sp.After = SpacingConverter.ParseWordSpacing(sSAfter).ToString();
             hasPPr = true;
         }
+        if (properties.TryGetValue("spacebeforelines", out var sSBL) || properties.TryGetValue("spaceBeforeLines", out sSBL))
+        {
+            var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
+            sp.BeforeLines = ParseHelpers.SafeParseInt(sSBL, "spaceBeforeLines");
+            hasPPr = true;
+        }
+        if (properties.TryGetValue("spaceafterlines", out var sSAL) || properties.TryGetValue("spaceAfterLines", out sSAL))
+        {
+            var sp = stylePPr.SpacingBetweenLines ?? (stylePPr.SpacingBetweenLines = new SpacingBetweenLines());
+            sp.AfterLines = ParseHelpers.SafeParseInt(sSAL, "spaceAfterLines");
+            hasPPr = true;
+        }
         // CONSISTENCY(add-set-symmetry): mirror SetStylePath's lineSpacing case
         // (WordHandler.Set.Dispatch.cs:1403). Without this, `add /styles … --prop
         // lineSpacing=1.5x` was silent-dropped while `set /styles/X --prop
@@ -852,6 +864,7 @@ public partial class WordHandler
             "autoRedefine", "autoredefine", "hidden",
             "align", "alignment", "spacebefore", "spaceBefore",
             "spaceafter", "spaceAfter", "linespacing", "lineSpacing",
+            "spacebeforelines", "spaceBeforeLines", "spaceafterlines", "spaceAfterLines",
             "lineRule", "linerule",
             "font", "size", "bold", "italic", "color",
             "direction", "dir", "bidi",

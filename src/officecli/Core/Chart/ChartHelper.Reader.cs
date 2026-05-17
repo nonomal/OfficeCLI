@@ -410,6 +410,29 @@ internal static partial class ChartHelper
         // numeric chart props (gapwidth, overlap, explosion, style…).
         if (holeSize != null) node.Format["holeSize"] = ((int)holeSize).ToString();
 
+        // Chart-level explosion (pie/doughnut): the Setter writes c:explosion
+        // to every series uniformly. Surface as a single chart-level value
+        // when all series agree; otherwise leave to per-series read-out.
+        if (pieChart != null || doughnutChart != null)
+        {
+            var pieLikeSeries = plotArea.Descendants<OpenXmlCompositeElement>()
+                .Where(e => e.LocalName == "ser" && (e.Parent is C.PieChart || e.Parent is C.DoughnutChart || e.Parent is C.Pie3DChart || e.Parent is C.OfPieChart))
+                .ToList();
+            if (pieLikeSeries.Count > 0)
+            {
+                uint? uniform = null;
+                bool allSame = true;
+                foreach (var ser in pieLikeSeries)
+                {
+                    var ex = ser.GetFirstChild<C.Explosion>()?.Val?.Value;
+                    if (uniform == null) uniform = ex ?? 0;
+                    else if ((ex ?? 0) != uniform) { allSame = false; break; }
+                }
+                if (allSame && uniform != null && uniform > 0)
+                    node.Format["explosion"] = uniform.Value.ToString();
+            }
+        }
+
         var bubbleChart = plotArea.GetFirstChild<C.BubbleChart>();
         var bubbleScale = bubbleChart?.GetFirstChild<C.BubbleScale>()?.Val?.Value;
         if (bubbleScale != null && bubbleScale != 100) node.Format["bubbleScale"] = (int)bubbleScale;

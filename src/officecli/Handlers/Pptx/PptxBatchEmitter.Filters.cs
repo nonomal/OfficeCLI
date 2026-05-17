@@ -69,6 +69,15 @@ public static partial class PptxBatchEmitter
                 result.Remove("fill");
         }
 
+        // Slide background="image" is a Get-side type marker — the embedded
+        // image part is not surfaced as a re-importable path, so replay would
+        // try to parse "image" as a color and reject. Drop the marker; the
+        // slide will replay with default (inherited) background until image-
+        // background round-trip is implemented end-to-end.
+        if (result.TryGetValue("background", out var bgVal)
+            && bgVal.Equals("image", StringComparison.OrdinalIgnoreCase))
+            result.Remove("background");
+
         return result;
     }
 }

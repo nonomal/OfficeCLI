@@ -78,6 +78,15 @@ public static partial class PptxBatchEmitter
             && bgVal.Equals("image", StringComparison.OrdinalIgnoreCase))
             result.Remove("background");
 
+        // Shape image="true" is a NodeBuilder marker emitted for shapes
+        // carrying a blipFill — Add has no shape-fill image importer, so
+        // pass-through would fail prop validation. Mirror the
+        // background="image" filter above; the shape replays with default
+        // fill until shape image-fill round-trip is implemented.
+        if (result.TryGetValue("image", out var imgVal)
+            && imgVal.Equals("true", StringComparison.OrdinalIgnoreCase))
+            result.Remove("image");
+
         return result;
     }
 }

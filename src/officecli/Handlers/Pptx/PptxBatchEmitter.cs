@@ -64,6 +64,12 @@ public static partial class PptxBatchEmitter
         EmitNotesMasterRaw(ppt, items);
         EmitMasterRaw(ppt, items);
         EmitLayoutRaw(ppt, items);
+        // R8-5: emit presentation-level slide dimensions so custom sldSz
+        // round-trips through dump → batch. Previously EmitPptx skipped the
+        // root node entirely; replay always landed on the blank-deck default
+        // (33.87cm × 19.05cm widescreen), silently resizing decks built for
+        // 4:3, A4, custom banners, etc.
+        EmitPresentationProps(ppt, items);
 
         // CONSISTENCY(slide-order): always iterate via the handler's
         // GetSlideParts() (sldIdLst-driven). Walking SlideParts off the
@@ -121,6 +127,36 @@ public static partial class PptxBatchEmitter
         }
 
         return (items, ctx.Unsupported);
+    }
+
+    // R8-5: emit a single `set /` carrying slideWidth/slideHeight when the
+    // source deck deviates from the blank-baseline 33.87cm × 19.05cm
+    // widescreen. The blank-doc default is hard-coded inside BlankDocCreator,
+    // not surfaced by Get, so we string-compare the canonical FormatEmu
+    // output. EmitPresentationProps is a no-op for the default case to keep
+    // unchanged decks from gaining a spurious item on round-trip.
+    private const string DefaultSlideWidth = "33.87cm";
+    private const string DefaultSlideHeight = "19.05cm";
+
+    private static void EmitPresentationProps(PowerPointHandler ppt, List<BatchItem> items)
+    {
+        DocumentNode root;
+        try { root = ppt.Get("/"); }
+        catch { return; }
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (root.Format.TryGetValue("slideWidth", out var wObj) && wObj is string w
+            && !string.Equals(w, DefaultSlideWidth, StringComparison.OrdinalIgnoreCase))
+            props["slideWidth"] = w;
+        if (root.Format.TryGetValue("slideHeight", out var hObj) && hObj is string h
+            && !string.Equals(h, DefaultSlideHeight, StringComparison.OrdinalIgnoreCase))
+            props["slideHeight"] = h;
+        if (props.Count == 0) return;
+        items.Add(new BatchItem
+        {
+            Command = "set",
+            Path = "/",
+            Props = props,
+        });
     }
 
     /// <summary>

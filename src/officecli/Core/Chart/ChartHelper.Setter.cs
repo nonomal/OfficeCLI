@@ -1646,10 +1646,9 @@ internal static partial class ChartHelper
                 case "datalabels.showvalue" or "datalabels.showval"
                     or "showvalue" or "showval":
                 {
-                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!EnsureDataLabelsForShowToggle(chart, key, unsupported, out var dls)) break;
                     var show = ParseHelpers.IsTruthy(value);
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.ShowValue>();
                         dl.AppendChild(new C.ShowValue { Val = show });
@@ -1660,10 +1659,9 @@ internal static partial class ChartHelper
                 case "datalabels.showpercent" or "datalabels.showpct"
                     or "showpercent" or "showpct":
                 {
-                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!EnsureDataLabelsForShowToggle(chart, key, unsupported, out var dls)) break;
                     var show = ParseHelpers.IsTruthy(value);
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.ShowPercent>();
                         dl.AppendChild(new C.ShowPercent { Val = show });
@@ -1674,10 +1672,9 @@ internal static partial class ChartHelper
                 case "datalabels.showcatname" or "datalabels.showcategoryname" or "datalabels.showcategory"
                     or "showcatname" or "showcategoryname" or "showcategory":
                 {
-                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!EnsureDataLabelsForShowToggle(chart, key, unsupported, out var dls)) break;
                     var show = ParseHelpers.IsTruthy(value);
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.ShowCategoryName>();
                         dl.AppendChild(new C.ShowCategoryName { Val = show });
@@ -1688,10 +1685,9 @@ internal static partial class ChartHelper
                 case "datalabels.showsername" or "datalabels.showseriesname" or "datalabels.showseries"
                     or "showsername" or "showseriesname" or "showseries":
                 {
-                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!EnsureDataLabelsForShowToggle(chart, key, unsupported, out var dls)) break;
                     var show = ParseHelpers.IsTruthy(value);
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.ShowSeriesName>();
                         dl.AppendChild(new C.ShowSeriesName { Val = show });
@@ -1701,10 +1697,9 @@ internal static partial class ChartHelper
 
                 case "datalabels.showlegendkey" or "showlegendkey":
                 {
-                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
-                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    if (!EnsureDataLabelsForShowToggle(chart, key, unsupported, out var dls)) break;
                     var show = ParseHelpers.IsTruthy(value);
-                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    foreach (var dl in dls)
                     {
                         dl.RemoveAllChildren<C.ShowLegendKey>();
                         dl.AppendChild(new C.ShowLegendKey { Val = show });
@@ -2855,5 +2850,56 @@ internal static partial class ChartHelper
                         $"{fullKey}: expected boolean (true/false/1/0/yes/no/on/off), got '{value}'.");
                 break;
         }
+    }
+
+    // R8-3: previously the dotted show* / top-level show* setters only flipped
+    // existing <c:dLbls> containers. On a chart whose data labels had been
+    // cleared (datalabels=none, or new charts emitted without dLbls), the
+    // Descendants<DataLabels> enumeration returned nothing and the operation
+    // succeeded silently with no XML change. Caller saw success=true and an
+    // unchanged chart — surprise round-trip behaviour. Enable-by-show*
+    // semantics expect us to materialise a minimal container when one is
+    // missing; collect (and seed if needed) the DataLabels for each chartType
+    // in the PlotArea.
+    private static bool EnsureDataLabelsForShowToggle(
+        C.Chart chart, string key, List<string> unsupported, out List<C.DataLabels> dataLabels)
+    {
+        dataLabels = new List<C.DataLabels>();
+        var plotArea = chart.GetFirstChild<C.PlotArea>();
+        if (plotArea == null) { unsupported.Add(key); return false; }
+        var chartTypes = plotArea.ChildElements
+            .Where(e => e.LocalName.Contains("Chart") || e.LocalName.Contains("chart"))
+            .ToList();
+        if (chartTypes.Count == 0) { unsupported.Add(key); return false; }
+        foreach (var chartTypeEl in chartTypes)
+        {
+            var existing = chartTypeEl.Elements<C.DataLabels>().FirstOrDefault();
+            if (existing != null) { dataLabels.Add(existing); continue; }
+            // Schema-order insertion mirrors the "datalabels" full-replace path:
+            // dLbls precedes dropLines/hiLowLines/upDownBars/gapWidth/overlap/
+            // showMarker/holeSize/firstSliceAngle/axId.
+            // Schema order on CT_DLbls: showLegendKey, showVal, showCatName,
+            // showSerName, showPercent, showBubbleSize. Match the existing
+            // datalabels=full-replace seeding above.
+            var dl = new C.DataLabels();
+            dl.AppendChild(new C.ShowLegendKey { Val = false });
+            dl.AppendChild(new C.ShowValue { Val = false });
+            dl.AppendChild(new C.ShowCategoryName { Val = false });
+            dl.AppendChild(new C.ShowSeriesName { Val = false });
+            dl.AppendChild(new C.ShowPercent { Val = false });
+            var insertBefore = chartTypeEl.GetFirstChild<C.DropLines>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.HighLowLines>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.UpDownBars>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.GapWidth>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.Overlap>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.ShowMarker>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.HoleSize>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.FirstSliceAngle>() as OpenXmlElement
+                ?? chartTypeEl.GetFirstChild<C.AxisId>();
+            if (insertBefore != null) chartTypeEl.InsertBefore(dl, insertBefore);
+            else chartTypeEl.AppendChild(dl);
+            dataLabels.Add(dl);
+        }
+        return dataLabels.Count > 0;
     }
 }

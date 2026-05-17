@@ -1381,11 +1381,15 @@ public partial class PowerPointHandler
         var rgb = gs.GetFirstChild<Drawing.RgbColorModelHex>();
         if (rgb?.Val?.Value != null) return ParseHelpers.FormatHexColor(rgb.Val.Value);
         var scheme = gs.GetFirstChild<Drawing.SchemeColor>();
-        if (scheme?.Val?.Value != null) return scheme.Val.Value.ToString();
+        // .Val.Value is an EnumValue<SchemeColorValues> — its ToString() returns the
+        // enum object's CLR name ("SchemeColorValues { }"), not the semantic OOXML
+        // name. Use InnerText to get "accent1"/"dark1"/... so the emitted gradient
+        // string round-trips through BuildGradientFill's color parser.
+        if (scheme?.Val?.InnerText != null) return scheme.Val.InnerText;
         var sys = gs.GetFirstChild<Drawing.SystemColor>();
-        if (sys?.Val?.Value != null) return sys.Val.Value.ToString();
+        if (sys?.Val?.InnerText != null) return sys.Val.InnerText;
         var preset = gs.GetFirstChild<Drawing.PresetColor>();
-        if (preset?.Val?.Value != null) return preset.Val.Value.ToString();
+        if (preset?.Val?.InnerText != null) return preset.Val.InnerText;
         return "?";
     }
 

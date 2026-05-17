@@ -642,6 +642,14 @@ public partial class PowerPointHandler
     /// </summary>
     internal static Drawing.GradientFill BuildGradientFill(string value)
     {
+        // ReadGradientString emits semicolon-separated form
+        // ("linear;#C1;#C2;angle") for round-trip. Translate to the canonical
+        // dash form so dump-replay accepts what dump just produced. The
+        // `linear;` prefix is the marker; `radial:` / `path:` already use
+        // their own colon-prefix syntax which uses dashes between colors.
+        if (value.StartsWith("linear;", StringComparison.OrdinalIgnoreCase))
+            value = value[7..].Replace(';', '-');
+
         // Check for radial/path prefix
         string? gradientType = null;
         string colorSpec = value;

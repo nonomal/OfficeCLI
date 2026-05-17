@@ -1136,7 +1136,11 @@ public partial class PowerPointHandler
                 or "animation" or "animate"
                 or "tc" or "cell" or "tr" or "row"
                 // BUG-R36-B11: query("comment") enumerates all slide comments.
-                or "comment";
+                or "comment"
+                // R8-8: paragraph/run as root selectors — walk every shape's
+                // text body and emit one node per paragraph or run, matching
+                // the docx surface where query("run") returns all body runs.
+                or "paragraph" or "p" or "run" or "r";
         if (!isKnownType)
         {
             var genericParsed = GenericXmlQuery.ParseSelector(selector);
@@ -1207,6 +1211,25 @@ public partial class PowerPointHandler
                 }
                 if (MatchesGenericAttributes(slideNode, parsed.Attributes))
                     results.Add(slideNode);
+            }
+            return results;
+        }
+
+        // R8-8: top-level paragraph/run query — walk every slide's shape tree
+        // and surface the paragraph/run sub-nodes that ShapeToNode emits.
+        // Without this, the docx vocabulary `query "run"` returned 0 in
+        // PowerPoint because rawType fell into the generic XML fallback (which
+        // matched no a:r elements at the slide-XML root and bailed).
+        if (rawType is "paragraph" or "p" or "run" or "r")
+        {
+            bool wantRun = rawType is "run" or "r";
+            int qSlideNum = 0;
+            foreach (var sp in GetSlideParts())
+            {
+                qSlideNum++;
+                if (parsed.SlideNum.HasValue && parsed.SlideNum.Value != qSlideNum) continue;
+                var slideNode = Get($"/slide[{qSlideNum}]", depth: 3);
+                CollectParagraphsOrRuns(slideNode, wantRun, parsed.TextContains, parsed.Attributes, results);
             }
             return results;
         }
@@ -1784,5 +1807,39 @@ public partial class PowerPointHandler
         if (midDelayVal != null && midDelayVal != "0"
             && int.TryParse(midDelayVal, out var dMs) && dMs > 0)
             animNode.Format["delay"] = dMs;
+    }
+
+    // R8-8: walk a Get-produced slide tree and harvest every paragraph or run
+    // sub-node, applying the same TextContains / attribute filters Query
+    // applies at the shape level. Recurses into shape/group/placeholder/table
+    // bodies so all text-bearing surfaces participate.
+    private static void CollectParagraphsOrRuns(
+        DocumentNode node, bool wantRun, string? textContains,
+        Dictionary<string, (string Value, bool Negate)>? attrs,
+        List<DocumentNode> results)
+    {
+        if (node.Children == null) return;
+        foreach (var child in node.Children)
+        {
+            var ct = child.Type;
+            bool isPara = ct is "paragraph" or "p";
+            bool isRun = ct is "run" or "r";
+            bool match = wantRun ? isRun : isPara;
+            if (match)
+            {
+                if (textContains != null
+                    && !(child.Text ?? "").Contains(textContains, StringComparison.OrdinalIgnoreCase))
+                {
+                    // attribute matchers may still filter; skip on text miss
+                }
+                else if (MatchesGenericAttributes(child, attrs))
+                {
+                    results.Add(child);
+                }
+            }
+            // Recurse: runs live one level under paragraphs, paragraphs under
+            // shape/placeholder/cell bodies. Group/table descend as well.
+            CollectParagraphsOrRuns(child, wantRun, textContains, attrs, results);
+        }
     }
 }

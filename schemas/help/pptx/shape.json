@@ -17,9 +17,16 @@
       "/slide[N]/shape[N]"
     ]
   },
-  "note": "Positional /shape[N] enumerates ALL shapes on the slide including layout-inherited placeholders (title, body, etc.) — newly added shapes typically land at the end, not at /shape[1]. The 'add' command echoes back the canonical /shape[@id=ID] path; prefer that for follow-up Set/Get rather than guessing the positional index.\n\neffective.* keys (direction, size, font, color, bold) are read-only resolved values walked up the placeholder→layout→master→presentation defaults inheritance chain. They appear only when the direct key is absent on this shape; once a direct value is set, the corresponding effective.* is suppressed. There are no .src counterparts (the implementation does not emit them).",
+  "note": "Positional /shape[N] enumerates ALL shapes on the slide including layout-inherited placeholders (title, body, etc.) — newly added shapes typically land at the end, not at /shape[1]. The 'add' command echoes back the canonical /shape[@id=ID] path; prefer that for follow-up Set/Get rather than guessing the positional index.\n\neffective.* keys (direction, size, font, color, bold) are read-only resolved values walked up the placeholder→layout→master→presentation defaults inheritance chain. They appear only when the direct key is absent on this shape; once a direct value is set, the corresponding effective.* is suppressed. Each effective.* key has a paired effective.*.src key (e.g. effective.bold.src) naming the cascade layer that supplied the value (placeholder|layout|master|defaults).",
   "extends": "_shared/shape",
   "properties": {
+    "evaluated": {
+      "type": "bool",
+      "description": "cross-handler protocol flag — emitted on shapes whose body contains an <a:fld> dynamic field (slide number, date-time, footer, etc.). True when every dynamic field has cached text the renderer can show; false when at least one is empty (view text substitutes #OCLI_NOTEVAL!{type}; view issues emits subtype slide_field_not_evaluated). PowerPoint always re-renders fields on open, so there is no cache_stale equivalent. Read this via get --json instead of pattern-matching the sentinel.",
+      "add": false, "set": false, "get": true,
+      "readback": "true|false (true ⇒ all <a:fld> shapes on this node carry display text)",
+      "enforcement": "report"
+    },
     "opacity": {
       "type": "number",
       "description": "fill opacity (0.0 - 1.0). Requires a fill to attach to — opacity alone (without fill/gradient/pattern) has no effect in OOXML.",
@@ -750,7 +757,7 @@
         "--prop shadow=000000",
         "--prop shadow=true"
       ],
-      "readback": "compound 'color-blurPt-angleDeg-distPt-opacityPct' (e.g. '000000-4-45-3-40'). Color is raw hex (no leading #); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
+      "readback": "compound '#RRGGBBAA-blurPt-angleDeg-distPt-opacityPct' (e.g. '#00000066-4-45-3-40'). Color is CSS-form 8-digit hex with leading # (alpha last); blur, distance in pt; angle in degrees; opacity in percent (0-100).",
       "enforcement": "report"
     },
     "glow": {
@@ -764,7 +771,7 @@
         "--prop glow=4472C4",
         "--prop glow=true"
       ],
-      "readback": "compound 'color-radiusPt-opacityPct' (e.g. '00FF00-8-75'). Color is raw hex (no leading #); radius in pt; opacity in percent.",
+      "readback": "compound '#RRGGBBAA-radiusPt-opacityPct' (e.g. '#4472C4BF-8-75'). Color is CSS-form 8-digit hex with leading # (alpha last); radius in pt; opacity in percent.",
       "enforcement": "report"
     },
     "lineOpacity": {

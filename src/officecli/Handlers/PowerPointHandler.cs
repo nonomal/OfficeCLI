@@ -383,6 +383,13 @@ public partial class PowerPointHandler : IDocumentHandler
         _doc.PresentationPart?.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).Count() ?? 0;
     internal bool HasNotesMaster =>
         _doc.PresentationPart?.NotesMasterPart != null;
+    // Exposed for PptxBatchEmitter so it can iterate slides without going
+    // through Get("/") — Get("/") fans out into per-slide deep walks that
+    // can throw at SDK validation time on vendor templates with foreign
+    // attributes (gov_bja, 1.pptx, ...). The emitter now uses this count
+    // plus per-slide try/catch to keep the dump going on partial corruption.
+    internal int SlideCount => GetSlideParts().Count();
+
     internal bool SlideHasNotes(int slideIdx)
     {
         var parts = GetSlideParts().ToList();

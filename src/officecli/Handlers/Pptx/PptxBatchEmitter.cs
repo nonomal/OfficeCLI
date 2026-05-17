@@ -60,15 +60,41 @@ public static partial class PptxBatchEmitter
         // GetSlideParts() (sldIdLst-driven). Walking SlideParts off the
         // package returns parts in zip URI order — `slide12.xml` sorts
         // before `slide3.xml`, scrambling user-visible order.
-        var slideTree = ppt.Get("/");
-        if (slideTree.Children == null) return (items, ctx.Unsupported);
-
-        int slideNum = 0;
-        foreach (var slideNode in slideTree.Children)
+        // CONSISTENCY(emit-skip-on-validate): a non-standard attribute or
+        // element on a single slide must not abort the whole dump. The
+        // OpenXml SDK throws a flat InvalidOperationException ("The element
+        // does not allow the specified attribute.") when its strict-mode
+        // validator catches a foreign/extension attribute (common in vendor
+        // templates: gov_bja_template, 1.pptx, ...). Iterate slides one by
+        // one and surface OOXML validation failures as unsupported_element
+        // warnings instead of crashing the whole dump.
+        var slideCount = ppt.SlideCount;
+        for (int slideNum = 1; slideNum <= slideCount; slideNum++)
         {
-            if (slideNode.Type != "slide") continue;
-            slideNum++;
-            EmitSlide(ppt, slideNode, slideNum, items, ctx);
+            var slidePath = $"/slide[{slideNum}]";
+            DocumentNode slideNode;
+            try { slideNode = ppt.Get(slidePath); }
+            catch (Exception ex) when (ex.Message.Contains("does not allow", StringComparison.Ordinal)
+                                    || ex.Message.Contains("not allowed", StringComparison.Ordinal))
+            {
+                ctx.Unsupported.Add(new UnsupportedWarning(
+                    Element: "slide.ooxml_validation",
+                    SlidePath: slidePath,
+                    Reason: ex.Message));
+                continue;
+            }
+            try
+            {
+                EmitSlide(ppt, slideNode, slideNum, items, ctx);
+            }
+            catch (Exception ex) when (ex.Message.Contains("does not allow", StringComparison.Ordinal)
+                                    || ex.Message.Contains("not allowed", StringComparison.Ordinal))
+            {
+                ctx.Unsupported.Add(new UnsupportedWarning(
+                    Element: "slide.ooxml_validation",
+                    SlidePath: slidePath,
+                    Reason: ex.Message));
+            }
         }
 
         return (items, ctx.Unsupported);

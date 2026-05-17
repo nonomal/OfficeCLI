@@ -269,10 +269,42 @@ public static partial class PptxBatchEmitter
         }
     }
 
+    // Run-level Format keys that AddRun seeds on every new <a:r> regardless
+    // of caller input — emitting them adds nothing but noise on round-trip
+    // AND triggers drift when the source had MORE than one default-only run.
+    // `lang` is the canonical culprit: AddRun hard-codes Language="en-US",
+    // so a paragraph carrying N empty <a:r> elements with only lang=en-US
+    // produces N+M runs on every dump→replay (M = newly-seeded defaults on
+    // the freshly-added paragraph). Treat the empty/lang-only run as a
+    // no-op marker and skip it entirely.
+    private static readonly HashSet<string> RunDefaultOnlyKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "lang", "altLang",
+    };
+
     private static void EmitRun(DocumentNode runNode, string paraParent, List<BatchItem> items)
     {
         var props = FilterEmittableProps(runNode.Format);
-        if (!string.IsNullOrEmpty(runNode.Text))
+        bool hasText = !string.IsNullOrEmpty(runNode.Text);
+
+        // Drop runs that carry no text and only default attributes AddRun
+        // would seed anyway. Without this, a deck with N lang-only empty
+        // runs accumulates N more on each round-trip — the source's N stay
+        // (faithfully re-emitted), and AddRun's hard-coded Language="en-US"
+        // seeds a fresh lang on every newly-added <a:r>, so the next dump
+        // sees N+M runs per paragraph and drifts by M each cycle.
+        if (!hasText && props.Count > 0
+            && props.Keys.All(k => RunDefaultOnlyKeys.Contains(k)))
+        {
+            return;
+        }
+        // Fully empty <a:r> (no text, no props after filtering) — same
+        // logic: AddRun would just seed its defaults, no useful content
+        // round-trips.
+        if (!hasText && props.Count == 0)
+            return;
+
+        if (hasText)
             props["text"] = runNode.Text!;
 
         items.Add(new BatchItem

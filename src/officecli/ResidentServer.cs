@@ -874,7 +874,12 @@ public class ResidentServer : IDisposable
             }
         }
 
-        _lastBatchHadFailure = results.Any(r => !r.Success);
+        // Partial-success contract: batch is a mutation command (root
+        // CLAUDE.md "Mutation: partial success stays true"). The verdict
+        // flips to failure ONLY when every step was rejected (or the batch
+        // was empty). Keeps envelope.success / exit code in lockstep with
+        // the non-resident path.
+        _lastBatchHadFailure = results.Count > 0 && !results.Any(r => r.Success);
         CommandBuilder.PrintBatchResults(results, json, items.Count);
     }
 

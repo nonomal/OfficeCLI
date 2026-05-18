@@ -354,14 +354,21 @@ internal static class ParseHelpers
             "windowtext" => "dark1",
             "windowbackground" => "light1",
             // OOXML internal short forms (used by PPT a:schemeClr@val).
+            // dk/lt collapse to canonical dark/light (no separate user-facing
+            // form). tx/bg map to text/background — the SDK distinguishes
+            // SchemeColorValues.Text1 / Background1 from Dark1 / Light1, and
+            // CLAUDE.md ("scheme colors pass through unchanged") demands the
+            // user-supplied form survives Get; collapsing tx1→dark1 would
+            // break that contract for text1/text2/background1/background2 set
+            // by the user.
             "dk1" => "dark1",
             "dk2" => "dark2",
             "lt1" => "light1",
             "lt2" => "light2",
-            "tx1" => "dark1",
-            "tx2" => "dark2",
-            "bg1" => "light1",
-            "bg2" => "light2",
+            "tx1" => "text1",
+            "tx2" => "text2",
+            "bg1" => "background1",
+            "bg2" => "background2",
             "hlink" => "hyperlink",
             "folhlink" => "followedHyperlink",
             _ => v,

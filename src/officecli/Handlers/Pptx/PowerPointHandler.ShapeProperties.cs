@@ -407,7 +407,7 @@ public partial class PowerPointHandler
                     foreach (var run in runs)
                     {
                         var rProps = run.RunProperties ?? (run.RunProperties = new Drawing.RunProperties());
-                        rProps.Underline = value.ToLowerInvariant() switch
+                        var ulMapped = value.ToLowerInvariant() switch
                         {
                             "true" or "single" or "sng" => Drawing.TextUnderlineValues.Single,
                             "double" or "dbl" => Drawing.TextUnderlineValues.Double,
@@ -418,6 +418,18 @@ public partial class PowerPointHandler
                             "false" or "none" => Drawing.TextUnderlineValues.None,
                             _ => throw new ArgumentException($"Invalid underline value: '{value}'. Valid values: single, double, heavy, dotted, dash, wavy, none.")
                         };
+                        rProps.Underline = ulMapped;
+                        // When the user clears the underline (none/false), any
+                        // previously-attached uFill / uFillTx children describe
+                        // the colour of a stroke that no longer exists. Leave
+                        // them in place and PowerPoint silently renders the
+                        // run as underlined again on next open. Strip them so
+                        // "underline=none" actually means "no underline".
+                        if (ulMapped == Drawing.TextUnderlineValues.None)
+                        {
+                            rProps.RemoveAllChildren<Drawing.UnderlineFill>();
+                            rProps.RemoveAllChildren<Drawing.UnderlineFillText>();
+                        }
                     }
                     break;
 

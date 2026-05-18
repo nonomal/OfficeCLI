@@ -303,10 +303,33 @@ public partial class PowerPointHandler
                         .FirstOrDefault(a => a.Id?.Value == authId);
                     if (auth == null) { unsupported.Add(key); break; }
                     XmlTextValidator.ValidateOrThrow(value, key);
-                    if (key.Equals("author", StringComparison.OrdinalIgnoreCase))
-                        auth.Name = value;
+
+                    // CommentAuthor is a shared record keyed by id. Mutating
+                    // Name/Initials in place rewrites attribution for every
+                    // comment that references the same authorId — silently
+                    // poisoning siblings. If any other comment (on any slide)
+                    // still references this author, fork: route this comment
+                    // to a new CommentAuthor with the requested name+initials
+                    // (reusing an existing match if one happens to exist).
+                    // If this is the sole reference, mutate in place.
+                    var newName = key.Equals("author", StringComparison.OrdinalIgnoreCase)
+                        ? value : (auth.Name?.Value ?? "");
+                    var newInitials = key.Equals("initials", StringComparison.OrdinalIgnoreCase)
+                        ? value : (auth.Initials?.Value ?? DeriveInitials(newName));
+
+                    var otherRefs = CountAuthorReferences(authId, comment);
+                    if (otherRefs == 0)
+                    {
+                        // Sole user — safe to mutate the shared record.
+                        auth.Name = newName;
+                        auth.Initials = newInitials;
+                    }
                     else
-                        auth.Initials = value;
+                    {
+                        // Fork: assign this comment to a (possibly new) author.
+                        var forked = GetOrCreateCommentAuthor(newName, newInitials);
+                        comment.AuthorId = forked.Id?.Value ?? 0;
+                    }
                     break;
                 }
                 case "x":
@@ -332,6 +355,28 @@ public partial class PowerPointHandler
             }
         }
         return unsupported;
+    }
+
+    /// <summary>
+    /// Count how many comments across the whole deck reference the given
+    /// authorId, excluding the supplied comment. Used by author/initials
+    /// Set to decide whether mutating the shared CommentAuthor record is
+    /// safe or whether we must fork into a new author record.
+    /// </summary>
+    private int CountAuthorReferences(uint authId, Comment exclude)
+    {
+        int count = 0;
+        foreach (var sp in GetSlideParts())
+        {
+            var cp = sp.SlideCommentsPart;
+            if (cp?.CommentList == null) continue;
+            foreach (var c in cp.CommentList.Elements<Comment>())
+            {
+                if (ReferenceEquals(c, exclude)) continue;
+                if ((c.AuthorId?.Value ?? 0) == authId) count++;
+            }
+        }
+        return count;
     }
 
     internal bool RemoveSlideComment(string path)

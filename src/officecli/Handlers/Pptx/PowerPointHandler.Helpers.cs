@@ -700,6 +700,13 @@ public partial class PowerPointHandler
         var trimmed = (value ?? "").Trim();
         if (trimmed.StartsWith('-'))
             throw new ArgumentException($"Invalid advanceTime: '{value}' (must be >= 0).");
+        // ST_PositiveUniversalMeasure is bare milliseconds (integer). Reject
+        // non-numeric garbage like "later" or "5s" up front; PowerPoint
+        // silently drops the attribute on open when it fails to parse, so a
+        // malformed value used to land on disk with no error to the caller.
+        if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out _))
+            throw new ArgumentException($"Invalid advanceTime: '{value}' (expected a non-negative integer in milliseconds).");
         var acMorph = slide.ChildElements.FirstOrDefault(c =>
             c.LocalName == "AlternateContent" && c.InnerXml.Contains("morph"));
         if (acMorph != null)

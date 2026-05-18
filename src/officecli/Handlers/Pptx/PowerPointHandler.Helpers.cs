@@ -848,6 +848,16 @@ public partial class PowerPointHandler
             {
                 if (child is Drawing.Run run)
                     sb.Append(run.Text?.Text ?? "");
+                else if (child is OpenXmlUnknownElement unk
+                         && unk.LocalName == "tab"
+                         && unk.NamespaceUri == "http://schemas.openxmlformats.org/drawingml/2006/main")
+                {
+                    // CONSISTENCY(escape-sequences): <a:tab/> is the OOXML wire
+                    // form for a literal TAB between text runs (see
+                    // AppendLineWithTabs in Add.Text.cs). Round-trip back to '\t'
+                    // so Get text mirrors what the user wrote on Add/Set.
+                    sb.Append('\t');
+                }
                 else if (child is Drawing.Field fld)
                 {
                     // a:fld renders its cached <a:t> when present; otherwise

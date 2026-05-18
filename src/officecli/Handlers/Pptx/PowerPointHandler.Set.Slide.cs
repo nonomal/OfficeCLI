@@ -422,21 +422,16 @@ public partial class PowerPointHandler
                 }
                 case "layout":
                 {
-                    // Change slide layout
+                    // Change slide layout. Route through the single resolver so
+                    // Set accepts the same grammar Add accepts: display name,
+                    // OOXML type token (e.g. "objTx", "blank") or friendly
+                    // alias, and 1-based numeric index. Available-list format
+                    // is shared too — see ResolveSlideLayout / FormatAvailableLayouts.
                     var presentationPart = _doc.PresentationPart
                         ?? throw new InvalidOperationException("No presentation part");
-                    var allLayouts = presentationPart.SlideMasterParts
-                        .SelectMany(m => m.SlideLayoutParts).ToList();
-                    var targetLayout = allLayouts.FirstOrDefault(lp =>
-                        lp.SlideLayout?.CommonSlideData?.Name?.Value?.Equals(value, StringComparison.OrdinalIgnoreCase) == true);
+                    var targetLayout = ResolveSlideLayout(presentationPart, value);
                     if (targetLayout == null)
-                    {
-                        var availableNames = allLayouts
-                            .Select(lp => lp.SlideLayout?.CommonSlideData?.Name?.Value)
-                            .Where(n => n != null)
-                            .ToList();
-                        throw new ArgumentException($"Layout '{value}' not found. Available layouts: {string.Join(", ", availableNames)}");
-                    }
+                        throw new ArgumentException($"Layout '{value}' not found (no layouts defined).");
                     // Point the slide's layout relationship to the new layout
                     if (slidePart2.SlideLayoutPart != null)
                         slidePart2.DeletePart(slidePart2.SlideLayoutPart);

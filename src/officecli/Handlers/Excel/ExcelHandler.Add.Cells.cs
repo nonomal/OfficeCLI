@@ -425,7 +425,7 @@ public partial class ExcelHandler
                 // value before it gets serialized to sheet1.xml. Without
                 // this, a NUL byte from upstream data would crash every
                 // downstream save (including the pivot cache write).
-                var safeValue = OfficeCli.Core.PivotTableHelper.SanitizeXmlText(OfficeCli.Core.TextEscape.Resolve(value));
+                var safeValue = OfficeCli.Core.PivotTableHelper.SanitizeXmlText(value);
                 cell.CellValue = new CellValue(safeValue);
                 // R32-1: double.TryParse("NaN") returns true with double.NaN,
                 // which would write <c><v>NaN</v></c> with no t= — invalid

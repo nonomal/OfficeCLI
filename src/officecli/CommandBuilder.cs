@@ -723,7 +723,27 @@ static partial class CommandBuilder
                 throw new ArgumentException(
                     $"Invalid --prop '{prop}': key is empty. Use key=value (e.g. --prop name=Title).");
             if (eqIdx > 0)
-                dict[prop[..eqIdx]] = prop[(eqIdx + 1)..];
+            {
+                var key = prop[..eqIdx];
+                var value = prop[(eqIdx + 1)..];
+                // CONSISTENCY(text-escape-boundary): C-style escape resolution
+                // (\\n, \\t, \\r, \\\\) is a CLI-input concern only. The shell
+                // gives us the literal four-character sequence `\\n` which a
+                // user typing `--prop text='line1\\nline2'` plainly wants as
+                // a newline. Handlers no longer call TextEscape.Resolve
+                // internally — that double-resolution mangled batch JSON
+                // payloads, where `"text": "hello\\nworld"` already arrives
+                // as `hello\\nworld` literal after JSON parsing and must NOT
+                // be turned into a newline. Only `text` and `value` are
+                // affected; other props (colors, paths, numbers) are passed
+                // through untouched.
+                if (key.Equals("text", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("value", StringComparison.OrdinalIgnoreCase))
+                {
+                    value = OfficeCli.Core.TextEscape.Resolve(value);
+                }
+                dict[key] = value;
+            }
         }
         return dict;
     }

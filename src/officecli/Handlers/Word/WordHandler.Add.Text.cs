@@ -1912,8 +1912,9 @@ public partial class WordHandler
         // two-char escapes in --prop text= are interpreted as real newline /
         // tab. Mirrors PPTX shape-text and Excel cell-value handling. CRLF/CR
         // collapsed afterwards so all break forms route through <w:br/>.
-        var s = OfficeCli.Core.TextEscape.Resolve(text);
-        s = s.Replace("\r\n", "\n").Replace("\r", "\n");
+        // CONSISTENCY(text-escape-boundary): \n / \t resolution at CLI --prop;
+        // text arrives with real newlines already, just normalize CR / CRLF.
+        var s = text.Replace("\r\n", "\n").Replace("\r", "\n");
         int start = 0;
         for (int i = 0; i < s.Length; i++)
         {

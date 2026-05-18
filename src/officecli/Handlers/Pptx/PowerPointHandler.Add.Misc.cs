@@ -720,8 +720,9 @@ public partial class PowerPointHandler
         if (properties.TryGetValue("text", out var phText) && phText.Length > 0)
         {
             XmlTextValidator.ValidateOrThrow(phText, "text");
-            // Accept both literal backslash-n (typical shell escape) and real LF.
-            var lines = OfficeCli.Core.TextEscape.Resolve(phText).Split('\n');
+            // CONSISTENCY(text-escape-boundary): \n / \t resolution is at the
+            // CLI --prop boundary; phText already contains real newlines.
+            var lines = phText.Split('\n');
             foreach (var line in lines)
             {
                 var p = new Drawing.Paragraph();

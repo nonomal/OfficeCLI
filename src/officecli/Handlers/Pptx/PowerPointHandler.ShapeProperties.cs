@@ -236,10 +236,9 @@ public partial class PowerPointHandler
                 case "text":
                 {
                     XmlTextValidator.ValidateOrThrow(value, "text");
-                    // CONSISTENCY(escape-sequences): \n splits paragraphs, \t
-                    // becomes <a:tab/> paragraph children between text runs.
-                    var resolved = OfficeCli.Core.TextEscape.Resolve(value);
-                    var textLines = resolved.Split('\n');
+                    // CONSISTENCY(text-escape-boundary): \n / \t resolution at
+                    // CLI --prop parse; here value has real newlines/tabs.
+                    var textLines = value.Split('\n');
                     if (runs.Count == 1 && textLines.Length == 1 && !textLines[0].Contains('\t'))
                     {
                         // Single run, single line, no tabs: just replace text
@@ -1474,9 +1473,8 @@ public partial class PowerPointHandler
                 {
                     XmlTextValidator.ValidateOrThrow(value, "text");
                     var textBody = cell.TextBody;
-                    // CONSISTENCY(escape-sequences): \n -> paragraph split,
-                    // \t -> <a:tab/> between runs.
-                    var lines = OfficeCli.Core.TextEscape.Resolve(value).Split('\n');
+                    // CONSISTENCY(text-escape-boundary): see CommandBuilder.
+                    var lines = value.Split('\n');
                     if (textBody == null)
                     {
                         textBody = new Drawing.TextBody(
@@ -2530,7 +2528,7 @@ public partial class PowerPointHandler
         // CONSISTENCY(escape-sequences): both \n and \t are interpreted in text=
         // properties cross-handler; resolve here so width estimation matches what
         // PowerPoint will actually render.
-        var textLines = OfficeCli.Core.TextEscape.Resolve(text).Split('\n');
+        var textLines = text.Split('\n');
         int totalLines = 0;
         foreach (var line in textLines)
         {

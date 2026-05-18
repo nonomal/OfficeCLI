@@ -392,7 +392,7 @@ public partial class ExcelHandler
                         var pProps = firstPara?.ParagraphProperties?.CloneNode(true);
                         var rProps = firstPara?.Elements<Drawing.Run>().FirstOrDefault()?.RunProperties?.CloneNode(true);
                         txBody.RemoveAllChildren<Drawing.Paragraph>();
-                        var lines = OfficeCli.Core.TextEscape.Resolve(value).Split('\n');
+                        var lines = value.Split('\n');
                         foreach (var line in lines)
                         {
                             var para = new Drawing.Paragraph();

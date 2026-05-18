@@ -1616,9 +1616,9 @@ public partial class PowerPointHandler
             new Drawing.BodyProperties(),
             new Drawing.ListStyle()
         );
-        // CONSISTENCY(escape-sequences): \n splits into paragraphs, \t becomes
-        // <a:tab/> elements as paragraph children between text runs.
-        var lines = OfficeCli.Core.TextEscape.Resolve(text).Split('\n');
+        // CONSISTENCY(text-escape-boundary): \n / \t resolution at CLI --prop;
+        // text arrives here with real newlines and tabs already.
+        var lines = text.Split('\n');
         foreach (var line in lines)
         {
             var para = new Drawing.Paragraph();

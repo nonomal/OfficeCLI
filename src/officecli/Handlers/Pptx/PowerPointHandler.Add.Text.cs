@@ -327,10 +327,9 @@ public partial class PowerPointHandler
                 // inside a single <a:t> (paragraph-level only adds one paragraph
                 // here), but \t expands to <a:tab/> siblings between text runs
                 // so tabular text round-trips through PowerPoint.
-                var paraTextResolved = OfficeCli.Core.TextEscape.Resolve(paraText);
-                if (paraTextResolved.Contains('\t'))
+                if (paraText.Contains('\t'))
                 {
-                    AppendLineWithTabs(newPara, paraTextResolved, seg => new Drawing.Run
+                    AppendLineWithTabs(newPara, paraText, seg => new Drawing.Run
                     {
                         RunProperties = (Drawing.RunProperties)rProps.CloneNode(true),
                         Text = new Drawing.Text { Text = seg }
@@ -339,7 +338,7 @@ public partial class PowerPointHandler
                 else
                 {
                     newRun.RunProperties = rProps;
-                    newRun.Text = new Drawing.Text { Text = paraTextResolved };
+                    newRun.Text = new Drawing.Text { Text = paraText };
                     newPara.Append(newRun);
                 }
 
@@ -530,7 +529,7 @@ public partial class PowerPointHandler
                 // tabs land as raw chars inside <a:t> rather than <a:tab/>;
                 // higher-level shape-text Add/Set splits on \t into separate
                 // runs with <a:tab/> siblings.
-                newRun.Text = new Drawing.Text { Text = OfficeCli.Core.TextEscape.Resolve(runText) };
+                newRun.Text = new Drawing.Text { Text = runText };
 
                 // Insert run at specified index, or append
                 if (index.HasValue)

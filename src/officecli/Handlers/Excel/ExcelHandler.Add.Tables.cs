@@ -247,7 +247,9 @@ public partial class ExcelHandler
         // CLI) and real LF as line breaks — Excel renders the
         // preserved newline in the comment body. Matches the shape
         // `text` behavior documented in add-shape help.
-        var cmtNormalized = OfficeCli.Core.TextEscape.Resolve((cmtText ?? "").Replace("\r\n", "\n"));
+        // CONSISTENCY(text-escape-boundary): \n / \t resolution lives at the
+        // CLI --prop parse boundary; this value already has real newlines.
+        var cmtNormalized = (cmtText ?? "").Replace("\r\n", "\n");
         comment.CommentText = new CommentText(
             new Run(
                 BuildCommentRunProperties(properties),

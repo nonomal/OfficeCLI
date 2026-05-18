@@ -365,9 +365,11 @@ public partial class ExcelHandler
                     // Auto-detect formula: value starting with '=' is treated as formula
                     if (effectiveValue.StartsWith('=') && effectiveValue.Length > 1)
                         goto case "formula";
-                    // CONSISTENCY(escape-sequences): mirror PPTX/Word — interpret
-                    // \n and \t two-char escapes as real newline / tab.
-                    var cellValue = OfficeCli.Core.TextEscape.Resolve(effectiveValue);
+                    // CONSISTENCY(text-escape-boundary): \n / \t resolution is
+                    // applied at the CLI --prop parse boundary
+                    // (CommandBuilder.ParsePropsArray); the value arrives here
+                    // with real newlines/tabs already decoded.
+                    var cellValue = effectiveValue;
                     // Warn when overwriting an existing formula with a literal value.
                     // Without this, `set --prop value=N` on a formula cell silently
                     // drops the formula — the same conflict-class as supplying both

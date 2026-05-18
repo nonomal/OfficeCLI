@@ -485,6 +485,11 @@ internal static partial class ChartHelper
         "majorunit", "minorunit",
         "axisnumfmt", "axisnumberformat",
         "gridlines", "majorgridlines", "minorgridlines",
+        // R24 — dotted gridline subkeys (Reader emits gridlineColor /
+        // gridlineWidth / gridlineDash; without deferring, Add dropped them).
+        "gridlinecolor", "gridlinewidth", "gridlinedash",
+        "majorgridlinecolor", "majorgridlinewidth", "majorgridlinedash",
+        "minorgridlinecolor", "minorgridlinewidth", "minorgridlinedash",
         "plotareafill", "plotfill", "chartareafill", "chartfill",
         "linewidth", "linedash", "dash", "marker", "markers", "markersize",
         "style", "styleid",

@@ -661,6 +661,55 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // R24 — dotted subkeys mirroring Reader's gridlineColor /
+                // gridlineWidth / gridlineDash (and minor* variants). The
+                // existing compound "gridlines=color:width:dash" replaces the
+                // whole spPr; these subkey paths preserve siblings so users
+                // (and dump→replay) can tweak one attribute at a time. Schema
+                // already declares get/set: true for these.
+                case "gridlinecolor" or "majorgridlinecolor":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    SetGridlineColor(gl, value);
+                    break;
+                }
+                case "gridlinewidth" or "majorgridlinewidth":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    if (!SetGridlineWidth(gl, value)) { unsupported.Add(key); }
+                    break;
+                }
+                case "gridlinedash" or "majorgridlinedash":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MajorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    SetGridlineDash(gl, value);
+                    break;
+                }
+                case "minorgridlinecolor":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    SetGridlineColor(gl, value);
+                    break;
+                }
+                case "minorgridlinewidth":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    if (!SetGridlineWidth(gl, value)) { unsupported.Add(key); }
+                    break;
+                }
+                case "minorgridlinedash":
+                {
+                    var gl = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>()?.GetFirstChild<C.MinorGridlines>();
+                    if (gl == null) { unsupported.Add(key); break; }
+                    SetGridlineDash(gl, value);
+                    break;
+                }
+
                 case "plotareafill" or "plotfill":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
@@ -2435,6 +2484,58 @@ internal static partial class ChartHelper
         var spPr = new C.ChartShapeProperties();
         spPr.AppendChild(outline);
         return spPr;
+    }
+
+    /// <summary>
+    /// Get or create the <c:spPr>/<a:ln> outline element on a gridline so a
+    /// single attribute (color / width / dash) can be replaced without
+    /// touching its siblings. Mirrors `<c:spPr><a:ln>…</a:ln></c:spPr>`.
+    /// </summary>
+    private static Drawing.Outline GetOrCreateGridlineOutline(OpenXmlCompositeElement gridlines)
+    {
+        var spPr = gridlines.GetFirstChild<C.ChartShapeProperties>();
+        if (spPr == null)
+        {
+            spPr = new C.ChartShapeProperties();
+            gridlines.AppendChild(spPr);
+        }
+        var outline = spPr.GetFirstChild<Drawing.Outline>();
+        if (outline == null)
+        {
+            outline = new Drawing.Outline();
+            spPr.AppendChild(outline);
+        }
+        return outline;
+    }
+
+    private static void SetGridlineColor(OpenXmlCompositeElement gridlines, string color)
+    {
+        var outline = GetOrCreateGridlineOutline(gridlines);
+        outline.RemoveAllChildren<Drawing.SolidFill>();
+        outline.RemoveAllChildren<Drawing.NoFill>();
+        var fill = new Drawing.SolidFill();
+        fill.AppendChild(BuildChartColorElement(color));
+        // Outline schema: fill children precede PresetDash.
+        var dash = outline.GetFirstChild<Drawing.PresetDash>();
+        if (dash != null) outline.InsertBefore(fill, dash);
+        else outline.PrependChild(fill);
+    }
+
+    private static bool SetGridlineWidth(OpenXmlCompositeElement gridlines, string value)
+    {
+        if (!double.TryParse(value, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var widthPt))
+            return false;
+        var outline = GetOrCreateGridlineOutline(gridlines);
+        outline.Width = (int)(widthPt * 12700);
+        return true;
+    }
+
+    private static void SetGridlineDash(OpenXmlCompositeElement gridlines, string dash)
+    {
+        var outline = GetOrCreateGridlineOutline(gridlines);
+        outline.RemoveAllChildren<Drawing.PresetDash>();
+        outline.AppendChild(new Drawing.PresetDash { Val = ParseDashStyle(dash) });
     }
 
     private static Drawing.PresetLineDashValues ParseDashStyle(string dash)

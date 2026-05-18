@@ -66,7 +66,9 @@ public partial class PowerPointHandler
                         throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Expected a positive integer.");
                 }
                 if (rows < 1 || cols < 1)
-                    throw new ArgumentException("rows and cols must be >= 1");
+                    // Prefix "Invalid" so OutputFormatter maps this to
+                    // invalid_value rather than the internal_error catch-all.
+                    throw new ArgumentException($"Invalid table dimensions: rows={rows}, cols={cols}. Both must be >= 1.");
 
                 // BUG-R6-D: enforce a practical upper bound on rows/cols so the
                 // EMU height/width calculations stay safely within int32 (the

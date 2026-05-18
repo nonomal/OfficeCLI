@@ -504,7 +504,19 @@ static partial class CommandBuilder
                     throw new ArgumentException("'set' command requires 'path' field. Example: {\"command\": \"set\", \"path\": \"/slide[1]\", \"props\": {\"bold\": \"true\"}}");
                 var path = item.Path;
                 var unsupported = handler.Set(path, props);
-                var applied = props.Where(kv => !unsupported.Contains(kv.Key)).ToList();
+                // Mirror standalone `set` (CommandBuilder.Set.cs): handler.Set
+                // may return entries with help text like "key (valid props ...)"
+                // or "key=value (reason)". Trim trailing text before the
+                // membership test so a rejected prop is not also counted as
+                // applied — without this, batch reported success=true with a
+                // warning, diverging from standalone set's exit-2 verdict.
+                var unsupportedKeys = unsupported.Select(u =>
+                {
+                    var head = u.Contains(' ') ? u[..u.IndexOf(' ')] : u;
+                    var eq = head.IndexOf('=');
+                    return eq >= 0 ? head[..eq] : head;
+                }).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var applied = props.Where(kv => !unsupportedKeys.Contains(kv.Key)).ToList();
                 var parts = new List<string>();
                 if (applied.Count > 0)
                 {
@@ -546,6 +558,16 @@ static partial class CommandBuilder
                         };
                         parts.Add(FormatUnsupported(unsupported, batchScope));
                     }
+                    // Mirror standalone `set`'s allFailed semantics: if every
+                    // requested property was rejected (nothing applied), the
+                    // step is a failure, not a successful no-op. Without
+                    // this, batch swallowed unsupported_property into an inner
+                    // success=true while the same set issued via the
+                    // standalone set command returned success=false exit 2.
+                    // Per-step verdict flips to false; outer batch envelope
+                    // still rides on the existing partial-success rule.
+                    if (applied.Count == 0)
+                        throw new CliException(string.Join("\n", parts)) { Code = "unsupported_property" };
                 }
                 return string.Join("\n", parts);
             }

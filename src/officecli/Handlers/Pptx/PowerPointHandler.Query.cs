@@ -233,11 +233,21 @@ public partial class PowerPointHandler
                 throw new ArgumentException($"Slide {notesSlideIdx} not found (total: {slidePartsN.Count})");
             var slidePartN = slidePartsN[notesSlideIdx - 1];
             if (slidePartN.NotesSlidePart == null)
-                return new DocumentNode { Path = path, Type = "error", Text = $"Slide {notesSlideIdx} has no notes" };
+                // CONSISTENCY(not-found-uniformity): missing notes on a valid
+                // slide is the same shape as out-of-range slide ("entity not
+                // present at a valid path") — surface as not_found, not as
+                // an error-typed DocumentNode (which the envelope formatter
+                // coerces to internal_error).
+                throw new ArgumentException($"Notes not found at /slide[{notesSlideIdx}]/notes (slide has no speaker notes)");
             var notesText = GetNotesText(slidePartN.NotesSlidePart);
             var notesNode = new DocumentNode { Path = path, Type = "notes", Text = notesText };
             // Schema declares text get=true; mirror node.Text into Format for parity.
             notesNode.Format["text"] = notesText ?? "";
+            // Walk the notes body shape's first run to expose font formatting
+            // (bold/italic/underline/color/size/font/lang/spacing/...). Without
+            // this the Set→Get round-trip silently loses every formatting key
+            // accepted by Set --prop. Mirrors the curated reader in RunToNode.
+            PopulateNotesFormat(slidePartN.NotesSlidePart, notesNode);
             return notesNode;
         }
 

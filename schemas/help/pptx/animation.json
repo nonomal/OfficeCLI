@@ -26,11 +26,28 @@
     },
     "class": {
       "type": "enum",
-      "description": "animation category — entrance, exit, or emphasis. spin/grow/wave only work with emphasis.",
-      "values": ["entrance", "exit", "emphasis"],
+      "description": "animation category — entrance, exit, emphasis, or motion. spin/grow/wave only work with emphasis; motion needs path=<preset|custom>.",
+      "values": ["entrance", "exit", "emphasis", "motion"],
       "add": true, "set": true, "get": true,
-      "examples": ["--prop class=entrance"],
-      "readback": "entrance | exit | emphasis",
+      "examples": ["--prop class=entrance", "--prop class=motion --prop path=line"],
+      "readback": "entrance | exit | emphasis | motion",
+      "enforcement": "report"
+    },
+    "path": {
+      "type": "enum",
+      "description": "Motion-path preset (only valid when class=motion). 'custom' requires d=<SVG-like path data>. Direction-aware presets (line, arc) accept direction= for variants.",
+      "values": ["line", "arc", "circle", "diamond", "triangle", "square", "custom"],
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop class=motion --prop path=line --prop direction=right", "--prop class=motion --prop path=circle"],
+      "readback": "preset name (line | arc | circle | diamond | triangle | square | custom)",
+      "enforcement": "report"
+    },
+    "d": {
+      "type": "string",
+      "description": "Custom motion-path data (SVG-like; only valid when class=motion and path=custom). Coords are relative to slide (0..1). Must end with 'E' (auto-appended if missing).",
+      "add": true, "set": true, "get": true,
+      "examples": ["--prop class=motion --prop path=custom --prop d='M 0 0 L 0.5 0 E'"],
+      "readback": "raw OOXML animMotion path string, only when path=custom",
       "enforcement": "report"
     },
     "trigger": {

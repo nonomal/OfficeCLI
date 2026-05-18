@@ -1879,8 +1879,14 @@ public partial class PowerPointHandler
     // ==================== Animation helpers ====================
 
     /// <summary>
-    /// Returns the ordered list of entrance/exit/emphasis effect CommonTimeNodes for the given shape.
-    /// Motion-path animations (presetClass="motion") are excluded.
+    /// Returns the ordered list of effect CommonTimeNodes for the given shape,
+    /// including entrance/exit/emphasis presets (PresetClass set) and motion-path
+    /// effects (presetClass="motion" raw attribute, no SDK enum). L3 sub-B
+    /// promoted motion paths into this list so animation[K] indexing covers
+    /// every animation surface on the shape.
+    /// CONSISTENCY(animation-chain): Add/Set/Get/Remove all rely on this single
+    /// enumeration order — keep the predicate in sync with what each writer
+    /// emits (ApplyShapeAnimation + AppendMotionPathAnimation).
     /// </summary>
     private List<CommonTimeNode> EnumerateShapeAnimationCTns(SlidePart slidePart, Shape shape)
     {
@@ -1890,9 +1896,21 @@ public partial class PowerPointHandler
         if (timing == null) return [];
         var shapeIdStr = shapeId.Value.ToString();
         return timing.Descendants<CommonTimeNode>()
-            .Where(ctn => ctn.PresetClass != null && ctn.PresetId != null &&
-                   ctn.GetAttributes().All(a => a.LocalName != "presetClass" || a.Value != "motion") &&
-                   ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
+            .Where(ctn =>
+            {
+                if (!ctn.Descendants<ShapeTarget>().Any(st => st.ShapeId?.Value == shapeIdStr))
+                    return false;
+                // Regular entrance/exit/emphasis: SDK PresetClass set + PresetId set.
+                if (ctn.PresetClass != null && ctn.PresetId != null) return true;
+                // Motion path: SDK has no enum for "motion", so it's stored as a
+                // raw attribute and PresetClass parses to null. Match via the
+                // raw attribute + AnimateMotion descendant.
+                var rawCls = ctn.GetAttributes()
+                    .FirstOrDefault(a => a.LocalName == "presetClass").Value;
+                if (rawCls == "motion" && ctn.Descendants<AnimateMotion>().Any())
+                    return true;
+                return false;
+            })
             .ToList();
     }
 
@@ -1902,6 +1920,62 @@ public partial class PowerPointHandler
     /// </summary>
     private static void PopulateAnimationNode(DocumentNode animNode, CommonTimeNode effectCTn)
     {
+        // L3 sub-B: motion-path effects are stored under presetClass="motion"
+        // (a raw attribute the SDK doesn't model), with a child p:animMotion.
+        // Surface as class=motion + path=<preset|"custom"> + d=<raw path> so
+        // round-trip through Set/Get/Remove uses the same path= vocabulary as
+        // AddMotionAnimation. CONSISTENCY(animation-motion-presets).
+        var rawClsAttr = effectCTn.GetAttributes()
+            .FirstOrDefault(a => a.LocalName == "presetClass").Value;
+        if (rawClsAttr == "motion")
+        {
+            var animMotion = effectCTn.Descendants<AnimateMotion>().FirstOrDefault();
+            var pathStr = animMotion?.Path?.Value ?? "";
+            animNode.Format["class"] = "motion";
+            animNode.Format["effect"] = "motion";
+            var (preset, dir) = ResolveMotionPreset(pathStr);
+            if (preset != null)
+            {
+                animNode.Format["path"] = preset;
+                if (dir != null) animNode.Format["direction"] = dir;
+            }
+            else
+            {
+                animNode.Format["path"] = "custom";
+                animNode.Format["d"] = pathStr;
+            }
+            animNode.Format["motionPath"] = pathStr;
+            // Duration / trigger / delay / easing all stored on the same nodes
+            // as preset effects — fall through to the regular extraction below.
+            // Re-use the unified Read path by setting marker locals.
+            var motionDur = 500;
+            if (int.TryParse(animMotion?.CommonBehavior?.CommonTimeNode?.Duration, out var mdur)) motionDur = mdur;
+            else if (int.TryParse(effectCTn.Duration, out var mdur2)) motionDur = mdur2;
+            animNode.Format["duration"] = motionDur;
+            var ntm = effectCTn.NodeType?.Value;
+            animNode.Format["trigger"] = ntm == TimeNodeValues.AfterEffect ? "afterPrevious"
+                : ntm == TimeNodeValues.WithEffect ? "withPrevious"
+                : "onClick";
+            if (effectCTn.Acceleration?.HasValue == true && effectCTn.Acceleration.Value > 0)
+                animNode.Format["easein"] = (int)(effectCTn.Acceleration.Value / 1000);
+            if (effectCTn.Deceleration?.HasValue == true && effectCTn.Deceleration.Value > 0)
+                animNode.Format["easeout"] = (int)(effectCTn.Deceleration.Value / 1000);
+            // Walk up for delay (mid cTn pattern).
+            CommonTimeNode? midM = null;
+            var curM = effectCTn.Parent;
+            for (int wd = 0; wd < 5 && curM != null; wd++)
+            {
+                if (curM is CommonTimeNode cand && cand != effectCTn && cand.PresetId == null)
+                { midM = cand; break; }
+                curM = curM.Parent;
+            }
+            var dlyValM = midM?.StartConditionList?.GetFirstChild<Condition>()?.Delay?.Value;
+            if (dlyValM != null && dlyValM != "0"
+                && int.TryParse(dlyValM, out var dMsM) && dMsM > 0)
+                animNode.Format["delay"] = dMsM;
+            return;
+        }
+
         var presetId = effectCTn.PresetId?.Value ?? 0;
         var clsVal = effectCTn.PresetClass?.Value;
         var cls = clsVal == TimeNodePresetClassValues.Exit ? "exit"

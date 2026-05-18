@@ -840,53 +840,185 @@ public partial class PowerPointHandler
                     "It is derived from the effect preset and cannot be set directly.");
         }
 
-        // Read current animation properties via PopulateAnimationNode, then merge
-        // with user-provided overrides, then re-apply via the standard pipeline.
-        // Limitation: like Set on /slide/shape with animation=, this replaces ALL
-        // animations on the shape (the apply pipeline only knows how to add one).
-        // CONSISTENCY(animation-set): mirrors Add's animValue string assembly.
-        var existing = new DocumentNode { Path = "" };
-        PopulateAnimationNode(existing, ctns[animIdx - 1]);
+        // L3 sub-A: chain-preserving Set. Snapshot every existing animation on
+        // the shape into a (props) dict via PopulateAnimationNode, mutate the
+        // K-th dict with the caller's overrides, then rebuild the whole chain
+        // in original order. Previously this method removed ALL animations and
+        // re-added one, destroying the chain on any indexed Set call.
+        // CONSISTENCY(animation-chain): rebuild model also used implicitly by
+        // /animation[K] Remove (RemoveSingleShapeAnimation), so Add/Get/Set/Remove
+        // share one indexing contract.
+        var snapshots = new List<Dictionary<string, string>>(ctns.Count);
+        for (int i = 0; i < ctns.Count; i++)
+        {
+            var n = new DocumentNode { Path = "" };
+            PopulateAnimationNode(n, ctns[i]);
+            var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in n.Format)
+            {
+                if (v == null) continue;
+                var s = v.ToString() ?? "";
+                if (s.Length == 0) continue;
+                // presetId is derived, not a re-applicable input.
+                if (k.Equals("presetId", StringComparison.OrdinalIgnoreCase)) continue;
+                d[k] = s;
+            }
+            snapshots.Add(d);
+        }
 
-        string Get(string key, string? fallback = null)
-            => properties.TryGetValue(key, out var v)
-                ? v
-                : (existing.Format.TryGetValue(key, out var ev) ? ev?.ToString() ?? fallback ?? "" : fallback ?? "");
+        // Merge caller overrides onto the target index. CONSISTENCY(animation-
+        // class-suffix): if the user overrides `effect` with a suffixed form
+        // (fly-out, fade-exit, …) and did not also pass an explicit `class`,
+        // drop the snapshot's class so the suffix's class wins. Mirrors
+        // AddAnimation's behaviour where suffixCls overrides the entrance
+        // default unless an explicit class= was supplied.
+        var target = snapshots[animIdx - 1];
+        var userOverridesEffect = properties.ContainsKey("effect");
+        var userPassesClass = properties.ContainsKey("class");
+        foreach (var (k, v) in properties)
+        {
+            target[k] = v;
+        }
+        if (userOverridesEffect && !userPassesClass)
+        {
+            var (_, suffixCls) = ParseEffectClassSuffix(properties["effect"]);
+            if (suffixCls != null) target["class"] = suffixCls;
+        }
 
-        var effect = Get("effect", "fade");
-        // bt-1 fix: mirror AddAnimation's class-suffix routing so set
-        // effect=fly-out flips class to exit (was silently kept as
-        // entrance). CONSISTENCY(animation-class-suffix).
-        var explicitCls = properties.TryGetValue("class", out var ec) ? ec : null;
+        // Validate the target snapshot. Unsupplied snapshot values were
+        // already validated on the original Add path, but the caller's
+        // overrides may be junk — re-validate everything that touches the
+        // schema-typed slots so the surface is symmetric with AddAnimation.
+        if (target.TryGetValue("class", out var tCls)) ValidateAnimationClass(tCls);
+        if (target.TryGetValue("duration", out var tDur)) ValidateAnimationDuration(tDur);
+        if (target.TryGetValue("dur", out var tDur2)) ValidateAnimationDuration(tDur2);
+        if (target.TryGetValue("delay", out var tDel)) ValidateAnimationDelay(tDel);
+        if (target.TryGetValue("repeat", out var tRep)) ValidateAnimationRepeat(tRep);
+        if (target.TryGetValue("restart", out var tRes)) ValidateAnimationRestart(tRes);
+        if (target.TryGetValue("autoReverse", out var tAr)) ValidateAnimationAutoReverse(tAr);
+        else if (target.TryGetValue("autoreverse", out tAr)) ValidateAnimationAutoReverse(tAr);
+
+        // Wipe all animations on the shape, then re-apply each snapshot in order.
+        // CONSISTENCY(animation-chain): motion-class snapshots route through
+        // AppendMotionPathAnimation; preset (entrance/exit/emphasis) snapshots
+        // route through ApplyShapeAnimation. Both append to the MainSequence
+        // ChildTimeNodeList in original order so animation[K] indexing holds.
+        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
+        if (shapeId.HasValue)
+        {
+            RemoveShapeAnimations(slidePart.Slide!, shapeId.Value);
+            // RemoveShapeAnimations targets MainSequence groups that contain
+            // a matching ShapeTarget; motion-path groups land in the same list
+            // so they're removed too. Belt-and-suspenders: also drop motion
+            // path animations explicitly in case the writer changes.
+            RemoveAllMotionPathAnimationsForShape(slidePart.Slide!, shapeId.Value);
+        }
+        for (int i = 0; i < snapshots.Count; i++)
+        {
+            var snap = snapshots[i];
+            if (snap.TryGetValue("class", out var snapCls)
+                && snapCls.Equals("motion", StringComparison.OrdinalIgnoreCase))
+            {
+                ReapplyMotionFromSnapshot(slidePart, shape, snap);
+            }
+            else
+            {
+                var animValue = BuildAnimValueFromProps(snap);
+                ApplyShapeAnimation(slidePart, shape, animValue);
+            }
+        }
+        GetSlide(slidePart).Save();
+        return [];
+    }
+
+    /// <summary>
+    /// Re-emit a motion-path animation from a snapshot dict produced by
+    /// PopulateAnimationNode. Resolves preset+direction back to a path string
+    /// (falling back to d= for path=custom) and appends via AppendMotionPathAnimation.
+    /// CONSISTENCY(animation-motion-presets).
+    /// </summary>
+    private static void ReapplyMotionFromSnapshot(
+        SlidePart slidePart, Shape shape, Dictionary<string, string> snap)
+    {
+        string pathString;
+        var preset = snap.GetValueOrDefault("path");
+        if (string.IsNullOrEmpty(preset)
+            || preset.Equals("custom", StringComparison.OrdinalIgnoreCase))
+        {
+            // Custom path: prefer d= override, else stored motionPath string.
+            pathString = snap.GetValueOrDefault("d")
+                ?? snap.GetValueOrDefault("motionPath")
+                ?? "M 0 0 L 0 0 E";
+        }
+        else
+        {
+            var dir = snap.GetValueOrDefault("direction");
+            pathString = GetMotionPresetPath(preset, dir)
+                ?? snap.GetValueOrDefault("motionPath")
+                ?? "M 0 0 L 0 0 E";
+        }
+        var duration = int.TryParse(snap.GetValueOrDefault("duration", "2000"),
+            out var dv) ? dv : 2000;
+        var trigger = snap.GetValueOrDefault("trigger", "onClick").ToLowerInvariant() switch
+        {
+            "afterprevious" => PowerPointHandler.AnimTrigger.AfterPrevious,
+            "withprevious"  => PowerPointHandler.AnimTrigger.WithPrevious,
+            _                => PowerPointHandler.AnimTrigger.OnClick
+        };
+        var delayMs = int.TryParse(snap.GetValueOrDefault("delay", "0"), out var dvL) ? dvL : 0;
+        var easin   = int.TryParse(snap.GetValueOrDefault("easein", "0"), out var ein) ? ein * 1000 : 0;
+        var easout  = int.TryParse(snap.GetValueOrDefault("easeout", "0"), out var eout) ? eout * 1000 : 0;
+        AppendMotionPathAnimation(slidePart, shape, pathString, duration,
+            trigger, delayMs, easin, easout);
+    }
+
+    /// <summary>
+    /// Drop every motion-path animation group on the slide that targets the
+    /// given shape. Mirrors RemoveShapeAnimations' walk-up to the MainSequence
+    /// click-group par, narrowed to ctns carrying presetClass="motion".
+    /// </summary>
+    private static void RemoveAllMotionPathAnimationsForShape(Slide slide, uint shapeId)
+    {
+        var timing = slide.GetFirstChild<Timing>();
+        if (timing == null) return;
+        var spIdStr = shapeId.ToString();
+        var toRemove = timing.Descendants<ShapeTarget>()
+            .Where(st => st.ShapeId?.Value == spIdStr)
+            .Select(st =>
+            {
+                OpenXmlElement? node = st;
+                while (node?.Parent != null)
+                {
+                    if (node.Parent is ChildTimeNodeList ctl
+                        && ctl.Parent is CommonTimeNode ctn
+                        && ctn.NodeType?.Value == TimeNodeValues.MainSequence)
+                        return node;
+                    node = node.Parent;
+                }
+                return null;
+            })
+            .Where(n => n != null
+                && n.Descendants<CommonTimeNode>().Any(c =>
+                    c.GetAttributes().Any(a => a.LocalName == "presetClass" && a.Value == "motion")))
+            .Distinct()
+            .ToList();
+        foreach (var n in toRemove) n!.Remove();
+    }
+
+    /// <summary>
+    /// Render a property dictionary (as produced by PopulateAnimationNode + user
+    /// overrides) into the composite animValue string parsed by ApplyShapeAnimation.
+    /// CONSISTENCY(animation-set): mirrors AddAnimation's animValue assembly.
+    /// </summary>
+    private static string BuildAnimValueFromProps(Dictionary<string, string> p)
+    {
+        var effect = p.TryGetValue("effect", out var e) ? e : "fade";
         var (effectStripped, suffixCls) = ParseEffectClassSuffix(effect);
         effect = effectStripped;
-        var cls = explicitCls
-            ?? suffixCls
-            ?? (existing.Format.TryGetValue("class", out var exCls) ? exCls?.ToString() ?? "entrance" : "entrance");
-        // Validate class enum (composite parser silently falls back to entrance).
-        ValidateAnimationClass(cls);
-        // Validate user-supplied duration / delay against the integer-ms schema
-        // contract. We only validate values that came in via this Set call —
-        // values pulled from `existing` are already-stored and were validated
-        // (or originated outside this code path).
-        if (properties.TryGetValue("duration", out var setDurRaw))
-            ValidateAnimationDuration(setDurRaw);
-        else if (properties.TryGetValue("dur", out var setDurRaw2))
-            ValidateAnimationDuration(setDurRaw2);
-        if (properties.TryGetValue("delay", out var setDelayRaw))
-            ValidateAnimationDelay(setDelayRaw);
-        // L2 props symmetric with AddAnimation.
-        if (properties.TryGetValue("repeat", out var setRepeatRaw))
-            ValidateAnimationRepeat(setRepeatRaw);
-        if (properties.TryGetValue("restart", out var setRestartRaw))
-            ValidateAnimationRestart(setRestartRaw);
-        if (properties.TryGetValue("autoReverse", out var setArRaw)
-            || properties.TryGetValue("autoreverse", out setArRaw))
-            ValidateAnimationAutoReverse(setArRaw);
-        var duration = properties.TryGetValue("duration", out var dv) ? dv
-            : properties.TryGetValue("dur", out var dv2) ? dv2
-            : (existing.Format.TryGetValue("duration", out var ed) ? ed?.ToString() ?? "500" : "500");
-        var trigger = Get("trigger", "onclick");
+        var cls = p.TryGetValue("class", out var c) ? c : (suffixCls ?? "entrance");
+        var duration = p.TryGetValue("duration", out var d) ? d
+            : p.TryGetValue("dur", out var d2) ? d2 : "500";
+        var trigger = p.TryGetValue("trigger", out var t) ? t : "onclick";
         var triggerPart = trigger.ToLowerInvariant() switch
         {
             "onclick" or "click" => "click",
@@ -895,35 +1027,25 @@ public partial class PowerPointHandler
             _ => throw new ArgumentException(
                 $"Invalid animation trigger: '{trigger}'. Valid values: onclick, click, after, afterprevious, with, withprevious.")
         };
-
         var animValue = $"{effect}-{cls}-{duration}-{triggerPart}";
-        string? Resolve(string key)
-            => properties.TryGetValue(key, out var pv) ? pv
-             : (existing.Format.TryGetValue(key, out var ev) ? ev?.ToString() : null);
-        var delayVal = Resolve("delay");
-        if (!string.IsNullOrEmpty(delayVal)) animValue += $"-delay={delayVal}";
-        var einVal = Resolve("easein");
-        if (!string.IsNullOrEmpty(einVal)) animValue += $"-easein={einVal}";
-        var eoutVal = Resolve("easeout");
-        if (!string.IsNullOrEmpty(eoutVal)) animValue += $"-easeout={eoutVal}";
-        if (properties.TryGetValue("easing", out var easing))
-            animValue += $"-easing={easing}";
-        if (properties.TryGetValue("direction", out var dir))
+        if (p.TryGetValue("delay", out var del) && !string.IsNullOrEmpty(del))
+            animValue += $"-delay={del}";
+        if (p.TryGetValue("easein", out var ein) && !string.IsNullOrEmpty(ein))
+            animValue += $"-easein={ein}";
+        if (p.TryGetValue("easeout", out var eout) && !string.IsNullOrEmpty(eout))
+            animValue += $"-easeout={eout}";
+        if (p.TryGetValue("easing", out var eas) && !string.IsNullOrEmpty(eas))
+            animValue += $"-easing={eas}";
+        if (p.TryGetValue("direction", out var dir) && !string.IsNullOrEmpty(dir))
             animValue += $"-{dir}";
-        // L2: merge user override with existing Format readback so a partial
-        // Set (e.g. just repeat=5) preserves previously-stored restart/auto.
-        var repeatMerged = Resolve("repeat");
-        if (!string.IsNullOrEmpty(repeatMerged)) animValue += $"-repeat={repeatMerged}";
-        var restartMerged = Resolve("restart");
-        if (!string.IsNullOrEmpty(restartMerged)) animValue += $"-restart={restartMerged}";
-        var autoRevMerged = Resolve("autoReverse");
-        if (!string.IsNullOrEmpty(autoRevMerged)) animValue += $"-autoReverse={autoRevMerged}";
-
-        var shapeId = shape.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value;
-        if (shapeId.HasValue)
-            RemoveShapeAnimations(slidePart.Slide!, shapeId.Value);
-        ApplyShapeAnimation(slidePart, shape, animValue);
-        GetSlide(slidePart).Save();
-        return [];
+        if (p.TryGetValue("repeat", out var rep) && !string.IsNullOrEmpty(rep))
+            animValue += $"-repeat={rep}";
+        if (p.TryGetValue("restart", out var res) && !string.IsNullOrEmpty(res))
+            animValue += $"-restart={res}";
+        var arKey = p.TryGetValue("autoReverse", out var ar) ? ar
+            : p.TryGetValue("autoreverse", out var ar2) ? ar2 : null;
+        if (!string.IsNullOrEmpty(arKey))
+            animValue += $"-autoReverse={arKey}";
+        return animValue;
     }
 }

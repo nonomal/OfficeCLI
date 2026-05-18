@@ -810,6 +810,16 @@ public partial class PowerPointHandler
                 var animShapeIdx = int.Parse(animMatch.Groups[2].Value);
                 var (animSlidePart, animShape) = ResolveShape(animSlideIdx, animShapeIdx);
 
+                // L3 sub-B: class=motion routes to motion-path animation instead
+                // of preset entrance/exit/emphasis. Preset path lookup ("line",
+                // "arc", "circle", ...) translates to OOXML <p:animMotion path>.
+                // path=custom requires d= to supply raw SVG-like data.
+                if (properties.TryGetValue("class", out var maybeMotionCls)
+                    && maybeMotionCls.Equals("motion", StringComparison.OrdinalIgnoreCase))
+                {
+                    return AddMotionAnimation(parentPath, animSlidePart, animShape, properties);
+                }
+
                 // Build animation value string from properties
                 var effect = properties.GetValueOrDefault("effect", "fade");
                 var explicitCls = properties.GetValueOrDefault("class");
@@ -897,6 +907,80 @@ public partial class PowerPointHandler
                 // returning a stale path like animation[2] for the first add.
                 var animCount = EnumerateShapeAnimationCTns(animSlidePart, animShape).Count;
                 return $"{parentPath}/animation[{animCount}]";
+    }
+
+    // L3 sub-B: motion-path animation handler (class=motion). Supports a small
+    // set of preset paths (line / arc / circle / diamond / triangle / square)
+    // with optional direction= for line/arc; custom path requires d=. Appends
+    // to the shape's animation chain so animation[K] indexing remains uniform.
+    // CONSISTENCY(animation-chain): mirrors AddAnimation's append behavior.
+    private string AddMotionAnimation(string parentPath,
+        DocumentFormat.OpenXml.Packaging.SlidePart slidePart,
+        DocumentFormat.OpenXml.Presentation.Shape shape,
+        Dictionary<string, string> properties)
+    {
+        var preset = properties.GetValueOrDefault("path");
+        if (string.IsNullOrEmpty(preset))
+            throw new ArgumentException(
+                "class=motion requires path=<preset>. Valid presets: "
+                + string.Join(", ", KnownMotionPresets())
+                + ". Use path=custom with d=<SVG-like path data> for a custom motion path.");
+
+        string pathString;
+        if (preset.Equals("custom", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!properties.TryGetValue("d", out var customD) || string.IsNullOrEmpty(customD))
+                throw new ArgumentException(
+                    "path=custom requires d=<SVG-like path data> (e.g. d='M 0 0 L 0.5 0 E'). "
+                    + "Coords are relative to slide (0..1).");
+            pathString = customD;
+            // Ensure path is terminated with E so PowerPoint accepts it.
+            if (!pathString.TrimEnd().EndsWith("E", StringComparison.OrdinalIgnoreCase))
+                pathString = pathString.TrimEnd() + " E";
+        }
+        else
+        {
+            var direction = properties.GetValueOrDefault("direction");
+            var resolved = GetMotionPresetPath(preset, direction);
+            if (resolved == null)
+                throw new ArgumentException(
+                    $"Unknown motion path preset: '{preset}'. Valid presets: "
+                    + string.Join(", ", KnownMotionPresets()) + ".");
+            pathString = resolved;
+        }
+
+        var duration = properties.GetValueOrDefault("duration")
+                       ?? properties.GetValueOrDefault("dur", "2000");
+        ValidateAnimationDuration(duration);
+        var durationMs = int.Parse(duration, System.Globalization.CultureInfo.InvariantCulture);
+
+        var trigger = properties.GetValueOrDefault("trigger", "onclick");
+        var triggerEnum = trigger.ToLowerInvariant() switch
+        {
+            "onclick" or "click"            => PowerPointHandler.AnimTrigger.OnClick,
+            "after" or "afterprevious"      => PowerPointHandler.AnimTrigger.AfterPrevious,
+            "with" or "withprevious"        => PowerPointHandler.AnimTrigger.WithPrevious,
+            _ => throw new ArgumentException(
+                $"Invalid animation trigger: '{trigger}'. Valid values: onclick, click, after, afterprevious, with, withprevious.")
+        };
+
+        int delayMs = 0, easingAccel = 0, easingDecel = 0;
+        if (properties.TryGetValue("delay", out var dlyRaw))
+        {
+            ValidateAnimationDelay(dlyRaw);
+            delayMs = int.Parse(dlyRaw, System.Globalization.CultureInfo.InvariantCulture);
+        }
+        if (properties.TryGetValue("easein", out var einRaw)
+            && int.TryParse(einRaw, out var einV)) easingAccel = einV * 1000;
+        if (properties.TryGetValue("easeout", out var eoutRaw)
+            && int.TryParse(eoutRaw, out var eoutV)) easingDecel = eoutV * 1000;
+
+        AppendMotionPathAnimation(slidePart, shape, pathString, durationMs,
+            triggerEnum, delayMs, easingAccel, easingDecel);
+        GetSlide(slidePart).Save();
+
+        var animCount = EnumerateShapeAnimationCTns(slidePart, shape).Count;
+        return $"{parentPath}/animation[{animCount}]";
     }
 
 

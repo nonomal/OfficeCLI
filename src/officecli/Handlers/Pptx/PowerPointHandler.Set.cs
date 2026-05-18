@@ -113,29 +113,40 @@ public partial class PowerPointHandler
                             unsupported.Add(key);
                         }
                         break;
-                    // Core document properties
+                    // Core document properties. Validate at the write boundary —
+                    // these fan out to PackageProperties.Save() at Close, where
+                    // an unrejected XML-illegal codepoint surfaces as an opaque
+                    // shutdown failure that poisons the package (data loss).
                     case "title":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Title = value;
                         break;
                     case "author" or "creator":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Creator = value;
                         break;
                     case "subject":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Subject = value;
                         break;
                     case "description":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Description = value;
                         break;
                     case "category":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Category = value;
                         break;
                     case "keywords":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Keywords = value;
                         break;
                     case "lastmodifiedby":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.LastModifiedBy = value;
                         break;
                     case "revision":
+                        XmlTextValidator.ValidateOrThrow(value, key);
                         _doc.PackageProperties.Revision = value;
                         break;
                     case "defaultfont" or "font":

@@ -1178,7 +1178,11 @@ public partial class PowerPointHandler
                 case "name":
                 {
                     var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
-                    if (nvPr != null) nvPr.Name = value;
+                    if (nvPr != null)
+                    {
+                        XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvPr.Name = value;
+                    }
                     else unsupported.Add(key);
                     break;
                 }
@@ -1186,7 +1190,11 @@ public partial class PowerPointHandler
                 case "alt" or "alttext" or "description":
                 {
                     var nvPr = shape.NonVisualShapeProperties?.NonVisualDrawingProperties;
-                    if (nvPr != null) nvPr.Description = value;
+                    if (nvPr != null)
+                    {
+                        XmlTextValidator.ValidateOrThrow(value, "alttext");
+                        nvPr.Description = value;
+                    }
                     else unsupported.Add(key);
                     break;
                 }

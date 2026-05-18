@@ -237,7 +237,11 @@ public partial class PowerPointHandler
                 case "name":
                 {
                     var csd = targetRoot.GetFirstChild<CommonSlideData>();
-                    if (csd != null) csd.Name = value;
+                    if (csd != null)
+                    {
+                        XmlTextValidator.ValidateOrThrow(value, "name");
+                        csd.Name = value;
+                    }
                     break;
                 }
                 case "direction" or "dir" or "rtl":

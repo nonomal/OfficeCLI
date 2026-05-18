@@ -239,7 +239,11 @@ public partial class PowerPointHandler
                 case "name":
                 {
                     var nvPr = pic.NonVisualPictureProperties?.NonVisualDrawingProperties;
-                    if (nvPr != null) nvPr.Name = value;
+                    if (nvPr != null)
+                    {
+                        Core.XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvPr.Name = value;
+                    }
                     break;
                 }
                 case "shadow":
@@ -438,6 +442,7 @@ public partial class PowerPointHandler
                 }
                 case "name":
                 {
+                    Core.XmlTextValidator.ValidateOrThrow(value, "name");
                     // Update cNvPr name in Choice
                     var nvGfPr = gf?.ChildElements.FirstOrDefault(e => e.LocalName == "nvGraphicFramePr");
                     var choiceCNvPr = nvGfPr?.ChildElements.FirstOrDefault(e => e.LocalName == "cNvPr");
@@ -555,6 +560,7 @@ public partial class PowerPointHandler
                 }
                 case "name":
                 {
+                    Core.XmlTextValidator.ValidateOrThrow(value, "name");
                     var nvSpPr = sp?.ChildElements.FirstOrDefault(e => e.LocalName == "nvGraphicFramePr")
                               ?? sp?.ChildElements.FirstOrDefault(e => e.LocalName == "nvSpPr");
                     var cNvPr = nvSpPr?.ChildElements.FirstOrDefault(e => e.LocalName == "cNvPr");
@@ -695,6 +701,7 @@ public partial class PowerPointHandler
                     break;
                 }
                 case "name":
+                    Core.XmlTextValidator.ValidateOrThrow(value, "name");
                     oleEl.Name = value;
                     break;
                 case "display":

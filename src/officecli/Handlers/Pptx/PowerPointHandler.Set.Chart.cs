@@ -95,7 +95,11 @@ public partial class PowerPointHandler
                 }
                 case "name":
                     var nvPr = chartGf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties;
-                    if (nvPr != null) nvPr.Name = value;
+                    if (nvPr != null)
+                    {
+                        Core.XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvPr.Name = value;
+                    }
                     break;
             }
         }

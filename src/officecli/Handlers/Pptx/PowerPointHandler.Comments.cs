@@ -302,6 +302,7 @@ public partial class PowerPointHandler
                     var auth = authorsPart?.CommentAuthorList?.Elements<CommentAuthor>()
                         .FirstOrDefault(a => a.Id?.Value == authId);
                     if (auth == null) { unsupported.Add(key); break; }
+                    XmlTextValidator.ValidateOrThrow(value, key);
                     if (key.Equals("author", StringComparison.OrdinalIgnoreCase))
                         auth.Name = value;
                     else

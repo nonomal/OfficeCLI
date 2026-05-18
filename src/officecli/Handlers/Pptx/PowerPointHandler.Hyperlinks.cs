@@ -110,7 +110,18 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(target.Action))
             hlink.Action = target.Action;
         if (!string.IsNullOrEmpty(tooltip))
+        {
+            // Tooltip becomes an attribute value in the saved part XML. Without
+            // a guard here, codepoints outside XML 1.0 character data (e.g.
+            // U+0007 BEL) escape unrejected and surface as a raw XmlException
+            // at PackageProperties.Save() — the catch site then poisons the
+            // open package and the next Close writes an empty file over the
+            // user's deck. Mirror Add.Text / Add.Shape: validate at the write
+            // boundary so the caller sees an `invalid_value` CliException
+            // instead of an opaque OOXML save failure.
+            Core.XmlTextValidator.ValidateOrThrow(tooltip, "tooltip");
             hlink.Tooltip = tooltip;
+        }
         return hlink;
     }
 

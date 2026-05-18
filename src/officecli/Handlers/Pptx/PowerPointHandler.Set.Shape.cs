@@ -278,7 +278,11 @@ public partial class PowerPointHandler
             {
                 case "name":
                     var nvGrpPr = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties;
-                    if (nvGrpPr != null) nvGrpPr.Name = value;
+                    if (nvGrpPr != null)
+                    {
+                        Core.XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvGrpPr.Name = value;
+                    }
                     break;
                 case "link":
                     ApplyGroupHyperlink(slidePart, grp, value, grpTooltipValue);
@@ -291,7 +295,11 @@ public partial class PowerPointHandler
                     {
                         var existing = grp.NonVisualGroupShapeProperties?.NonVisualDrawingProperties
                             ?.GetFirstChild<Drawing.HyperlinkOnClick>();
-                        if (existing != null) existing.Tooltip = value;
+                        if (existing != null)
+                        {
+                            Core.XmlTextValidator.ValidateOrThrow(value, "tooltip");
+                            existing.Tooltip = value;
+                        }
                     }
                     break;
                 case "x" or "y" or "width" or "height":
@@ -377,7 +385,11 @@ public partial class PowerPointHandler
             {
                 case "name":
                     var nvCxnPr = cxn.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties;
-                    if (nvCxnPr != null) nvCxnPr.Name = value;
+                    if (nvCxnPr != null)
+                    {
+                        Core.XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvCxnPr.Name = value;
+                    }
                     break;
                 case "x" or "y" or "width" or "height":
                 {

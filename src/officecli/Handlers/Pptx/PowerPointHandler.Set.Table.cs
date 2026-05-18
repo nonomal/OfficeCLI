@@ -196,7 +196,11 @@ public partial class PowerPointHandler
                 }
                 case "name":
                     var nvPr = gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties;
-                    if (nvPr != null) nvPr.Name = value;
+                    if (nvPr != null)
+                    {
+                        XmlTextValidator.ValidateOrThrow(value, "name");
+                        nvPr.Name = value;
+                    }
                     break;
                 case "tablestyle" or "style":
                 {

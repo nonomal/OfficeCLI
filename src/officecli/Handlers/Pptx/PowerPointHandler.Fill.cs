@@ -476,7 +476,7 @@ public partial class PowerPointHandler
             "roundrect" or "roundedrectangle" => Drawing.ShapeTypeValues.RoundRectangle,
             "ellipse" or "oval" => Drawing.ShapeTypeValues.Ellipse,
             "triangle" => Drawing.ShapeTypeValues.Triangle,
-            "rtriangle" or "righttriangle" => Drawing.ShapeTypeValues.RightTriangle,
+            "rtriangle" or "righttriangle" or "rttriangle" => Drawing.ShapeTypeValues.RightTriangle,
             "diamond" => Drawing.ShapeTypeValues.Diamond,
             "parallelogram" => Drawing.ShapeTypeValues.Parallelogram,
             "trapezoid" => Drawing.ShapeTypeValues.Trapezoid,

@@ -84,6 +84,12 @@ internal static partial class ChartHelper
                 _ => posRaw
             };
         }
+        else
+        {
+            // Builder defaults to legend=bottom when prop absent; emit explicit
+            // "none" so dump→replay round-trip preserves the no-legend state.
+            node.Format["legend"] = "none";
+        }
 
         var dataLabels = plotArea.Descendants<C.DataLabels>().FirstOrDefault();
         if (dataLabels != null)

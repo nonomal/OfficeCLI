@@ -1496,10 +1496,29 @@ public partial class WordHandler
                 return true;
             case "underline":
             case "font.underline":
+            {
+                // CONSISTENCY(underline-color-preserve): snapshot any existing
+                // <w:u w:color="…"/> attribute before rebuilding the element,
+                // so toggling the style ("single" → "double") does not silently
+                // drop a previously-set underline colour. The dedicated
+                // "underline.color" case rebuilds the Underline element from
+                // scratch and would otherwise be the only path that keeps
+                // colour through a style change.
+                var existingUl = props.GetFirstChild<Underline>();
+                var preservedColor = existingUl?.Color?.Value;
+                var preservedThemeColor = existingUl?.ThemeColor?.Value;
+                var preservedThemeTint = existingUl?.ThemeTint?.Value;
+                var preservedThemeShade = existingUl?.ThemeShade?.Value;
                 props.RemoveAllChildren<Underline>();
                 var ulMapped = NormalizeUnderlineValue(value);
-                InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
+                var newUl = new Underline { Val = new UnderlineValues(ulMapped) };
+                if (preservedColor != null) newUl.Color = preservedColor;
+                if (preservedThemeColor != null) newUl.ThemeColor = preservedThemeColor;
+                if (preservedThemeTint != null) newUl.ThemeTint = preservedThemeTint;
+                if (preservedThemeShade != null) newUl.ThemeShade = preservedThemeShade;
+                InsertRunPropInSchemaOrder(props, newUl);
                 return true;
+            }
             case "underline.color":
             case "underlinecolor":
             case "underlineColor":

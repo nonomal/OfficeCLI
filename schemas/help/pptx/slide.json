@@ -25,10 +25,10 @@
     },
     "title": {
       "type": "string",
-      "description": "title text. Creates a Title shape at Add time.",
-      "add": true, "set": true, "get": true,
+      "description": "title text. Creates a Title shape at Add time. To modify or read the title text after creation, target the title shape directly (e.g. /slide[N]/shape[@phType=title]).",
+      "add": true, "set": false, "get": false,
       "examples": ["--prop title=\"Introduction\""],
-      "readback": "Preview surfaces the title text (not in Format)",
+      "readback": "not surfaced at slide level; descend into the title shape",
       "enforcement": "report"
     },
     "text": {

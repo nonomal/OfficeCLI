@@ -41,9 +41,9 @@ officecli set deck.pptx /slide[2] --prop transition=push-right-1500
 ## Canonical readback
 
 `Get` returns the canonical full-word form: `push-right`, not `push-r`.
-Earlier versions of officecli leaked the raw OOXML single-letter dir
-attribute for p14 transitions (e.g. `pan-up` → `pan-u`); the read path
-now expands the abbreviation so both branches speak full words.
+Single-letter abbreviations (`l`/`r`/`u`/`d`) are accepted on input but
+always expand on readback so `set transition=pan-u` and
+`set transition=pan-up` round-trip identically.
 
 ## Aliases (input only)
 

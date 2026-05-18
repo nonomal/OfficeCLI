@@ -24,8 +24,7 @@ officecli set deck.pptx /slide[N] --prop transition=fade-med    # or 'medium'
 officecli set deck.pptx /slide[N] --prop transition=fade-slow
 ```
 
-Stored as `<p:transition spd="fast|med|slow">`. `Get` surfaces it as
-the read-only `transitionSpeed` format key.
+`Get` surfaces the value as the read-only `transitionSpeed` format key.
 
 ### 2. Office 2010+ duration in milliseconds
 
@@ -35,9 +34,8 @@ officecli set deck.pptx /slide[N] --prop transition=fade-1500    # 1.5 s
 officecli set deck.pptx /slide[N] --prop transition=fade-3000    # 3.0 s
 ```
 
-Stored as `<p:transition p14:dur="1500">` inside the
-`mc:AlternateContent` wrapper. `Get` surfaces it as the read-only
-`transitionDuration` format key.
+`Get` surfaces the value as the read-only `transitionDuration` format
+key (millisecond integer).
 
 Specifying both speed and duration is allowed — newer PowerPoint
 honors `@dur`, older falls back to `@spd`.

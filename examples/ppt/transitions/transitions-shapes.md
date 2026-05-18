@@ -17,8 +17,7 @@ bash transitions-shapes.sh
 ## The three sub-families
 
 Shape-mask transitions reveal the new slide through a growing geometric
-mask. OOXML splits them into three sub-types by what modifies the
-shape:
+mask. They split into three flavors by what modifies the shape:
 
 ### 1. Direction-less (no `-in`/`-out` suffix)
 
@@ -29,14 +28,13 @@ officecli set deck.pptx /slide[N] --prop transition=plus
 officecli set deck.pptx /slide[N] --prop transition=wedge
 ```
 
-These are `CT_OptionalBlackTransition` shapes — OOXML defines no
-direction attribute. Passing `-in`/`-out` is rejected with a clear error
-rather than silently dropped:
+These four are direction-less. Passing `-in`/`-out` is rejected with a
+clear error rather than silently dropped:
 
 ```
 Error: Transition 'circle' does not accept a direction modifier (got '-in').
-'circle' is a direction-less shape transition in OOXML — drop the
-suffix and use plain 'transition=circle'.
+'circle' is a direction-less shape transition — drop the suffix and
+use plain 'transition=circle'.
 ```
 
 ### 2. In / Out
@@ -52,12 +50,9 @@ The default is `-in`; bare `zoom` / `box` round-trip as `zoom` / `box`
 (default collapses on readback), `zoom-out` / `box-out` round-trip with
 the suffix intact.
 
-**Box uses a different OOXML element than the others here.** The basic
-`<p:transition>` schema's allowed-child list does not include `<p:box>`;
-Box is a PowerPoint 2013+ "modern" transition stored as
-`<p15:prstTrans prst="box">` (with `invX="1" invY="1"` for the `-out`
-variant) inside an `mc:AlternateContent` wrapper. Older PowerPoint that
-doesn't recognize the p15 namespace plays the inline fallback fade.
+**Box is a PowerPoint 2013+ "modern" transition.** officecli writes
+it with an inline fade fallback baked in, so pre-2013 PowerPoint plays
+a fade in its place instead of nothing.
 
 ### 3. Spoke count — `wheel-N`
 

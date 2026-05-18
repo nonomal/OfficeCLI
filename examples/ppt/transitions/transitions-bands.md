@@ -56,8 +56,8 @@ orientation given) reads back as plain `split`.
 | `randombar` | `bars` |
 | `diagonal` | `strips` |
 
-Pick whichever spelling reads best in your script; the OOXML is identical
-either way.
+Pick whichever spelling reads best in your script; both produce the
+same transition.
 
 ## Related
 

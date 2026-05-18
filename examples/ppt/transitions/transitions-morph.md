@@ -37,8 +37,8 @@ officecli set deck.pptx /slide[N] --prop transition=morph-bychar
 | `byword` | Whole words within text bodies |
 | `bychar` | Individual characters within text bodies |
 
-`object`, `word`, `char`, `character` are accepted input aliases that
-canonicalize to the OOXML-spelling on readback.
+`object`, `word`, `char`, `character` are accepted input aliases;
+`Get` returns the canonical `byObject` / `byWord` / `byChar` form.
 
 ## How shape pairing works
 
@@ -60,29 +60,14 @@ officecli add deck.pptx /slide[2] --type shape \
     --prop x=15cm --prop y=10cm --prop width=6cm --prop height=6cm
 ```
 
-## OOXML representation
+## Backwards compatibility
 
-Morph is written inside an `mc:AlternateContent` wrapper using the
-2015 p159 namespace:
-
-```xml
-<mc:AlternateContent>
-  <mc:Choice Requires="p159">
-    <p:transition>
-      <p159:morph option="byObject"/>
-    </p:transition>
-  </mc:Choice>
-  <mc:Fallback>
-    <p:transition><p:fade/></p:transition>
-  </mc:Fallback>
-</mc:AlternateContent>
-```
-
-Older PowerPoint (pre-2016) plays the fallback fade — the deck remains
+officecli writes morph with an inline fade fallback baked in. Older
+PowerPoint (pre-2016) plays the fallback fade — the deck remains
 openable everywhere.
 
 ## See also
 
 - `examples/product_launch_morph.pptx` in the repo root — a full
   product-launch deck built with morph as the primary motion.
-- [transitions-dynamic.md](transitions-dynamic.md) — Office 2010+ "Exciting" gallery, which uses a similar mc:AlternateContent wrapper around p14 transitions.
+- [transitions-dynamic.md](transitions-dynamic.md) — Office 2010+ "Exciting" gallery (vortex / switch / flip / ...).

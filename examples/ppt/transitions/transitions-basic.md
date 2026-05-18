@@ -37,10 +37,9 @@ officecli set deck.pptx /slide[6] --prop transition=fade
 officecli set deck.pptx /slide[6] --prop transition=none
 ```
 
-After the second call, `Get` returns no `transition` key — the OOXML
-`<p:transition>` element is removed entirely (including the
-`mc:AlternateContent` wrapper that some Office 2010+ types use). Use
-this to remove a stale transition rather than guessing at an empty
+After the second call, `Get` returns no `transition` key — the
+transition is fully cleared, even for Morph and other wrapped types.
+Use this to remove a stale transition rather than guessing at an empty
 string.
 
 ## Related trios

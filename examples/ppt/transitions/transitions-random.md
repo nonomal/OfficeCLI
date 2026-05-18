@@ -22,9 +22,8 @@ officecli set deck.pptx /slide[N] --prop transition=random
 ```
 
 - **`newsflash`** — a fixed legacy animation: the new slide spins
-  inward newspaper-style. Pre-2010 OOXML element; ships in plain
-  `<p:transition><p:newsflash/></p:transition>` (no mc:AlternateContent
-  wrapper needed).
+  inward newspaper-style. Pre-2010 element, no compatibility wrapper
+  needed.
 - **`random`** — at render time, PowerPoint picks a random transition
   from its available set. The .pptx only captures the *intent*; the
   motion you see in Slide Show mode will differ each time you enter

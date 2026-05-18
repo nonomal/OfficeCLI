@@ -17,10 +17,9 @@ bash transitions-dynamic.sh
 ## Why these are special
 
 These transitions ship in PowerPoint 2010 or later. officecli writes
-each one inside an `mc:AlternateContent` wrapper with an inline
-`<mc:Fallback><p:transition><p:fade/></p:transition></mc:Fallback>` —
-older PowerPoint that doesn't recognize the p14 namespace will play a
-plain fade instead, so the deck still opens.
+each one with an inline fade fallback baked in, so a pre-2010
+PowerPoint opening the same deck plays a plain fade in their place
+instead of failing or showing nothing.
 
 ## Direction grouping
 
@@ -43,14 +42,10 @@ officecli set deck.pptx /slide[N] --prop transition=ferris-right-1500
 ## Recent fixes pinned by this trio
 
 - `reveal-right`, `ferris-right`, `gallery-right`, `conveyor-right`,
-  `shred-out`, `flythrough-out`, `warp-out` — earlier the parser called
-  the SDK constructor with no direction, so the resulting
-  `<p14:reveal/>` element had no `dir` attribute and read back as bare
-  `reveal`. Each type now passes through `ParseLeftRightDir` or
-  `ParseInOutDir` and round-trips correctly.
-- `pan-up` previously read back as `pan-u` because the regex-based p14
-  readback echoed the raw single-letter attribute. The readback now
-  expands abbreviations to canonical full words.
+  `shred-out`, `flythrough-out`, `warp-out` — direction was silently
+  dropped at write time and lost on readback; each now round-trips.
+- `pan-up` previously read back as the truncated `pan-u`; single-letter
+  abbreviations now always expand to full words on readback.
 
 ## Related
 

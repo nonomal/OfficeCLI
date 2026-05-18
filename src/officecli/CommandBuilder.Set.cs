@@ -109,6 +109,31 @@ static partial class CommandBuilder
                     return 2;
             }
 
+            // `set` is a mutation command; an invocation with no --prop and
+            // no bare unmatched key=value pairs is a caller mistake (missing
+            // the property they intended to apply). Without this guard the
+            // command ran the dispatcher with an empty properties dictionary,
+            // applied nothing, and returned "Updated <path>" with success=0
+            // — indistinguishable from a real successful set. Surface as
+            // missing_property so the caller knows nothing happened.
+            if ((props == null || props.Length == 0) && unmatchedKvWarnings.Count == 0)
+            {
+                var err = $"No properties to set at {path}. Pass at least one --prop key=value.";
+                if (json)
+                {
+                    var missingPropWarnings = new List<OfficeCli.Core.CliWarning>
+                    {
+                        new() { Message = err, Code = "missing_property", Suggestion = "--prop key=value" }
+                    };
+                    Console.WriteLine(OutputFormatter.WrapEnvelopeError(err, missingPropWarnings));
+                }
+                else
+                {
+                    Console.Error.WriteLine($"Error: {err}");
+                }
+                return 1;
+            }
+
             // Path that does not start with '/' is rejected up front (must run before
             // TryResident — resident has its own dispatch and would otherwise execute
             // selector-mode silently). handler.Set treats no-slash paths as CSS selectors

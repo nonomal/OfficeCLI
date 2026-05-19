@@ -2166,7 +2166,13 @@ internal static partial class ChartHelper
                     lc.RemoveAllChildren<C.UpDownBars>();
                     if (value.Equals("none", StringComparison.OrdinalIgnoreCase)
                         || value.Equals("false", StringComparison.OrdinalIgnoreCase)) break;
-                    if (value.Contains(':') || (ParseHelpers.IsValidBooleanString(value) && ParseHelpers.IsTruthy(value)))
+                    // Accept three input shapes: bool ("true"), bare numeric
+                    // gapWidth ("150"), and the compound "gap:up:down" — the
+                    // Reader emits the compound form, but users can also pass
+                    // just the gap width when colors should default.
+                    if (value.Contains(':')
+                        || (ParseHelpers.IsValidBooleanString(value) && ParseHelpers.IsTruthy(value))
+                        || ushort.TryParse(value, out _))
                     {
                         var udb = new C.UpDownBars();
                         ushort gapWidth = 150;
@@ -2177,6 +2183,10 @@ internal static partial class ChartHelper
                             if (udbParts.Length >= 1 && ushort.TryParse(udbParts[0], out var gw)) gapWidth = gw;
                             if (udbParts.Length >= 2 && !string.IsNullOrEmpty(udbParts[1])) upColor = udbParts[1];
                             if (udbParts.Length >= 3 && !string.IsNullOrEmpty(udbParts[2])) downColor = udbParts[2];
+                        }
+                        else if (ushort.TryParse(value, out var bareGw))
+                        {
+                            gapWidth = bareGw;
                         }
                         udb.AppendChild(new C.GapWidth { Val = gapWidth });
                         var upBars = new C.UpBars();

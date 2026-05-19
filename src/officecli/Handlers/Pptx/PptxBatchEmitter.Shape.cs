@@ -29,6 +29,31 @@ public static partial class PptxBatchEmitter
             props.Remove("link");
     }
 
+    // Run-level analogue of DeferSlideJumpLink. Target path is the run's
+    // positional path under its paragraph parent; tooltip rides along.
+    private static void DeferRunSlideJumpLink(Dictionary<string, string> props, string paraPath,
+                                              int runIndex, SlideEmitContext ctx)
+    {
+        if (!props.TryGetValue("link", out var linkVal) || string.IsNullOrEmpty(linkVal)) return;
+        if (!SlideJumpLink.IsMatch(linkVal)) return;
+        props.Remove("link");
+        var deferredProps = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
+        {
+            ["link"] = linkVal,
+        };
+        if (props.TryGetValue("tooltip", out var tt) && !string.IsNullOrEmpty(tt))
+        {
+            deferredProps["tooltip"] = tt;
+            props.Remove("tooltip");
+        }
+        ctx.DeferredLinks.Add(new BatchItem
+        {
+            Command = "set",
+            Path = $"{paraPath}/run[{runIndex}]",
+            Props = deferredProps,
+        });
+    }
+
     // R24 — a:pPr accepts none of these (ECMA-376 §21.1.2.2.7 lvlLPr /
     // §21.1.2.2.6 defaultLevelParagraphProperties — language is part of
     // a:rPr only). The single-run-collapse path used to spill these onto
@@ -144,7 +169,7 @@ public static partial class PptxBatchEmitter
         // user text — skip the body walk for equations entirely.
         if (isEquation) return;
 
-        EmitTextBody(ppt, fullShape, replayPath, items);
+        EmitTextBody(ppt, fullShape, replayPath, items, ctx: ctx);
     }
 
     private static void EmitPlaceholder(PowerPointHandler ppt, DocumentNode phNode, string parentSlidePath,
@@ -167,7 +192,7 @@ public static partial class PptxBatchEmitter
         // path) targets a non-existent run and fails the batch. Tell
         // EmitTextBody the seeded paragraph has zero runs so it issues `add
         // run` for the first run instead.
-        EmitTextBody(ppt, full, replayPath, items, seededFirstParaHasRun: false);
+        EmitTextBody(ppt, full, replayPath, items, seededFirstParaHasRun: false, ctx: ctx);
     }
 
     private static void EmitConnector(PowerPointHandler ppt, DocumentNode cxnNode, string parentSlidePath,
@@ -293,7 +318,7 @@ public static partial class PptxBatchEmitter
     // paragraphs collapse run props onto the paragraph itself, mirroring the
     // docx single-run optimization.
     private static void EmitTextBody(PowerPointHandler ppt, DocumentNode shapeNode, string shapeParent, List<BatchItem> items,
-                                     bool seededFirstParaHasRun = true)
+                                     bool seededFirstParaHasRun = true, SlideEmitContext? ctx = null)
     {
         if (shapeNode.Children == null) return;
         var paragraphs = shapeNode.Children.Where(c => c.Type == "paragraph" || c.Type == "p").ToList();
@@ -316,13 +341,15 @@ public static partial class PptxBatchEmitter
             // and AddParagraph appends), so WordBatchEmitter uses pure `add`.
             EmitParagraph(ppt, para, shapeParent, pIdx, items,
                 firstParagraph: pIdx == 1,
-                seededParaHasRun: pIdx == 1 && seededFirstParaHasRun);
+                seededParaHasRun: pIdx == 1 && seededFirstParaHasRun,
+                ctx: ctx);
         }
     }
 
     private static void EmitParagraph(PowerPointHandler ppt, DocumentNode paraNode, string shapeParent,
                                       int paraIdx, List<BatchItem> items, bool firstParagraph,
-                                      bool seededParaHasRun = true)
+                                      bool seededParaHasRun = true,
+                                      SlideEmitContext? ctx = null)
     {
         var props = FilterEmittableProps(paraNode.Format);
         // CONSISTENCY(slide-jump-defer): the shape-level emit already deferred
@@ -469,9 +496,9 @@ public static partial class PptxBatchEmitter
         for (int ri = 0; ri < runs.Count; ri++)
         {
             if (ri == 0 && firstRunOnSeededParagraph)
-                EmitFirstRunAsSet(runs[ri], paraParent, items);
+                EmitFirstRunAsSet(runs[ri], paraParent, items, ctx);
             else
-                EmitRun(runs[ri], paraParent, items);
+                EmitRun(runs[ri], paraParent, items, ctx, runIndex: ri + 1);
         }
     }
 
@@ -480,10 +507,12 @@ public static partial class PptxBatchEmitter
     // <paraParent>/run[1]. Empty/lang-only seeded runs in the source are
     // filtered the same way EmitRun filters; an empty rewrite is a no-op set
     // with no props.
-    private static void EmitFirstRunAsSet(DocumentNode runNode, string paraParent, List<BatchItem> items)
+    private static void EmitFirstRunAsSet(DocumentNode runNode, string paraParent, List<BatchItem> items,
+                                          SlideEmitContext? ctx = null)
     {
         var props = FilterEmittableProps(runNode.Format);
-        DummyCtxStripSlideJump(props);
+        if (ctx != null) DeferRunSlideJumpLink(props, paraParent, 1, ctx);
+        else DummyCtxStripSlideJump(props);
         bool hasText = !string.IsNullOrEmpty(runNode.Text);
         if (!hasText && props.Count > 0
             && props.Keys.All(k => RunDefaultOnlyKeys.Contains(k)))
@@ -511,10 +540,18 @@ public static partial class PptxBatchEmitter
         "lang", "altLang",
     };
 
-    private static void EmitRun(DocumentNode runNode, string paraParent, List<BatchItem> items)
+    private static void EmitRun(DocumentNode runNode, string paraParent, List<BatchItem> items,
+                                SlideEmitContext? ctx = null, int runIndex = 0)
     {
         var props = FilterEmittableProps(runNode.Format);
-        DummyCtxStripSlideJump(props);
+        // Defer run-level slide-jump links the same way shape-level links are
+        // deferred — emit a follow-up `set` BatchItem against the run path
+        // once every target slide is materialized. Without this, run-internal
+        // `link=slide[N]` was silently stripped and the rendered run lost its
+        // hyperlink on replay. External URLs / named actions / mailto stay in
+        // the run prop bag and AddRun.ApplyRunHyperlink handles them inline.
+        if (ctx != null) DeferRunSlideJumpLink(props, paraParent, runIndex, ctx);
+        else DummyCtxStripSlideJump(props);
         bool hasText = !string.IsNullOrEmpty(runNode.Text);
 
         // Drop runs that carry no text and only default attributes AddRun

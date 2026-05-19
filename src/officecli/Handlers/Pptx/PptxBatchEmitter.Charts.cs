@@ -147,5 +147,93 @@ public static partial class PptxBatchEmitter
             Type = "chart",
             Props = props.Count > 0 ? props : null,
         });
+
+        // Axis-role round-trip. EmitChart's add row covers chart-level axis
+        // shortcuts (axismin/axismax/axistitle) that only target the primary
+        // value axis — for any per-role override (especially role=value2 on a
+        // secondary axis, or category/series tick/format tweaks) the add path
+        // is silent. Re-query each axis via the handler's Get on the axis
+        // sub-path (same path the Set side accepts) and emit a
+        // `set /slide[N]/chart[K]/axis[@role=ROLE]` row carrying the non-default
+        // keys. Missing roles (pie / doughnut / treemap have no axes) are
+        // silently skipped.
+        EmitChartAxesIfDifferent(ppt, fullChart.Path, items);
+    }
+
+    // Keys BuildAxisNode emits with synthetic defaults that match a freshly-
+    // built axis under AddChart — emitting them would be a no-op and just add
+    // noise to dump output. `role` is the selector key, not a property.
+    private static readonly HashSet<string> AxisDefaultSkipKeys =
+        new(StringComparer.OrdinalIgnoreCase) { "role" };
+
+    // Value tuples (key, defaultValue) — skip the key on emit when the value
+    // matches the AddChart default. Avoids re-emitting `majorTickMark=out`,
+    // `crosses=autoZero` etc. on every dump even when the user never touched
+    // the axis. Defaults sourced from ChartHelper.Builder PostAxisDefaults
+    // (see SetterHelpers — bar/column/line all share these).
+    private static readonly Dictionary<string, string> AxisDefaultValueSkips =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["majorTickMark"] = "out",
+            ["minorTickMark"] = "none",
+            ["tickLabelPos"] = "nextTo",
+            ["crosses"] = "autoZero",
+            ["crossBetween"] = "between",
+            ["majorGridlines"] = "true",   // value axis seeds gridlines on
+            ["minorGridlines"] = "false",
+        };
+
+    private static void EmitChartAxesIfDifferent(PowerPointHandler ppt,
+        string chartPath, List<BatchItem> items)
+    {
+        if (string.IsNullOrEmpty(chartPath)) return;
+
+        foreach (var role in new[] { "category", "value", "value2", "series" })
+        {
+            var axisPath = $"{chartPath}/axis[@role={role}]";
+            DocumentNode? axisNode;
+            try { axisNode = ppt.Get(axisPath); }
+            catch { continue; } // axis missing on this chart type — skip
+
+            var setProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in axisNode.Format)
+            {
+                if (v == null) continue;
+                if (AxisDefaultSkipKeys.Contains(k)) continue;
+                // Skip BuildAxisNode "always-emit" gridline booleans when
+                // false — AddChart leaves the default off, so emitting
+                // `majorGridlines=false` is a no-op that adds noise.
+                var s = v.ToString();
+                if (string.IsNullOrEmpty(s)) continue;
+                if (AxisDefaultValueSkips.TryGetValue(k, out var def)
+                    && string.Equals(s, def, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // Gridlines false: the BuildAxisNode reader always emits both
+                // majorGridlines and minorGridlines (true|false). The
+                // category/series axes never carry gridlines under AddChart's
+                // default, so a "false" value matches the synthetic default
+                // regardless of which axis role surfaced it. Skip it
+                // unconditionally to keep dumps lean. Genuinely user-disabled
+                // gridlines on a value axis re-emit explicitly via the chart-
+                // level gridlines=false prop, which already round-trips.
+                if ((k.Equals("majorGridlines", StringComparison.OrdinalIgnoreCase)
+                  || k.Equals("minorGridlines", StringComparison.OrdinalIgnoreCase))
+                    && s!.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                // visible=true is BuildAxisNode's "always-emit" default.
+                if (k.Equals("visible", StringComparison.OrdinalIgnoreCase)
+                    && s!.Equals("true", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                setProps[k] = s!;
+            }
+            if (setProps.Count == 0) continue;
+
+            items.Add(new BatchItem
+            {
+                Command = "set",
+                Path = axisPath,
+                Props = setProps,
+            });
+        }
     }
 }

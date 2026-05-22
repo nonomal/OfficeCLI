@@ -347,10 +347,27 @@ public static partial class PptxBatchEmitter
         var slidePath = slideNode.Path;
         ProbeUnsupportedOnSlide(ppt, slidePath, ctx);
 
+        // Detect exotic transition / timing content that the semantic emit
+        // can't faithfully reproduce (morph + p14/p15 transitions, motion
+        // paths, sequence groupings). When present, we suppress the semantic
+        // emit for that category and emit a raw-set passthrough at the end
+        // of the slide — single source of truth per slide-per-category.
+        var exotic = ScanSlideExoticContent(ppt, slidePath);
+
         // Pull the full slide node so layout / hidden / background etc. surface
         // even when the entry passed us a depth-truncated tree from "/".
         var fullSlide = ppt.Get(slidePath);
         var slideProps = FilterEmittableProps(fullSlide.Format);
+
+        if (exotic.HasExoticTransition)
+        {
+            // Strip transition-related props so the add slide doesn't write a
+            // semantic <p:transition> that would then collide with the
+            // raw-set append below (schema permits only one <p:transition>).
+            foreach (var k in new[] { "transition", "transitionSpeed", "transitionDuration",
+                                       "advanceTime", "advanceClick" })
+                slideProps.Remove(k);
+        }
 
         items.Add(new BatchItem
         {
@@ -405,7 +422,16 @@ public static partial class PptxBatchEmitter
         // Pre-build the per-slide animation index keyed by source shape @id
         // (or positional fallback). EmitAnimationsForShape pulls per-shape
         // entries from this map as we emit each <p:sp>.
-        var animIndex = BuildSlideAnimationIndex(ppt, slideNum);
+        //
+        // When the slide has exotic timing content (motion paths, sequence
+        // groupings, custom triggers the Query doesn't enumerate), we skip
+        // semantic per-shape animation emits entirely and rely on a raw-set
+        // passthrough of the whole <p:timing> tree appended at slide end.
+        // Mixing the two would silently corrupt the replay (semantic add
+        // would inject duplicate effect nodes alongside the raw-set tree).
+        var animIndex = exotic.HasExoticTiming
+            ? new Dictionary<string, List<DocumentNode>>(StringComparer.Ordinal)
+            : BuildSlideAnimationIndex(ppt, slideNum);
 
         var ord = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in fullSlide.Children)
@@ -486,6 +512,18 @@ public static partial class PptxBatchEmitter
             }
         }
 
+        // Raw-XML passthrough for exotic transition / timing content. Emitted
+        // AFTER all shape/animation rows so they replace anything the semantic
+        // emit produced (defensive — slideProps already stripped, animIndex
+        // already nulled, but raw-set is the authoritative payload).
+        // Append into /p:sld preserves OOXML schema order because we removed
+        // the corresponding props upstream: the slide carries neither
+        // <p:transition> nor <p:timing> at this point in replay.
+        if (exotic.HasExoticTransition && exotic.TransitionXml != null)
+            EmitRawSlideSlice(slidePath, "p:transition", exotic.TransitionXml, items, ctx);
+        if (exotic.HasExoticTiming && exotic.TimingXml != null)
+            EmitRawSlideSlice(slidePath, "p:timing", exotic.TimingXml, items, ctx);
+
         // Notes body content — stub for PR1. Notes part presence does not
         // surface in the slide subtree's children today (notes live under
         // /slide[N]/notes); PR2 will reach in and emit them.
@@ -534,24 +572,320 @@ public static partial class PptxBatchEmitter
         if (xml.Contains("p:model3d", StringComparison.Ordinal))
             ctx.Unsupported.Add(new UnsupportedWarning("model3D", slidePath, "3D model present"));
 
-        // Exotic transitions. Morph is most common; conveyor/ferris/honeycomb/
-        // gallery live under p:transition's p15: extension list. Sniff the
-        // transition element if present and tag by extension hint.
-        // Vanilla transitions (fade/push/wipe/cut) already round-trip via
-        // the `transition` prop, so they are NOT unsupported.
+        // Exotic transitions (morph, p15:prstTrans gallery, p14:* like flip/
+        // gallery/conveyor) and exotic animation timing (motion paths,
+        // sequence groupings) now round-trip via a raw-set passthrough on the
+        // <p:transition> / <p:timing> elements — see ScanSlideExoticContent
+        // and EmitRawSlideSlice. No UnsupportedWarning is raised for them
+        // because the slice is emitted verbatim. The warning is reserved for
+        // cases where the slice itself cannot be canonicalised (handled in
+        // EmitRawSlideSlice).
+    }
+
+    /// <summary>
+    /// Result of scanning a slide's raw XML for content that the semantic
+    /// emit path cannot reproduce. Both transition and timing fields are
+    /// null when the slide carries only vanilla content (or none).
+    /// </summary>
+    private readonly record struct SlideExoticContent(
+        bool HasExoticTransition, string? TransitionXml,
+        bool HasExoticTiming, string? TimingXml);
+
+    private static SlideExoticContent ScanSlideExoticContent(PowerPointHandler ppt, string slidePath)
+    {
+        string xml;
+        try { xml = ppt.Raw(slidePath); }
+        catch { return default; }
+
+        string? transXml = null;
+        bool transExotic = false;
         var tIdx = xml.IndexOf("<p:transition", StringComparison.Ordinal);
         if (tIdx >= 0)
         {
-            var tEnd = xml.IndexOf("</p:transition>", tIdx, StringComparison.Ordinal);
-            var tSlice = tEnd > tIdx ? xml.Substring(tIdx, tEnd - tIdx) : xml.Substring(tIdx);
-            if (tSlice.Contains("p159:morph", StringComparison.Ordinal)
-                || tSlice.Contains("p15:morph", StringComparison.Ordinal)
-                || tSlice.Contains("<p159:morph", StringComparison.Ordinal))
+            // Capture the full <p:transition>...</p:transition> slice, OR the
+            // self-closing form. Also include any enclosing
+            // <mc:AlternateContent> wrapper because morph/p14/p15 transitions
+            // live INSIDE that wrapper (the typed <p:transition> sits as the
+            // mc:Fallback child); the wrapper is the natural replace target.
+            var mcWrapStart = xml.LastIndexOf("<mc:AlternateContent", tIdx, StringComparison.Ordinal);
+            // mcWrapStart is valid only if its closing </mc:AlternateContent>
+            // tag lies after tIdx (i.e. <p:transition> is nested inside it).
+            int sliceStart, sliceEnd;
+            if (mcWrapStart >= 0)
             {
-                ctx.Unsupported.Add(new UnsupportedWarning("transition.morph", slidePath,
-                    "morph transition uses p15: extension"));
+                var mcWrapEnd = xml.IndexOf("</mc:AlternateContent>", mcWrapStart, StringComparison.Ordinal);
+                if (mcWrapEnd > tIdx)
+                {
+                    sliceStart = mcWrapStart;
+                    sliceEnd = mcWrapEnd + "</mc:AlternateContent>".Length;
+                }
+                else
+                {
+                    sliceStart = tIdx;
+                    sliceEnd = SliceEnd(xml, tIdx, "p:transition");
+                }
+            }
+            else
+            {
+                sliceStart = tIdx;
+                sliceEnd = SliceEnd(xml, tIdx, "p:transition");
+            }
+            if (sliceEnd > sliceStart)
+            {
+                var slice = xml.Substring(sliceStart, sliceEnd - sliceStart);
+                // Exotic markers: any markup outside the plain <p:transition>
+                // grammar — namespaces other than p:/a: under the transition
+                // tree, mc:AlternateContent wrapping, p14/p15/p159 extension
+                // elements. Vanilla fade/push/wipe/cut/cover/cut/etc. that the
+                // semantic `transition=` prop already round-trips through
+                // ReadSlideTransition NEVER carry these markers, so the
+                // semantic path remains authoritative for them.
+                if (slice.Contains("mc:AlternateContent", StringComparison.Ordinal)
+                    || slice.Contains("p159:", StringComparison.Ordinal)
+                    || slice.Contains("p15:", StringComparison.Ordinal)
+                    || slice.Contains("p14:", StringComparison.Ordinal))
+                {
+                    transExotic = true;
+                    transXml = slice;
+                }
             }
         }
+
+        string? timingXml = null;
+        bool timingExotic = false;
+        var pIdx = xml.IndexOf("<p:timing", StringComparison.Ordinal);
+        if (pIdx >= 0)
+        {
+            var sliceEnd = SliceEnd(xml, pIdx, "p:timing");
+            if (sliceEnd > pIdx)
+            {
+                var slice = xml.Substring(pIdx, sliceEnd - pIdx);
+                // Motion paths surface as presetClass="path"; sequence
+                // groupings beyond the per-shape entrance/exit/emphasis tree
+                // that Query enumerates show up as <p:tnLst> nested under
+                // <p:par> with no presetID anchor that we currently parse,
+                // OR as <p:set>/<p:anim>/<p:animMotion>/<p:animRot>/etc.
+                // direct timing-effect nodes which BuildSlideAnimationIndex
+                // doesn't materialise. The cheapest precise signal is
+                // presetClass="path" (motion path) OR any <p:animMotion>
+                // element OR a presetClass we don't enumerate.
+                // Precise signal: `presetClass="path"` flags motion-path
+                // animations (the Query selector "animation" excludes
+                // presetClass=motion/path entirely, so they vanish under the
+                // semantic emit). `<p:animMotion>` is the lower-level
+                // OOXML element a motion-path expands to but rarely appears
+                // without the presetClass marker on the enclosing effect.
+                // Other p:anim* variants (animScale/animRot/animClr) are
+                // how the SDK implements ordinary zoom/spin/colorChange
+                // EMPHASIS effects that the Query DOES enumerate via
+                // PopulateAnimationNode — flagging those would force every
+                // emphasis slide through raw-set and break the basic
+                // animation round-trip.
+                if (slice.Contains("presetClass=\"path\"", StringComparison.Ordinal)
+                    || slice.Contains("<p:animMotion", StringComparison.Ordinal))
+                {
+                    timingExotic = true;
+                    timingXml = slice;
+                }
+            }
+        }
+
+        return new SlideExoticContent(transExotic, transXml, timingExotic, timingXml);
+    }
+
+    // Normalize a slide raw slice into a stable textual form so the first-pass
+    // (clean source XML) and second-pass (post-SDK-round-trip) produce
+    // byte-identical raw-set rows. The SDK round-trip aggressively rewrites
+    // ambient prefixes: it may render <mc:AlternateContent> as <AlternateContent
+    // xmlns="…/markup-compatibility/2006"> (default-namespaced) on output even
+    // when the inserted source used the prefixed form. This normalizer parses
+    // the slice, forces every element in the four ambient pptx namespaces
+    // (p, a, r, mc) onto its canonical prefix, then strips redundant xmlns
+    // decls. The result compares equal across rounds regardless of which
+    // serialization the SDK picked.
+    private static string NormalizeSlideRawSlice(string sliceXml)
+    {
+        if (string.IsNullOrEmpty(sliceXml) || !sliceXml.StartsWith("<")) return sliceXml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(sliceXml);
+            if (doc.Root == null) return sliceXml;
+            var ambient = new (string Prefix, System.Xml.Linq.XNamespace Ns)[]
+            {
+                ("p",  "http://schemas.openxmlformats.org/presentationml/2006/main"),
+                ("a",  "http://schemas.openxmlformats.org/drawingml/2006/main"),
+                ("r",  "http://schemas.openxmlformats.org/officeDocument/2006/relationships"),
+                ("mc", "http://schemas.openxmlformats.org/markup-compatibility/2006"),
+            };
+            // Force the root to carry the canonical prefix decls for any
+            // ambient namespace it uses on itself or its descendants. We do
+            // not strip non-ambient decls (e.g. p159, p14, p15) since those
+            // are extension namespaces specific to this slice and must
+            // travel with it.
+            foreach (var (prefix, ns) in ambient)
+            {
+                bool used = doc.Root.DescendantsAndSelf().Any(e => e.Name.Namespace == ns)
+                            || doc.Root.DescendantsAndSelf().SelectMany(e => e.Attributes())
+                                .Any(a => !a.IsNamespaceDeclaration && a.Name.Namespace == ns);
+                if (!used) continue;
+                // Remove any default-namespace decls pointing at this ambient
+                // namespace, anywhere in the tree — they will be supplanted
+                // by the prefixed form on the root.
+                foreach (var el in doc.Root.DescendantsAndSelf().ToList())
+                {
+                    var toRemove = el.Attributes()
+                        .Where(a => a.IsNamespaceDeclaration && a.Value == ns.NamespaceName)
+                        .ToList();
+                    foreach (var a in toRemove) a.Remove();
+                }
+                // Stamp the canonical prefix decl onto the root.
+                doc.Root.SetAttributeValue(System.Xml.Linq.XNamespace.Xmlns + prefix, ns.NamespaceName);
+            }
+            // Drop redundant prefix decls on descendants that match the root's
+            // (mirrors CanonicalizeRawXml but on the post-rewrite tree).
+            var rootDecls = doc.Root.Attributes()
+                .Where(a => a.IsNamespaceDeclaration)
+                .ToDictionary(a => a.Name, a => a.Value);
+            foreach (var desc in doc.Root.Descendants())
+            {
+                var dups = desc.Attributes()
+                    .Where(a => a.IsNamespaceDeclaration
+                                && rootDecls.TryGetValue(a.Name, out var v) && v == a.Value)
+                    .ToList();
+                foreach (var a in dups) a.Remove();
+            }
+            // Final pass: drop ambient namespace decls from the slice root.
+            // They are guaranteed to be in scope at the /p:sld replay site,
+            // so keeping them only causes textual drift between rounds (the
+            // SDK re-stamps them on read-back, our source-side extraction
+            // may not have them at all).
+            //
+            // We CANNOT use XLinq's RemoveAttributes here naively — XLinq
+            // refuses to remove a namespace declaration that is currently
+            // in use by the element's own name or attribute names; doing so
+            // would silently break the serialization. So we serialize first,
+            // THEN textually drop the ambient decls from the root tag.
+            var serialized = doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            return StripAmbientXmlnsFromRootTag(serialized);
+        }
+        catch { return sliceXml; }
+    }
+
+    private static string StripAmbientXmlnsFromRootTag(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || xml[0] != '<') return xml;
+        var gtIdx = xml.IndexOf('>');
+        if (gtIdx <= 0) return xml;
+        var head = xml.Substring(0, gtIdx);
+        var tail = xml.Substring(gtIdx);
+        // Remove ` xmlns:p="…/presentationml/2006/main"` etc. only when the
+        // URI matches the well-known ambient. Other xmlns decls (xmlns:p159,
+        // xmlns:p14, …) stay — they are extension-scoped and must travel.
+        var ambientUris = new (string Prefix, string Uri)[]
+        {
+            ("p",  "http://schemas.openxmlformats.org/presentationml/2006/main"),
+            ("a",  "http://schemas.openxmlformats.org/drawingml/2006/main"),
+            ("r",  "http://schemas.openxmlformats.org/officeDocument/2006/relationships"),
+            ("mc", "http://schemas.openxmlformats.org/markup-compatibility/2006"),
+        };
+        foreach (var (prefix, uri) in ambientUris)
+        {
+            var pat = $" xmlns:{prefix}=\"{uri}\"";
+            head = head.Replace(pat, "");
+        }
+        return head + tail;
+    }
+
+    // Strip well-known pptx slide ambient namespace declarations from the
+    // ROOT of a slice destined for raw-set into /p:sld. The slide root
+    // always declares xmlns:p, xmlns:a, xmlns:r, xmlns:mc — the SDK's
+    // round-trip serialization stamps them onto every direct child of the
+    // slide root, so a slice extracted from the source's raw XML (no
+    // root-level decls) and a slice extracted from the post-replay raw XML
+    // (root-level decls present, courtesy of the SDK) would not compare
+    // equal under CanonicalizeRawXml alone — that helper only strips
+    // descendant-vs-root duplicates, never the root's own ambient decls.
+    private static string StripSlideAmbientXmlns(string xml)
+    {
+        if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<")) return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            // Match the slide root's known ambient namespaces. Any
+            // declaration on the slice root pointing at one of these is
+            // redundant once the slice is appended under /p:sld.
+            var ambient = new Dictionary<string, string>
+            {
+                ["p"]  = "http://schemas.openxmlformats.org/presentationml/2006/main",
+                ["a"]  = "http://schemas.openxmlformats.org/drawingml/2006/main",
+                ["r"]  = "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+                ["mc"] = "http://schemas.openxmlformats.org/markup-compatibility/2006",
+            };
+            var toRemove = doc.Root.Attributes()
+                .Where(a => a.IsNamespaceDeclaration
+                            && ambient.TryGetValue(a.Name.LocalName, out var u)
+                            && u == a.Value)
+                .ToList();
+            foreach (var a in toRemove) a.Remove();
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch { return xml; }
+    }
+
+    private static int SliceEnd(string xml, int start, string localName)
+    {
+        // Find the end of the element starting at `start`. Handles both
+        // self-closing form (`<p:transition .../>`) and paired form
+        // (`<p:transition ...> ... </p:transition>`).
+        var gtIdx = xml.IndexOf('>', start);
+        if (gtIdx < 0) return -1;
+        // Self-closing: char before '>' is '/'.
+        if (gtIdx > start && xml[gtIdx - 1] == '/')
+            return gtIdx + 1;
+        var closeTag = $"</{localName}>";
+        var closeIdx = xml.IndexOf(closeTag, gtIdx, StringComparison.Ordinal);
+        if (closeIdx < 0) return -1;
+        return closeIdx + closeTag.Length;
+    }
+
+    private static void EmitRawSlideSlice(string slidePath, string localName,
+                                          string sliceXml, List<BatchItem> items,
+                                          SlideEmitContext ctx)
+    {
+        // The replay target's freshly-added /slide[N] has no <p:transition>
+        // and no <p:timing> (we stripped the semantic props upstream), so
+        // raw-set "replace" against `/p:sld/p:transition` would fail with
+        // "XPath matched no elements". Use append on /p:sld instead — the
+        // OOXML schema order (cSld → clrMapOvr → transition → timing) is
+        // preserved because we always emit transition before timing, and
+        // neither was present before this append.
+        string canon;
+        try { canon = NormalizeSlideRawSlice(sliceXml); }
+        catch
+        {
+            ctx.Unsupported.Add(new UnsupportedWarning(
+                Element: localName,
+                SlidePath: slidePath,
+                Reason: "raw slice could not be canonicalised; element dropped"));
+            return;
+        }
+        if (string.IsNullOrEmpty(canon))
+        {
+            ctx.Unsupported.Add(new UnsupportedWarning(
+                Element: localName,
+                SlidePath: slidePath,
+                Reason: "raw slice canonicalised to empty; element dropped"));
+            return;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = slidePath,
+            Xpath = "/p:sld",
+            Action = "append",
+            Xml = canon,
+        });
     }
 
     // Emit one `add animation` BatchItem per effect attached to this shape.

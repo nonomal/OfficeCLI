@@ -46,10 +46,6 @@
     <EmbeddedResource Remove="../../skills/**/*.glb" />
   </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="../../SKILL.md" LogicalName="OfficeCli.Resources.skill-officecli.md" />
-  </ItemGroup>
-
   <!-- Embed help schemas into the assembly so SchemaHelpLoader can read
        them via Assembly.GetManifestResourceStream — no on-disk extraction
        required (single-file installer ships only the .exe). -->

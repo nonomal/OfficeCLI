@@ -14,6 +14,13 @@ namespace OfficeCli.Core;
 /// </summary>
 internal static class SkillInstaller
 {
+    // Umbrella skill folder name. Embedded via the `skills/**/*` glob in
+    // officecli.csproj — same logical-name shape as every sub-skill, no
+    // special-case resource path. Kept out of SkillMap on purpose so
+    // `officecli skills list` and `load_skill` only surface sub-skills.
+    private const string UmbrellaFolder = "officecli";
+    private static string UmbrellaResource => $"skills/{UmbrellaFolder}/SKILL.md";
+
     private static readonly (string[] Aliases, string DisplayName, string DetectDir, string SkillDir)[] Tools =
     [
         (["claude", "claude-code"],       "Claude Code",    ".claude",              Path.Combine(".claude", "skills")),
@@ -274,7 +281,7 @@ internal static class SkillInstaller
             if (Directory.Exists(Path.Combine(Home, tool.DetectDir)))
             {
                 found = true;
-                var targetPath = Path.Combine(Home, tool.SkillDir, "officecli", "SKILL.md");
+                var targetPath = Path.Combine(Home, tool.SkillDir, UmbrellaFolder, "SKILL.md");
                 InstallBaseFile(tool.DisplayName, targetPath);
                 foreach (var alias in tool.Aliases)
                     installed.Add(alias);
@@ -295,7 +302,7 @@ internal static class SkillInstaller
         {
             if (tool.Aliases.Contains(agentKey))
             {
-                var targetPath = Path.Combine(Home, tool.SkillDir, "officecli", "SKILL.md");
+                var targetPath = Path.Combine(Home, tool.SkillDir, UmbrellaFolder, "SKILL.md");
                 InstallBaseFile(tool.DisplayName, targetPath);
                 foreach (var alias in tool.Aliases)
                     installed.Add(alias);
@@ -317,7 +324,7 @@ internal static class SkillInstaller
 
     private static void InstallBaseFile(string displayName, string targetPath)
     {
-        var content = LoadEmbeddedResource("OfficeCli.Resources.skill-officecli.md");
+        var content = LoadEmbeddedResource(UmbrellaResource);
         if (content == null)
         {
             Console.Error.WriteLine($"  {displayName}: embedded resource not found");
@@ -441,10 +448,10 @@ internal static class SkillInstaller
             // Base SKILL.md
             try
             {
-                var basePath = Path.Combine(skillsDir, "officecli", "SKILL.md");
+                var basePath = Path.Combine(skillsDir, UmbrellaFolder, "SKILL.md");
                 if (File.Exists(basePath))
                 {
-                    var content = LoadEmbeddedResource("OfficeCli.Resources.skill-officecli.md");
+                    var content = LoadEmbeddedResource(UmbrellaResource);
                     if (content != null && File.ReadAllText(basePath) != content)
                     {
                         File.WriteAllText(basePath, content);

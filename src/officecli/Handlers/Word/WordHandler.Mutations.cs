@@ -1025,14 +1025,35 @@ public partial class WordHandler
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
 
+        // Range marker placement. When the new wrapper's immediate
+        // predecessor is already a MoveFromRangeEnd with the same id,
+        // the caller is extending a contiguous move range (typical
+        // for `set` invoked sequentially on r[2], r[3], r[4] with a
+        // shared revision.id): remove that End to extend the existing
+        // range over us, and append a fresh End after this wrapper.
+        // Without this coalescence we'd produce N independent
+        // RangeStart/End pairs all sharing the same `w:name`, which
+        // Mac Word renders as a single "Deleted" entry (losing the
+        // move-vs-delete distinction) instead of one Move spanning
+        // the runs.
         var moveName = $"Move_{id}";
-        wrapper.InsertBeforeSelf(new MoveFromRangeStart
+        var prevSibling = wrapper.PreviousSibling();
+        bool extendExisting = prevSibling is MoveFromRangeEnd prevEnd
+                              && prevEnd.Id?.Value == id;
+        if (extendExisting)
         {
-            Id = id,
-            Author = author,
-            Date = date,
-            Name = moveName,
-        });
+            prevSibling!.Remove();
+        }
+        else
+        {
+            wrapper.InsertBeforeSelf(new MoveFromRangeStart
+            {
+                Id = id,
+                Author = author,
+                Date = date,
+                Name = moveName,
+            });
+        }
         wrapper.InsertAfterSelf(new MoveFromRangeEnd { Id = id });
     }
 
@@ -1050,14 +1071,28 @@ public partial class WordHandler
         parentEl.ReplaceChild(wrapper, run);
         wrapper.AppendChild(run);
 
+        // Range marker placement — same contiguous-extension trick as
+        // <see cref="WrapRunAsMoveFrom"/>: when the new wrapper's
+        // predecessor is a matching MoveToRangeEnd, drop it and rely
+        // on the existing Start to bracket the extended range.
         var moveName = $"Move_{id}";
-        wrapper.InsertBeforeSelf(new MoveToRangeStart
+        var prevSibling = wrapper.PreviousSibling();
+        bool extendExisting = prevSibling is MoveToRangeEnd prevEnd
+                              && prevEnd.Id?.Value == id;
+        if (extendExisting)
         {
-            Id = id,
-            Author = author,
-            Date = date,
-            Name = moveName,
-        });
+            prevSibling!.Remove();
+        }
+        else
+        {
+            wrapper.InsertBeforeSelf(new MoveToRangeStart
+            {
+                Id = id,
+                Author = author,
+                Date = date,
+                Name = moveName,
+            });
+        }
         wrapper.InsertAfterSelf(new MoveToRangeEnd { Id = id });
     }
 

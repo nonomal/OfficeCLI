@@ -2130,15 +2130,17 @@ public partial class WordHandler
             (parsed.Element is "revision");
         if (isRevisionSelector)
         {
+            var allRevs = EnumerateRevisions();
+            var sharedIds = ComputeSharedRevisionIds(allRevs);
             int revIdx = 0;
-            foreach (var rev in EnumerateRevisions())
+            foreach (var rev in allRevs)
             {
                 revIdx++;
                 var text = ExtractRevisionText(rev);
                 if (parsed.ContainsText != null
                     && !text.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
                 { revIdx--; continue; }
-                results.Add(BuildRevisionNode(rev, revIdx, text));
+                results.Add(BuildRevisionNode(rev, revIdx, text, sharedIds));
             }
             return results;
         }

@@ -555,6 +555,14 @@ public partial class WordHandler
         }
 
         var targets = EnumerateRevisions().Where(r => filter(r)).ToList();
+        // A filter naming a specific marker (`@id=N`) that matches nothing
+        // is a typo or stale id — fail loudly instead of saving a silent
+        // no-op. Bulk filters (`@author=`, `@type=`) can legitimately match
+        // zero (the document has no Alice revisions left); those stay
+        // silent. Mirrors the "no revision matches" error on the Get side
+        // so `query → set` round-trip surfaces stale ids consistently.
+        if (targets.Count == 0 && Regex.IsMatch(path, @"\[@id=", RegexOptions.IgnoreCase))
+            throw new ArgumentException($"no revision matches {path}");
         // Reverse so removing earlier siblings doesn't invalidate later refs.
         targets.Reverse();
         foreach (var rev in targets)
@@ -571,20 +579,50 @@ public partial class WordHandler
     /// (every revision Word/WPS writes does); falls back to positional
     /// `/revision[{index}]` only when id is missing. Mirrors the
     /// paragraph @paraId= / footnote @footnoteId= / sdt @sdtId= convention
-    /// — see CONSISTENCY(id-selectors) in Navigation.cs.</summary>
-    private static string BuildRevisionPath(RevisionRef rev, int positionalIndex)
-        => !string.IsNullOrEmpty(rev.Id)
-            ? $"/revision[@id={rev.Id}]"
-            : $"/revision[{positionalIndex}]";
+    /// — see CONSISTENCY(id-selectors) in Navigation.cs.
+    ///
+    /// When the same w:id appears on multiple markers (the documented
+    /// case: a moveFrom/moveTo pair shares an id to bind them), the
+    /// `[@id=N]` form is ambiguous on its own — disambiguate by
+    /// appending `[@type={kind}]`. Filter parsing in
+    /// <see cref="MatchesFilter"/> AND-joins selector segments, so the
+    /// resulting path round-trips unchanged through `get` / `set`.</summary>
+    private static string BuildRevisionPath(RevisionRef rev, int positionalIndex, HashSet<string> sharedIds)
+    {
+        if (string.IsNullOrEmpty(rev.Id))
+            return $"/revision[{positionalIndex}]";
+        if (sharedIds.Contains(rev.Id!))
+            return $"/revision[@id={rev.Id}][@type={rev.Kind}]";
+        return $"/revision[@id={rev.Id}]";
+    }
+
+    /// <summary>w:id values shared by more than one revision marker in
+    /// document order. The canonical case is the moveFrom/moveTo pair,
+    /// which OOXML requires to share an id. Used by
+    /// <see cref="BuildRevisionPath"/> to decide when to append a
+    /// [@type=…] discriminator.</summary>
+    private static HashSet<string> ComputeSharedRevisionIds(IList<RevisionRef> all)
+    {
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in all)
+        {
+            if (string.IsNullOrEmpty(r.Id)) continue;
+            seen[r.Id!] = seen.GetValueOrDefault(r.Id!) + 1;
+        }
+        var shared = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (id, count) in seen)
+            if (count > 1) shared.Add(id);
+        return shared;
+    }
 
     /// <summary>Build a DocumentNode for one revision. Shared between
     /// `query revision` (enumerates all) and `get /revision[...]` (resolves
     /// one) so the two endpoints emit byte-identical shapes.</summary>
-    private DocumentNode BuildRevisionNode(RevisionRef rev, int positionalIndex, string text)
+    private DocumentNode BuildRevisionNode(RevisionRef rev, int positionalIndex, string text, HashSet<string> sharedIds)
     {
         var node = new DocumentNode
         {
-            Path = BuildRevisionPath(rev, positionalIndex),
+            Path = BuildRevisionPath(rev, positionalIndex, sharedIds),
             Type = "revision",
             Text = text,
         };
@@ -614,6 +652,7 @@ public partial class WordHandler
         if (!IsRevisionSelectorPath(path)) return null;
 
         var all = EnumerateRevisions();
+        var sharedIds = ComputeSharedRevisionIds(all);
 
         // Positional /revision[N] — 1-based, fallback when no @id available.
         var indexMatch = Regex.Match(path, @"^/revision\[(\d+)\]$");
@@ -624,20 +663,40 @@ public partial class WordHandler
                 throw new ArgumentException(
                     $"/revision[{n}] out of range (document has {all.Count} revisions)");
             var rev = all[n - 1];
-            return BuildRevisionNode(rev, n, ExtractRevisionText(rev));
+            return BuildRevisionNode(rev, n, ExtractRevisionText(rev), sharedIds);
         }
 
-        // Filter form: /revision[@attr=value] (+ more). Returns the first
-        // match in document order — Get is single-node by contract; callers
-        // wanting all matches use `query revision` with the same filter.
+        // Filter form. Get accepts only unique-identifier attributes:
+        // `@id=N` alone, or `@id=N` plus `@type=…` as the moveFrom/moveTo
+        // disambiguator. Multi-match filters (`@author=`, standalone
+        // `@type=`, `@date=`) are deliberately rejected — they belong on
+        // `query revision`. Mirrors NavigateToElement's stance on
+        // ambiguous attributes (CONSISTENCY(id-selectors), Navigation.cs:
+        // "throw rather than silently returning the first element"):
+        // a single-result Get that silently picks the first of many is
+        // a footgun for any caller doing query→get round-trip.
         var filterDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in Regex.Matches(path, @"\[@(\w+)=([^\]]+)\]"))
             filterDict[m.Groups[1].Value] = m.Groups[2].Value.Trim('"', '\'');
 
+        if (!filterDict.ContainsKey("id"))
+            throw new ArgumentException(
+                $"get /revision requires `@id=N` (optionally `[@id=N][@type=moveFrom|moveTo]` "
+                + $"for shared-id pairs); got `{path}`. Multi-match filters belong on "
+                + $"`query revision` — e.g. `query revision[@author=Alice]`.");
+        foreach (var k in filterDict.Keys)
+        {
+            if (!string.Equals(k, "id", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(k, "type", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"get /revision attribute `@{k}=` is ambiguous (matches multiple markers); "
+                    + $"use `query revision` for multi-match selection, or address by `@id=N`.");
+        }
+
         for (int i = 0; i < all.Count; i++)
         {
             if (MatchesFilter(all[i], filterDict))
-                return BuildRevisionNode(all[i], i + 1, ExtractRevisionText(all[i]));
+                return BuildRevisionNode(all[i], i + 1, ExtractRevisionText(all[i]), sharedIds);
         }
         throw new ArgumentException($"no revision matches {path}");
     }

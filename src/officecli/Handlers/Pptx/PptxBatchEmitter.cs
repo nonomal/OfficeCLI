@@ -764,8 +764,26 @@ public static partial class PptxBatchEmitter
                 // PopulateAnimationNode — flagging those would force every
                 // emphasis slide through raw-set and break the basic
                 // animation round-trip.
+                // R10-bug2: media-only timing (`<p:audio>/<p:video>` carrying
+                // <p:cMediaNode vol=… repeatCount=…> + the play-cmd seq under
+                // <p:tnLst>) holds the only copy of volume / loop / autoPlay /
+                // trim props for audio/video shapes. BuildSlideAnimationIndex
+                // does not materialise those nodes (they're not shape entrance
+                // /exit/emphasis presets), so without exotic-flagging the
+                // entire <p:timing> slice the semantic emit drops every audio
+                // /video playback prop. Route through the same raw-set
+                // passthrough used for motion-path animations. Same caveat:
+                // a slide carrying both materialised animations AND a media
+                // timing block will double-emit the animation portion — rare
+                // in practice (audio/video decks seldom also carry shape
+                // entrance effects), and the alternative (surgically slicing
+                // <p:audio>/<p:video> out of the timing tree and stitching
+                // around BuildSlideAnimationIndex output) is materially more
+                // work than the warning-vs-correctness tradeoff justifies.
                 if (slice.Contains("presetClass=\"path\"", StringComparison.Ordinal)
-                    || slice.Contains("<p:animMotion", StringComparison.Ordinal))
+                    || slice.Contains("<p:animMotion", StringComparison.Ordinal)
+                    || slice.Contains("<p:audio", StringComparison.Ordinal)
+                    || slice.Contains("<p:video", StringComparison.Ordinal))
                 {
                     timingExotic = true;
                     timingXml = slice;

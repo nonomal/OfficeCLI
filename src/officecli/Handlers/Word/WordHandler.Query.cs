@@ -126,6 +126,19 @@ public partial class WordHandler
             return allOles[wOleIdx - 1];
         }
 
+        // Handle /revision[N] and /revision[@id=X] (or other filter forms)
+        // before ParsePath. Revision markers don't live at a single
+        // document-tree position (they're scattered across runs, paragraph
+        // properties, *PrChange wrappers, etc.) so generic NavigateToElement
+        // can't reach them — route through the shared EnumerateRevisions
+        // enumerator that `query revision` and `set /revision[...]` use,
+        // guaranteeing query→get→set round-trip on the same Path.
+        if (path.StartsWith("/revision[", StringComparison.Ordinal))
+        {
+            var revNode = TryGetRevisionNode(path);
+            if (revNode != null) return revNode;
+        }
+
         // Handle /watermark path
         if (path.Equals("/watermark", StringComparison.OrdinalIgnoreCase))
         {
@@ -2125,23 +2138,7 @@ public partial class WordHandler
                 if (parsed.ContainsText != null
                     && !text.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
                 { revIdx--; continue; }
-                var node = new DocumentNode
-                {
-                    Path = $"/revision[{revIdx}]",
-                    Type = "revision",
-                    Text = text,
-                };
-                node.Format["revision.type"] = rev.Kind;
-                if (!string.IsNullOrEmpty(rev.Author))
-                    node.Format["revision.author"] = rev.Author!;
-                if (rev.Date != null)
-                    node.Format["revision.date"] = rev.Date.Value.ToString("o");
-                if (!string.IsNullOrEmpty(rev.Id))
-                    node.Format["revision.id"] = rev.Id!;
-                var nativePath = ComputeRevisionNativePath(rev.Element);
-                if (!string.IsNullOrEmpty(nativePath))
-                    node.Format["revision.nativePath"] = nativePath;
-                results.Add(node);
+                results.Add(BuildRevisionNode(rev, revIdx, text));
             }
             return results;
         }

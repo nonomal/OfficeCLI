@@ -12,9 +12,9 @@
   },
   "paths": {
     "positional": ["/revision[N]", "/body/p[N]/ins[M]", "/body/p[N]/del[M]"],
-    "selector": ["/revision", "/revision[@author=NAME]", "/revision[@type=ins|del|format|moveFrom|moveTo]", "/revision[@author=NAME][@type=TYPE]"]
+    "selector": ["/revision", "/revision[@id=N]", "/revision[@author=NAME]", "/revision[@type=ins|del|format|moveFrom|moveTo]", "/revision[@author=NAME][@type=TYPE]"]
   },
-  "note": "Tracked-change marker. `query revision` enumerates every w:ins / w:del / w:moveFrom / w:moveTo / w:*PrChange in the document. Two disjoint property namespaces: `revision.type=ins|del|format|moveFrom|moveTo` creates a tracked change (used with add/set on the host run/paragraph/table/row/cell/section), while `revision.action=accept|reject` acts on existing markers via /revision selectors or native paths (/body/p[N], /body/p[N]/r[M], etc.). The two namespaces are mutually exclusive — mixing revision.action with any revision.type/.author/.date/.id key is rejected as ambiguous. Bare `revision=…` is no longer accepted. Separate from `revisionNumber` on / (document save counter) and `trackChanges` on /settings (track-mode toggle).",
+  "note": "Tracked-change marker. `query revision` enumerates every w:ins / w:del / w:moveFrom / w:moveTo / w:*PrChange in the document. The synthetic Path is `/revision[@id=N]` when the marker carries a stable w:id (true for everything Word/WPS writes), falling back to positional `/revision[N]` only for markers without an id — same precedence as paragraphs (`p[@paraId=…]` → `p[N]`). Use the @id= form in scripts; positional indexes shift after accept/reject. Both `get /revision[@id=N]` and `set /revision[@id=N] --prop revision.action=…` accept the same path. Two disjoint property namespaces: `revision.type=ins|del|format|moveFrom|moveTo` creates a tracked change (used with add/set on the host run/paragraph/table/row/cell/section), while `revision.action=accept|reject` acts on existing markers via /revision selectors or native paths (/body/p[N], /body/p[N]/r[M], etc.). The two namespaces are mutually exclusive — mixing revision.action with any revision.type/.author/.date/.id key is rejected as ambiguous. Bare `revision=…` is no longer accepted. Separate from `revisionNumber` on / (document save counter) and `trackChanges` on /settings (track-mode toggle).",
   "properties": {
     "type": {
       "type": "enum",
@@ -73,6 +73,7 @@
         "set /revision --prop revision.action=accept",
         "set '/revision[@author=Alice]' --prop revision.action=reject",
         "set '/revision[@type=ins]' --prop revision.action=accept",
+        "set /revision[@id=42] --prop revision.action=accept",
         "set /revision[3] --prop revision.action=accept",
         "set /body/p[1]/r[2] --prop revision.action=reject"
       ],

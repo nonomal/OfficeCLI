@@ -19,7 +19,8 @@
 //       set <doc> '/revision[@author=Alice]' --prop revision.action=accept # by author
 //       set <doc> '/revision[@type=ins]' --prop revision.action=reject     # by type
 //       set <doc> '/revision[@author=Bob][@type=del]' --prop revision.action=accept
-//       set <doc> /revision[3] --prop revision.action=accept               # by index
+//       set <doc> /revision[@id=42] --prop revision.action=accept          # by w:id (stable)
+//       set <doc> /revision[3] --prop revision.action=accept               # positional fallback
 //       set <doc> /body/p[N]/r[M] --prop revision.action=accept            # native path
 //     All synthetic-selector forms start with `/` to satisfy
 //     CONSISTENCY(no-slash-reject) in CommandBuilder.Set.cs.
@@ -39,6 +40,7 @@
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Wordprocessing;
+using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
 
@@ -562,6 +564,82 @@ public partial class WordHandler
         }
         _doc.MainDocumentPart?.Document?.Save();
         return unsupported;
+    }
+
+    /// <summary>Build the canonical Path for a revision. Prefers
+    /// `/revision[@id={w:id}]` when the marker carries a stable OOXML id
+    /// (every revision Word/WPS writes does); falls back to positional
+    /// `/revision[{index}]` only when id is missing. Mirrors the
+    /// paragraph @paraId= / footnote @footnoteId= / sdt @sdtId= convention
+    /// — see CONSISTENCY(id-selectors) in Navigation.cs.</summary>
+    private static string BuildRevisionPath(RevisionRef rev, int positionalIndex)
+        => !string.IsNullOrEmpty(rev.Id)
+            ? $"/revision[@id={rev.Id}]"
+            : $"/revision[{positionalIndex}]";
+
+    /// <summary>Build a DocumentNode for one revision. Shared between
+    /// `query revision` (enumerates all) and `get /revision[...]` (resolves
+    /// one) so the two endpoints emit byte-identical shapes.</summary>
+    private DocumentNode BuildRevisionNode(RevisionRef rev, int positionalIndex, string text)
+    {
+        var node = new DocumentNode
+        {
+            Path = BuildRevisionPath(rev, positionalIndex),
+            Type = "revision",
+            Text = text,
+        };
+        node.Format["revision.type"] = rev.Kind;
+        if (!string.IsNullOrEmpty(rev.Author))
+            node.Format["revision.author"] = rev.Author!;
+        if (rev.Date != null)
+            node.Format["revision.date"] = rev.Date.Value.ToString("o");
+        if (!string.IsNullOrEmpty(rev.Id))
+            node.Format["revision.id"] = rev.Id!;
+        var nativePath = ComputeRevisionNativePath(rev.Element);
+        if (!string.IsNullOrEmpty(nativePath))
+            node.Format["revision.nativePath"] = nativePath;
+        return node;
+    }
+
+    /// <summary>Get-side resolution for `/revision[N]` and `/revision[@id=X]`.
+    /// Returns null when the path is not a revision selector or no marker
+    /// matches; throws for in-range-but-invalid forms (e.g. unknown filter
+    /// attribute) so Get surfaces the same errors as Set.</summary>
+    private DocumentNode? TryGetRevisionNode(string path)
+    {
+        if (string.IsNullOrEmpty(path) || !path.StartsWith("/revision", StringComparison.Ordinal))
+            return null;
+        // Bare /revision (no selector) is a Query form, not a single-node Get.
+        if (path == "/revision") return null;
+        if (!IsRevisionSelectorPath(path)) return null;
+
+        var all = EnumerateRevisions();
+
+        // Positional /revision[N] — 1-based, fallback when no @id available.
+        var indexMatch = Regex.Match(path, @"^/revision\[(\d+)\]$");
+        if (indexMatch.Success)
+        {
+            var n = int.Parse(indexMatch.Groups[1].Value);
+            if (n < 1 || n > all.Count)
+                throw new ArgumentException(
+                    $"/revision[{n}] out of range (document has {all.Count} revisions)");
+            var rev = all[n - 1];
+            return BuildRevisionNode(rev, n, ExtractRevisionText(rev));
+        }
+
+        // Filter form: /revision[@attr=value] (+ more). Returns the first
+        // match in document order — Get is single-node by contract; callers
+        // wanting all matches use `query revision` with the same filter.
+        var filterDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in Regex.Matches(path, @"\[@(\w+)=([^\]]+)\]"))
+            filterDict[m.Groups[1].Value] = m.Groups[2].Value.Trim('"', '\'');
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            if (MatchesFilter(all[i], filterDict))
+                return BuildRevisionNode(all[i], i + 1, ExtractRevisionText(all[i]));
+        }
+        throw new ArgumentException($"no revision matches {path}");
     }
 
     /// <summary>Walk the document body and emit a RevisionRef for every

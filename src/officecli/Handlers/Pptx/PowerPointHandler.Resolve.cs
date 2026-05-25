@@ -46,7 +46,7 @@ public partial class PowerPointHandler
 
         var shapes = shapeTree.Elements<Shape>().ToList();
         if (shapeIdx < 1 || shapeIdx > shapes.Count)
-            throw new ArgumentException($"Shape {shapeIdx} not found");
+            throw new ArgumentException($"Shape {shapeIdx} not found (total: {shapes.Count})");
 
         return (slidePart, shapes[shapeIdx - 1]);
     }

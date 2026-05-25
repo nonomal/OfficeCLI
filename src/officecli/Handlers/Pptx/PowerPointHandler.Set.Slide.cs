@@ -173,7 +173,7 @@ public partial class PowerPointHandler
         {
             var shapes = shapeTree.Elements<Shape>().ToList();
             if (elIdx < 1 || elIdx > shapes.Count)
-                throw new ArgumentException($"Shape {elIdx} not found");
+                throw new ArgumentException($"Shape {elIdx} not found (total: {shapes.Count})");
             var shape = shapes[elIdx - 1];
             var allRuns = shape.Descendants<Drawing.Run>().ToList();
             // Pass the owning part so fill/image/effect helpers that need a

@@ -155,12 +155,75 @@ public static partial class WordBatchEmitter
         // /body. parentTablePath, when set, is a cell target path
         // (/body/tbl[X]/tr[Y]/tc[Z]) that we emit nested tables under.
         var tableParentPath = parentTablePath ?? containerPath;
+
+        // tblPrChange round-trip — D1 emit shape.
+        //
+        // OLD path was: (1) `add table` with all props (rows/cols/width/
+        // borders/...) AND (2) a follow-up no-op `set` carrying only
+        // `revision.author=…` to re-stamp the marker. The second step's
+        // BeginTrackChangeIfRequested snapshotted the just-finalized tblPr
+        // as the "before" state — but that's also the "after" state since
+        // nothing changed between (1) and (2). Word's reviewing pane then
+        // silently dropped the revision because before==after.
+        //
+        // NEW path: when the source carried a tblPrChange, split into
+        //   (1) `add table` with structural-only keys (rows / cols /
+        //       gridCols / skipTblW) so the seeded tblPr is bare,
+        //   (2) `set table` with EVERY other prop the source had + the
+        //       attribution. BeginTrackChangeIfRequested now snapshots the
+        //       bare-tblPr from (1) as "before" and captures the props
+        //       applied in (2) as the diff — Word's reviewing pane sees a
+        //       real change and surfaces it as Alice's tracked edit.
+        //
+        // Snapshot is still over-attributed (the source might only have
+        // changed `width`, but all 10 current props get marked as
+        // "changed" because we can't recover which subset was the real
+        // edit). Over-attribute is the lesser evil; current behavior
+        // under-attributes to silent loss.
+        var tblPrAuthor = TryStringFormat(tableNode.Format, "tblPrChange.author");
+        var tblPrDate = TryStringFormat(tableNode.Format, "tblPrChange.date");
+        bool hasTblPrChange = !string.IsNullOrEmpty(tblPrAuthor);
+
+        Dictionary<string, string> tableAddProps;
+        Dictionary<string, string>? tableSetProps = null;
+        if (hasTblPrChange)
+        {
+            tableAddProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            tableSetProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in tableProps)
+            {
+                if (k is "rows" or "cols" or "gridCols")
+                    tableAddProps[k] = v;
+                else
+                    tableSetProps[k] = v;
+            }
+            // Force AddTable to seed an empty tblPr (no default tblW, no
+            // default 6-border block). Without these, AddTable's defaults
+            // tend to coincide with the source's set values (auto-fit
+            // tblW = grid sum; single-4 borders are the most common case),
+            // making the follow-up set a no-op in OOXML terms — the
+            // snapshot then equals current state and Word's reviewing
+            // pane silently hides the tblPrChange. With the seed
+            // suppressed, the snapshot captures the bare tblPr and the
+            // set's props produce a real diff Word will surface.
+            tableAddProps["skipTblW"] = "true";
+            tableAddProps["skipDefaultBorders"] = "true";
+            tableSetProps["revision.type"] = "format";
+            tableSetProps["revision.author"] = tblPrAuthor!;
+            if (!string.IsNullOrEmpty(tblPrDate))
+                tableSetProps["revision.date"] = tblPrDate!;
+        }
+        else
+        {
+            tableAddProps = tableProps;
+        }
+
         items.Add(new BatchItem
         {
             Command = "add",
             Parent = tableParentPath,
             Type = "table",
-            Props = tableProps
+            Props = tableAddProps
         });
 
         // For nested tables, the target path is parent_cell/tbl[1] (first
@@ -169,13 +232,15 @@ public static partial class WordBatchEmitter
             ? $"{parentTablePath}/tbl[1]"
             : $"{containerPath}/tbl[last()]";
 
-        // tblPrChange round-trip: source carried <w:tblPrChange> with
-        // author/date. Emit a no-op `set` carrying only trackChange.* so
-        // Set.TrackChange re-runs the snapshot+stamp on the now-populated
-        // tblPr. The snapshot equals the just-created state — semantically
-        // "this author marked the tblPr changed at this time" (the original
-        // pre-change values are not recoverable from the source dump).
-        EmitTrackChangeMarker(tableNode.Format, "tblPrChange", tablePath, items);
+        if (tableSetProps != null && tableSetProps.Count > 0)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "set",
+                Path = tablePath,
+                Props = tableSetProps
+            });
+        }
         for (int r = 0; r < rows.Count; r++)
         {
             // Emit row-level properties (header / height / height.rule) as a
@@ -183,8 +248,15 @@ public static partial class WordBatchEmitter
             // surface per-row props (BUG-ROWPROPS). Without this, `dump→batch`
             // silently strips repeating-header rows and explicit row heights.
             var rowNode = rowNodes[r];
+            // trPrChange D1 round-trip: fold the attribution into the
+            // row's prop-set step so BeginTrackChangeIfRequested snapshots
+            // the bare-trPr "before" vs the props-applied "after". If the
+            // source had a trPrChange but no row-only props, still emit
+            // the bare-attribution set so the marker exists (over-attributed
+            // tail case, same lesser-evil as the tblPrChange edge case).
             var rowProps = ExtractRowOnlyProps(rowNode.Format);
-            if (rowProps.Count > 0)
+            bool rowHadRevision = FoldRevisionIntoProps(rowNode.Format, "trPrChange", rowProps);
+            if (rowProps.Count > 0 || rowHadRevision)
             {
                 items.Add(new BatchItem
                 {
@@ -193,9 +265,6 @@ public static partial class WordBatchEmitter
                     Props = rowProps
                 });
             }
-            // trPrChange round-trip — see EmitTrackChangeMarker.
-            EmitTrackChangeMarker(rowNode.Format, "trPrChange",
-                $"{tablePath}/tr[{r + 1}]", items);
             var cells = rowCellNodes[r];
             for (int c = 0; c < cells.Count; c++)
             {
@@ -210,11 +279,11 @@ public static partial class WordBatchEmitter
                 // round-trip. Skip keys that EmitParagraph will re-apply
                 // to the first paragraph (align/direction/run leak-throughs)
                 // to avoid double-application.
+                // tcPrChange D1 round-trip: fold attribution into the
+                // cell's prop-set step (mirrors the row branch above).
                 var cellProps = ExtractCellOnlyProps(cellNode.Format);
-                // tcPrChange round-trip — see EmitTrackChangeMarker.
-                EmitTrackChangeMarker(cellNode.Format, "tcPrChange",
-                    cellTargetPath, items);
-                if (cellProps.Count > 0)
+                bool cellHadRevision = FoldRevisionIntoProps(cellNode.Format, "tcPrChange", cellProps);
+                if (cellProps.Count > 0 || cellHadRevision)
                 {
                     // CONSISTENCY(tblgrid-preserve): tcW values in the source
                     // are allowed to disagree with the gridCol widths (Word
@@ -350,43 +419,42 @@ public static partial class WordBatchEmitter
         "header", "height", "cantSplit",
     };
 
-    /// <summary>
-    /// Emit a `set <path> --prop trackChange.author=... [--prop trackChange.date=...]`
-    /// step when <paramref name="format"/> carries `<paramref name="prefix"/>.author`
-    /// (and optionally `<paramref name="prefix"/>.date`) — i.e. the source had a
-    /// pending *PrChange revision marker. On replay, Set.TrackChange.cs
-    /// re-runs the snapshot+stamp on the now-populated *Pr, recreating the
-    /// marker. Used for tblPrChange / trPrChange / tcPrChange / sectPrChange.
-    /// (pPrChange already round-trips via `add p --prop trackChange=format`
-    /// — its trackChange.* keys ride the create step; this helper handles
-    /// the structural elements whose Add path doesn't accept trackChange.)
-    /// </summary>
-    private static void EmitTrackChangeMarker(
+    /// <summary>Read a string-valued key from a DocumentNode.Format dict
+    /// (Format values are typed as <c>object?</c>). Returns null when
+    /// the key is missing, the value is null, or the string is empty.
+    /// Used by the D1 round-trip path to detect whether a host element
+    /// carried a `*PrChange` marker in source.</summary>
+    private static string? TryStringFormat(Dictionary<string, object?> format, string key)
+    {
+        if (!format.TryGetValue(key, out var obj) || obj == null) return null;
+        var s = obj.ToString();
+        return string.IsNullOrEmpty(s) ? null : s;
+    }
+
+    /// <summary>Fold the source's `<paramref name="prefix"/>.author` /
+    /// `.date` keys into an existing prop bag as a `revision.type=format`
+    /// + `revision.author` + `revision.date` triplet. Called by the
+    /// row / cell emit paths so the structural-prop `set` and the
+    /// revision attribution travel in one batch step — the
+    /// BeginTrackChangeIfRequested snapshot then captures the bare-pr
+    /// "before" state vs the just-applied "after" state, producing a
+    /// real *PrChange diff Word's reviewing pane will surface (instead
+    /// of the legacy two-step emit's `before==after` lie).
+    ///
+    /// Returns true when a revision was folded in. Mutates
+    /// <paramref name="props"/> in place.</summary>
+    private static bool FoldRevisionIntoProps(
         Dictionary<string, object?> format,
         string prefix,
-        string path,
-        List<BatchItem> items)
+        Dictionary<string, string> props)
     {
-        if (!format.TryGetValue($"{prefix}.author", out var authorObj) || authorObj == null)
-            return;
-        var author = authorObj.ToString();
-        if (string.IsNullOrEmpty(author)) return;
-        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["revision.author"] = author!,
-        };
-        if (format.TryGetValue($"{prefix}.date", out var dateObj) && dateObj != null)
-        {
-            var date = dateObj.ToString();
-            if (!string.IsNullOrEmpty(date))
-                props["revision.date"] = date!;
-        }
-        items.Add(new BatchItem
-        {
-            Command = "set",
-            Path = path,
-            Props = props,
-        });
+        var author = TryStringFormat(format, $"{prefix}.author");
+        if (author == null) return false;
+        props["revision.type"] = "format";
+        props["revision.author"] = author;
+        var date = TryStringFormat(format, $"{prefix}.date");
+        if (date != null) props["revision.date"] = date;
+        return true;
     }
 
     private static Dictionary<string, string> ExtractRowOnlyProps(Dictionary<string, object?> raw)

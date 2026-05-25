@@ -2027,15 +2027,15 @@ public partial class WordHandler
                 }
                 if (wrapper is MoveFromRun mfI) mfI.Id = trackChangeId;
                 else if (wrapper is MoveToRun mtI) mtI.Id = trackChangeId;
-                // MoveFrom uses w:delText (same rule as w:del); MoveTo keeps w:t.
-                if (trackChangeKind == "movefrom")
-                {
-                    foreach (var t in newRun.Elements<Text>().ToList())
-                    {
-                        var dt = new DeletedText(t.Text ?? "") { Space = t.Space };
-                        t.Parent?.ReplaceChild(dt, t);
-                    }
-                }
+                // Both moveFrom and moveTo keep w:t. Per ECMA-376 §17.3.3.34,
+                // w:delText is only valid inside <w:del> (never inside
+                // <w:moveFrom>) — Word's strikethrough rendering for moveFrom
+                // content comes from the moveFrom wrapper, not from delText.
+                // Previously we converted t→delText inside moveFrom, which
+                // tripped Word's "found unreadable content" recovery on open
+                // (it re-wraps the orphan delText in a synthetic <w:del>).
+                // LibreOffice's docxattributeoutput.cxx:4108 skips the delText
+                // switch when bMoved is set — same rule.
                 parentEl.ReplaceChild(wrapper, newRun);
                 wrapper.AppendChild(newRun);
             }

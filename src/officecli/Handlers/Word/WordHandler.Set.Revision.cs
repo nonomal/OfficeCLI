@@ -1192,10 +1192,18 @@ public partial class WordHandler
             case "insertion":
                 return string.Join("", rev.Element.Descendants<Text>().Select(t => t.Text));
             case "deletion":
-            case "moveFrom":
                 return string.Join("", rev.Element.Descendants<DeletedText>().Select(t => t.Text));
+            case "moveFrom":
             case "moveTo":
-                return string.Join("", rev.Element.Descendants<Text>().Select(t => t.Text));
+                // moveFrom + moveTo both use w:t (per ECMA-376 §17.3.3.34
+                // delText is restricted to <w:del>). The earlier delText
+                // path in our emitter was wrong; reading either form here
+                // keeps legacy on-disk docs visible while the new emit
+                // settles in.
+                return string.Join("",
+                    rev.Element.Descendants<Text>().Select(t => t.Text))
+                    + string.Join("",
+                    rev.Element.Descendants<DeletedText>().Select(t => t.Text));
             case "formatChange":
                 {
                     var run = rev.Element.Ancestors<Run>().FirstOrDefault();

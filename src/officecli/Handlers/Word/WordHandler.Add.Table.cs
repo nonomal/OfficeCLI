@@ -25,16 +25,35 @@ public partial class WordHandler
         // expected partial-override semantics. To express a genuine three-line
         // table (top/bottom only), pass border=none first to wipe defaults,
         // then border.top + border.bottom. CONSISTENCY(border-default-overlay).
-        TableProperties tblProps = new TableProperties(
-            new TableBorders(
-                new TopBorder { Val = BorderValues.Single, Size = 4 },
-                new LeftBorder { Val = BorderValues.Single, Size = 4 },
-                new BottomBorder { Val = BorderValues.Single, Size = 4 },
-                new RightBorder { Val = BorderValues.Single, Size = 4 },
-                new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
-                new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
-            )
-        );
+        //
+        // `skipDefaultBorders=true` (dump→batch D1 round-trip; see
+        // WordBatchEmitter.Table.cs) suppresses the seed so a follow-up
+        // `set tbl --prop border=...` can snapshot a bare tblPr as the
+        // tblPrChange "before" state — without this, the seeded borders
+        // would already match the source's borders and the set's snapshot
+        // would equal the current state, hiding the revision from Word's
+        // reviewing pane.
+        bool skipDefaultBorders =
+            (properties.TryGetValue("skipDefaultBorders", out var sdbA) && IsTruthy(sdbA))
+            || (properties.TryGetValue("skipdefaultborders", out var sdbB) && IsTruthy(sdbB));
+        TableProperties tblProps;
+        if (skipDefaultBorders)
+        {
+            tblProps = new TableProperties();
+        }
+        else
+        {
+            tblProps = new TableProperties(
+                new TableBorders(
+                    new TopBorder { Val = BorderValues.Single, Size = 4 },
+                    new LeftBorder { Val = BorderValues.Single, Size = 4 },
+                    new BottomBorder { Val = BorderValues.Single, Size = 4 },
+                    new RightBorder { Val = BorderValues.Single, Size = 4 },
+                    new InsideHorizontalBorder { Val = BorderValues.Single, Size = 4 },
+                    new InsideVerticalBorder { Val = BorderValues.Single, Size = 4 }
+                )
+            );
+        }
         table.AppendChild(tblProps);
         // Apply user-supplied border.* props in order; "border" / "border.all"
         // (with value "none") wipes defaults before per-side props overlay.

@@ -105,13 +105,13 @@
       "readback": "category string",
       "enforcement": "report"
     },
-    "revision": {
+    "revisionNumber": {
       "type": "string",
-      "description": "document revision counter. Emitted only when present.",
+      "description": "document save counter from docProps/core.xml (cp:revision). Distinct from tracked-change revisions — see `help docx revision`.",
       "add": false,
       "set": false,
       "get": true,
-      "readback": "revision string",
+      "readback": "revision number string",
       "enforcement": "report"
     },
     "created": {

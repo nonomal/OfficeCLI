@@ -107,15 +107,16 @@
       "readback": "last-modified author",
       "enforcement": "report"
     },
-    "revision": {
+    "revisionNumber": {
       "type": "string",
       "add": false,
       "set": true,
       "get": true,
+      "description": "docProps/core.xml Revision field — presentation save counter.",
       "examples": [
-        "--prop revision=3"
+        "--prop revisionNumber=3"
       ],
-      "readback": "revision string",
+      "readback": "revision number string",
       "enforcement": "report"
     },
     "created": {

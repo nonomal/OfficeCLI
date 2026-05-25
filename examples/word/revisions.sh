@@ -268,12 +268,23 @@ add_para_capture() {
         | grep -oE '/body/p\[@paraId=[A-F0-9]+\]' | tail -1
 }
 
-# 7a. find + replace + revision — del(old) + ins(new) pair, both attributed to
-#     the author. After accept, the text becomes "The cat jumped." For the
-#     shipped artifact we leave the markers in place so they show in Word.
-P7A=$(add_para_capture "7a. The fox jumped over the lazy dog. (run find+replace to track 'fox'→'cat')")
+# 7a. find + replace + revision via REGEX — track only the FIRST occurrence
+#     of "fox", leave subsequent ones alone. The bare `find=fox` would match
+#     every occurrence; controlling which match to track is a job for the
+#     regex pattern.
+#
+#     Pattern:    (?<!fox.*)fox
+#     Reading:    match "fox" only when NOT preceded by another "fox" on the
+#                 same line. The .NET regex engine supports variable-width
+#                 negative lookbehind, so this works without contortions.
+#     Effect on this paragraph (two "fox" tokens):
+#       The fox jumped and another fox ran fast.
+#           ^^^                       ^^^
+#           tracked: del+ins          untouched
+P7A=$(add_para_capture "7a. The fox jumped and another fox ran fast. (regex tracks only the 1st 'fox'→'cat')")
 officecli set "$DOCX" "$P7A" \
-    --prop find=fox \
+    --prop 'find=(?<!fox.*)fox' \
+    --prop regex=true \
     --prop replace=cat \
     --prop revision.author=Iris \
     --prop revision.date=2026-05-25T10:50:00Z

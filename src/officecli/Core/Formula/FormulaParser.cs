@@ -829,6 +829,22 @@ internal static class FormulaParser
             // Single character for shorthand: H_2 takes just "2", but "2O" should take just "2"
             var text = tokens[pos].Value;
             pos++;
+            // Strip leading whitespace before picking the single char. The
+            // tokenizer collapses ordinary characters into one Text token that
+            // can include the separator space between a command and its
+            // argument (e.g. "\sum_{i=1}^n i" tokenises the trailing arg as
+            // " i", and "\sin x" tokenises as " x"). Without this skip, the
+            // first char picked was the space itself and the actual argument
+            // (i, x) leaked out as a sibling sitting outside the nary / func.
+            int leadingWs = 0;
+            while (leadingWs < text.Length && char.IsWhiteSpace(text[leadingWs]))
+                leadingWs++;
+            if (leadingWs >= text.Length)
+            {
+                // Token was pure whitespace — fall through to empty arg.
+                return MakeMathRun("");
+            }
+            text = text[leadingWs..];
             if (text.Length == 1)
                 return MakeMathRun(text);
             // For multi-char text in a subscript/superscript arg without braces, take only first char

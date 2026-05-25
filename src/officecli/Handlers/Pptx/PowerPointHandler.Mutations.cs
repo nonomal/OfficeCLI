@@ -422,7 +422,7 @@ public partial class PowerPointHandler
         {
             var shapes = container.Elements<Shape>().ToList();
             if (elementIdx < 1 || elementIdx > shapes.Count)
-                throw new ArgumentException($"Shape {elementIdx} not found");
+                throw new ArgumentException($"Shape {elementIdx} not found (total: {shapes.Count})");
             var shapeToRemove = shapes[elementIdx - 1];
             var shapeId = shapeToRemove.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value ?? 0;
             if (shapeId > 0)
@@ -454,7 +454,7 @@ public partial class PowerPointHandler
             var tables = container.Elements<GraphicFrame>()
                 .Where(gf => gf.Descendants<Drawing.Table>().Any()).ToList();
             if (elementIdx < 1 || elementIdx > tables.Count)
-                throw new ArgumentException($"Table {elementIdx} not found");
+                throw new ArgumentException($"Table {elementIdx} not found (total: {tables.Count})");
             tables[elementIdx - 1].Remove();
         }
         else if (elementType == "chart")
@@ -462,7 +462,7 @@ public partial class PowerPointHandler
             var charts = container.Elements<GraphicFrame>()
                 .Where(gf => gf.Descendants<C.ChartReference>().Any()).ToList();
             if (elementIdx < 1 || elementIdx > charts.Count)
-                throw new ArgumentException($"Chart {elementIdx} not found");
+                throw new ArgumentException($"Chart {elementIdx} not found (total: {charts.Count})");
             var chartGf = charts[elementIdx - 1];
             // Clean up ChartPart
             var chartRef = chartGf.Descendants<C.ChartReference>().FirstOrDefault();

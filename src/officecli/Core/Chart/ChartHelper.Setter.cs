@@ -1203,8 +1203,11 @@ internal static partial class ChartHelper
                         // barChart elements that have no GapWidth child. The `foreach
                         // Descendants` above then finds nothing and the gapwidth round-
                         // trips as lost. Mirror the `overlap` upsert pattern.
-                        foreach (var barChartEl in plotArea2.Elements<OpenXmlCompositeElement>()
-                            .Where(e => e.LocalName == "barChart" || e.LocalName == "bar3DChart"))
+                        var barEls = plotArea2.Elements<OpenXmlCompositeElement>()
+                            .Where(e => e.LocalName == "barChart" || e.LocalName == "bar3DChart")
+                            .ToList();
+                        if (barEls.Count == 0) { unsupported.Add(key); break; }
+                        foreach (var barChartEl in barEls)
                         {
                             // Insert before the first AxisId — mirrors BuildBarChart's
                             // schema order: [barDirection, barGrouping, varyColors,
@@ -1225,7 +1228,11 @@ internal static partial class ChartHelper
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     if (!int.TryParse(value, out var ov)) throw new ArgumentException($"Invalid overlap: '{value}'. Expected integer (-100 to 100).");
                     if (ov < -100 || ov > 100) throw new ArgumentException($"Invalid overlap: '{value}'. Valid range is -100 to 100.");
-                    foreach (var barChart in plotArea2.Elements<OpenXmlCompositeElement>().Where(e => e.LocalName.Contains("barChart") || e.LocalName.Contains("BarChart")))
+                    var overlapBarEls = plotArea2.Elements<OpenXmlCompositeElement>()
+                        .Where(e => e.LocalName.Contains("barChart") || e.LocalName.Contains("BarChart"))
+                        .ToList();
+                    if (overlapBarEls.Count == 0) { unsupported.Add(key); break; }
+                    foreach (var barChart in overlapBarEls)
                     {
                         var overlapEl = barChart.GetFirstChild<C.Overlap>();
                         if (overlapEl != null) overlapEl.Val = (sbyte)ov;

@@ -57,11 +57,17 @@ public partial class WordHandler
         if (!HasTrackChangeKey(properties))
             return (properties, _trackChangeNoop);
 
-        // ---- guard 1: only Run and Paragraph supported ----
-        if (element is not Run && element is not Paragraph)
+        // ---- guard 1: only Run / Paragraph / Table / TableRow / TableCell /
+        // SectionProperties supported (Phase 2 + Phase 5) ----
+        if (element is not Run
+            && element is not Paragraph
+            && element is not Table
+            && element is not TableRow
+            && element is not TableCell
+            && element is not SectionProperties)
             throw new InvalidOperationException(
-                "trackChange capture on set is only supported for run and paragraph elements "
-                + "(rPrChange / pPrChange); tcPr/trPr/tblPr/sectPr PrChange are not yet implemented.");
+                "trackChange capture on set is only supported for run / paragraph / table / "
+                + "table-row / table-cell / section elements; other element kinds are not yet implemented.");
 
         // ---- guard 2: RTL cascade props would smear the snapshot ----
         foreach (var k in properties.Keys)
@@ -149,9 +155,8 @@ public partial class WordHandler
             };
             return (stripped, wrap);
         }
-        else
+        else if (element is Paragraph para)
         {
-            var para = (Paragraph)element;
             var existingPPr = para.ParagraphProperties;
             if (existingPPr?.GetFirstChild<ParagraphPropertiesChange>() != null)
                 throw new InvalidOperationException(
@@ -187,6 +192,135 @@ public partial class WordHandler
                 pprChange.AppendChild(previous);
                 // Schema CT_PPr places pPrChange last; AppendChild is correct.
                 pPr.AppendChild(pprChange);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is Table tbl)
+        {
+            var existingTblPr = tbl.GetFirstChild<TableProperties>();
+            if (existingTblPr?.GetFirstChild<TablePropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending tblPrChange; accept/reject existing first");
+
+            // For sect/tbl/tc/tr the SDK does NOT have an *Extended quirk
+            // (verified at compile time / via probe — only Previous*Properties
+            // classes exist). Use PreviousTableProperties directly.
+            var previous = new PreviousTableProperties();
+            if (existingTblPr != null)
+            {
+                foreach (var child in existingTblPr.ChildElements)
+                {
+                    if (child is TablePropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var tblPr = tbl.GetFirstChild<TableProperties>()
+                            ?? tbl.PrependChild(new TableProperties());
+                var change = new TablePropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                tblPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is TableRow tr)
+        {
+            var existingTrPr = tr.GetFirstChild<TableRowProperties>();
+            if (existingTrPr?.GetFirstChild<TableRowPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending trPrChange; accept/reject existing first");
+
+            var previous = new PreviousTableRowProperties();
+            if (existingTrPr != null)
+            {
+                foreach (var child in existingTrPr.ChildElements)
+                {
+                    if (child is TableRowPropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var trPr = tr.GetFirstChild<TableRowProperties>()
+                           ?? tr.PrependChild(new TableRowProperties());
+                var change = new TableRowPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                trPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is TableCell tc)
+        {
+            var existingTcPr = tc.GetFirstChild<TableCellProperties>();
+            if (existingTcPr?.GetFirstChild<TableCellPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending tcPrChange; accept/reject existing first");
+
+            var previous = new PreviousTableCellProperties();
+            if (existingTcPr != null)
+            {
+                foreach (var child in existingTcPr.ChildElements)
+                {
+                    if (child is TableCellPropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var tcPr = tc.GetFirstChild<TableCellProperties>()
+                           ?? tc.PrependChild(new TableCellProperties());
+                var change = new TableCellPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                tcPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else
+        {
+            // SectionProperties — path /body/sectPr resolves to SectionProperties
+            // itself, not a parent container. Snapshot SELF's children
+            // (excluding existing sectPrChange).
+            var sectPr = (SectionProperties)element;
+            if (sectPr.GetFirstChild<SectionPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending sectPrChange; accept/reject existing first");
+
+            var previous = new PreviousSectionProperties();
+            foreach (var child in sectPr.ChildElements)
+            {
+                if (child is SectionPropertiesChange) continue;
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            Action wrap = () =>
+            {
+                var change = new SectionPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                sectPr.AppendChild(change);
             };
             return (stripped, wrap);
         }

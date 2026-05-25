@@ -740,6 +740,11 @@ public partial class WordHandler
             throw new ArgumentException($"Section {secIdx} not found (total: {sectionProps.Count})");
 
         var sectPr = sectionProps[secIdx - 1];
+        // Phase 5 trackChange capture: SetSectionPath bypasses generic SetElement
+        // (path is intercepted upstream in Set.cs), so wire the decorator here too.
+        // Snapshot sectPr BEFORE the foreach loop mutates it; append sectPrChange
+        // AFTER all props succeed (inside the same atomic try-block).
+        var (effectiveProps, wrapTrackChange) = BeginTrackChangeIfRequested(sectPr, properties);
         // CONSISTENCY(set-atomicity): mirror SetDocumentProperties in WordHandler.Add.cs
         // — multi-prop set on /section[N] must be all-or-nothing. Snapshot the whole
         // Document tree on entry; any throw inside the loop restores it before re-throw
@@ -747,7 +752,7 @@ public partial class WordHandler
         var atomicSnapshot = _doc.MainDocumentPart!.Document!.OuterXml;
         try
         {
-        foreach (var (key, value) in properties)
+        foreach (var (key, value) in effectiveProps)
         {
             switch (key.ToLowerInvariant())
             {
@@ -1008,6 +1013,9 @@ public partial class WordHandler
             _doc.MainDocumentPart!.Document = new Document(atomicSnapshot);
             throw;
         }
+        // Phase 5: append sectPrChange now that all props applied successfully.
+        // No-op when BeginTrackChangeIfRequested found no trackChange.* sub-keys.
+        wrapTrackChange();
         _doc.MainDocumentPart?.Document?.Save();
         return unsupported;
     }

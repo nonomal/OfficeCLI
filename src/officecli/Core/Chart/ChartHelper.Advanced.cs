@@ -566,7 +566,11 @@ internal static partial class ChartHelper
 
             foreach (var (original, _) in group)
             {
-                chartTypeEl.AppendChild(original.CloneNode(true));
+                // Don't clone original directly — original is a BarChartSeries, but
+                // chartTypeEl may be LineChart/AreaChart/ScatterChart which require
+                // LineChartSeries / AreaChartSeries / ScatterChartSeries respectively.
+                // Schema validation rejects mismatched series. Convert to the right type.
+                chartTypeEl.AppendChild(ConvertSeriesToType(original, group.Key));
             }
 
             chartTypeEl.AppendChild(new C.AxisId { Val = catAxisId });
@@ -580,5 +584,91 @@ internal static partial class ChartHelper
             else
                 plotArea.AppendChild(chartTypeEl);
         }
+    }
+
+    /// <summary>
+    /// Convert a chart series element (BarChartSeries, LineChartSeries, etc.) to the
+    /// series type required by a target chart type (bar/column/line/area/scatter).
+    /// The OOXML schema requires each chart container to host its own series subclass —
+    /// a LineChart cannot host a BarChartSeries even though the field set is identical.
+    /// Copies idx, order, tx, spPr, cat, val (and x/yVal for scatter) from the source.
+    /// </summary>
+    private static OpenXmlCompositeElement ConvertSeriesToType(OpenXmlCompositeElement source, string targetType)
+    {
+        // Extract identity + data children by local name so we can move them across
+        // schema namespaces without depending on the source's concrete type.
+        OpenXmlElement? Take(string localName)
+        {
+            return source.ChildElements.FirstOrDefault(e => e.LocalName == localName);
+        }
+
+        var idx = Take("idx");
+        var order = Take("order");
+        var tx = Take("tx");
+        var spPr = Take("spPr");
+        var marker = Take("marker");
+        var cat = Take("cat");
+        var val = Take("val");
+        var xVal = Take("xVal");
+        var yVal = Take("yVal");
+        var smooth = Take("smooth");
+        var invertIfNegative = Take("invertIfNegative");
+
+        OpenXmlCompositeElement target = targetType switch
+        {
+            "bar" or "column" or "col" => new C.BarChartSeries(),
+            "line" => new C.LineChartSeries(),
+            "area" => new C.AreaChartSeries(),
+            "scatter" => new C.ScatterChartSeries(),
+            _ => new C.LineChartSeries(),
+        };
+
+        // CT_SerXxx schema order: idx, order, tx, spPr, [invertIfNegative|marker], [dPt*],
+        // [dLbls], [trendline*], [errBars], cat, val (or xVal/yVal for scatter), smooth.
+        if (idx != null) target.AppendChild(idx.CloneNode(true));
+        if (order != null) target.AppendChild(order.CloneNode(true));
+        if (tx != null) target.AppendChild(tx.CloneNode(true));
+        if (spPr != null) target.AppendChild(spPr.CloneNode(true));
+
+        // invertIfNegative only valid on bar series; marker on line/scatter
+        if (targetType is "bar" or "column" or "col")
+        {
+            if (invertIfNegative != null) target.AppendChild(invertIfNegative.CloneNode(true));
+        }
+        else if (targetType is "line" or "scatter")
+        {
+            if (marker != null) target.AppendChild(marker.CloneNode(true));
+        }
+
+        if (targetType == "scatter")
+        {
+            // Scatter needs xVal + yVal; synthesize from cat/val if source was non-scatter.
+            if (xVal != null)
+                target.AppendChild(xVal.CloneNode(true));
+            else if (cat != null)
+            {
+                // Reuse cat data as numeric x-values where possible; otherwise omit.
+                // Scatter without xVal is legal — Excel auto-indexes.
+            }
+            if (yVal != null) target.AppendChild(yVal.CloneNode(true));
+            else if (val != null)
+            {
+                // Convert c:val -> c:yVal by re-parenting the numRef/numLit child.
+                var inner = val.ChildElements.FirstOrDefault(e =>
+                    e.LocalName == "numRef" || e.LocalName == "numLit");
+                if (inner != null)
+                    target.AppendChild(new C.YValues(inner.CloneNode(true)));
+            }
+        }
+        else
+        {
+            if (cat != null) target.AppendChild(cat.CloneNode(true));
+            if (val != null) target.AppendChild(val.CloneNode(true));
+        }
+
+        if (targetType is "line" or "scatter" && smooth != null)
+            target.AppendChild(smooth.CloneNode(true));
+
+        return target;
     }
 }

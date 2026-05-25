@@ -16,21 +16,26 @@ public partial class WordHandler
         Modified = true;
         var unsupported = new List<string>();
 
+        // Bare `revision=` key was retired when the namespace split into
+        // revision.type (creation) / revision.action (accept-reject). Reject
+        // up-front with a pointed error so migrating scripts get an actionable
+        // message instead of a generic "unsupported property" deep in dispatch.
+        RejectBareRevisionKey(properties);
+
         // Revision selector / indexed path → dedicated dispatcher. Handles
         // `revision`, `revision[@author=X][@type=Y]`, and `/revision[N]` with
-        // a single `--prop revision=accept|reject` action. Routed before the
+        // a single `--prop revision.action=accept|reject`. Routed before the
         // generic selector-batch branch so the synthetic /revision[N] path
         // (which has no real DOM target) doesn't trip Query→recursive-Set.
         if (IsRevisionSelectorPath(path))
             return SetRevisionsBySelector(path, properties);
 
-        // Native-path accept/reject: `set /body/p[N] --prop revision=accept`,
-        // `set /body/p[N]/r[M] --prop revision=reject`, etc. — accept/reject
+        // Native-path accept/reject: `set /body/p[N] --prop revision.action=accept`,
+        // `set /body/p[N]/r[M] --prop revision.action=reject`, etc. — accept/reject
         // every revision marker structurally tied to that element. Routed
-        // BEFORE the rest of the dispatch so `revision=accept|reject` isn't
-        // misinterpreted by the creation-side Set.TrackChange decorator
-        // (which would otherwise treat `revision=reject` as a creation kind
-        // and stamp a fresh pPrChange/rPrChange).
+        // BEFORE the rest of the dispatch so the action key isn't shadowed
+        // by the creation-side Set.TrackChange decorator (creation and action
+        // live in disjoint key namespaces: `revision.type` vs `revision.action`).
         if (IsRevisionActionRequest(properties))
             return SetRevisionByNativePath(path, properties);
 

@@ -1399,7 +1399,7 @@ public partial class WordHandler
             var pPrChange = pProps?.GetFirstChild<ParagraphPropertiesChange>();
             if (pPrChange != null)
             {
-                node.Format["revision"] = "format";
+                node.Format["revision.type"] = "format";
                 if (!string.IsNullOrEmpty(pPrChange.Author?.Value))
                     node.Format["revision.author"] = pPrChange.Author!.Value!;
                 if (pPrChange.Date?.Value is DateTime pDate)
@@ -2089,7 +2089,7 @@ public partial class WordHandler
                     var insAnc = unkRun.Ancestors<InsertedRun>().FirstOrDefault();
                     if (insAnc != null)
                     {
-                        synthNode.Format["revision"] = "ins";
+                        synthNode.Format["revision.type"] = "ins";
                         if (!string.IsNullOrEmpty(insAnc.Author?.Value))
                             synthNode.Format["revision.author"] = insAnc.Author!.Value!;
                         if (insAnc.Date?.Value is DateTime insAncDate)
@@ -2100,7 +2100,7 @@ public partial class WordHandler
                         var delAnc = unkRun.Ancestors<DeletedRun>().FirstOrDefault();
                         if (delAnc != null)
                         {
-                            synthNode.Format["revision"] = "del";
+                            synthNode.Format["revision.type"] = "del";
                             if (!string.IsNullOrEmpty(delAnc.Author?.Value))
                                 synthNode.Format["revision.author"] = delAnc.Author!.Value!;
                             if (delAnc.Date?.Value is DateTime delAncDate)
@@ -2241,7 +2241,7 @@ public partial class WordHandler
             var insAncestor = run.Ancestors<InsertedRun>().FirstOrDefault();
             if (insAncestor != null)
             {
-                node.Format["revision"] = "ins";
+                node.Format["revision.type"] = "ins";
                 if (!string.IsNullOrEmpty(insAncestor.Author?.Value))
                     node.Format["revision.author"] = insAncestor.Author!.Value!;
                 if (insAncestor.Date?.Value is DateTime insDate)
@@ -2252,7 +2252,7 @@ public partial class WordHandler
                 var delAncestor = run.Ancestors<DeletedRun>().FirstOrDefault();
                 if (delAncestor != null)
                 {
-                    node.Format["revision"] = "del";
+                    node.Format["revision.type"] = "del";
                     if (!string.IsNullOrEmpty(delAncestor.Author?.Value))
                         node.Format["revision.author"] = delAncestor.Author!.Value!;
                     if (delAncestor.Date?.Value is DateTime delDate)
@@ -2267,7 +2267,7 @@ public partial class WordHandler
                     var rPrChange = run.RunProperties?.GetFirstChild<RunPropertiesChange>();
                     if (rPrChange != null)
                     {
-                        node.Format["revision"] = "format";
+                        node.Format["revision.type"] = "format";
                         if (!string.IsNullOrEmpty(rPrChange.Author?.Value))
                             node.Format["revision.author"] = rPrChange.Author!.Value!;
                         if (rPrChange.Date?.Value is DateTime rDate)

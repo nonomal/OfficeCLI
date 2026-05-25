@@ -12,6 +12,9 @@ public partial class WordHandler
 {
     private string AddParagraph(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
+        // See RejectBareRevisionKey: the bare `revision=` literal was retired
+        // when creation/action split into revision.type / revision.action.
+        RejectBareRevisionKey(properties);
         string resultPath;
         var para = new Paragraph();
         AssignParaId(para);
@@ -888,8 +891,11 @@ public partial class WordHandler
             // round-trips fine on `set r[N] kern=36`. Removed so kern reaches
             // ApplyRunFormatting on the bare-key fallback path below.
             // v5.9: paragraph-level format-revision marker keys consumed
-            // by the pPrChange block at the end of AddParagraph.
-            "revision",
+            // by the pPrChange block at the end of AddParagraph. The bare
+            // `revision` key is intentionally absent — creation uses
+            // `revision.type=<kind>`, action uses `revision.action=accept|reject`;
+            // a bare `revision` literal is an error (no silent allowlist).
+            "revision.type",
             "revision.author",
             "revision.date",
             "revision.id",
@@ -1089,13 +1095,13 @@ public partial class WordHandler
             pProps.BiDi = new BiDi { Val = new DocumentFormat.OpenXml.OnOffValue(false) };
         }
 
-        // Paragraph-level `revision=format` → <w:pPrChange>.
+        // Paragraph-level `revision.type=format` → <w:pPrChange>.
         // Mirrors the run-side rPrChange path in AddRun. .doc carries
         // sprmPPropRMark (0xC63F); we stamp the marker with optional
         // author/date/id and leave the inner pPr empty (no recoverable
         // prior-property snapshot at v1).
         string? pTcKind = null;
-        properties.TryGetValue("revision", out pTcKind);
+        properties.TryGetValue("revision.type", out pTcKind);
         if (pTcKind?.Trim().ToLowerInvariant() == "format")
         {
             string? pTcAuthor = null;
@@ -1116,7 +1122,7 @@ public partial class WordHandler
         }
 
         // High-level paragraph-insertion revision: ANY revision.* sub-key
-        // (author/date/id) WITHOUT a `revision=<kind>` literal means "this
+        // (author/date/id) WITHOUT a `revision.type=<kind>` literal means "this
         // paragraph was just inserted as a tracked change". Mirrors the
         // equivalent in AddRun (Phase 1) and the inverse in Mutations.Remove
         // (Phase 4: remove paragraph + revision.author produces ¶ del +
@@ -1359,6 +1365,9 @@ public partial class WordHandler
 
     private string AddRun(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
+        // See RejectBareRevisionKey: the bare `revision=` literal was retired
+        // when creation/action split into revision.type / revision.action.
+        RejectBareRevisionKey(properties);
         string resultPath;
         // BUG-DUMP33-01: support <w:hyperlink> as a run parent so dump→batch
         // can round-trip tab-only / formatted runs that live inside a
@@ -1385,14 +1394,14 @@ public partial class WordHandler
         string? trackChangeAuthor = null;
         string? trackChangeDate = null;
         string? trackChangeId = null;
-        if (properties.TryGetValue("revision", out var tcKindRaw))
+        if (properties.TryGetValue("revision.type", out var tcKindRaw))
             trackChangeKind = tcKindRaw?.Trim().ToLowerInvariant();
         properties.TryGetValue("revision.author", out trackChangeAuthor);
         properties.TryGetValue("revision.date", out trackChangeDate);
         properties.TryGetValue("revision.id", out trackChangeId);
 
         // High-level inference: if a revision.* sub-key is present
-        // (author/date/id) without an explicit `revision=<kind>` literal,
+        // (author/date/id) without an explicit `revision.type=<kind>` literal,
         // default to "ins" — `add run + revision.author=X` means "create a
         // new run as a tracked insertion". Mirrors Word UI: any edit while
         // track-changes is on becomes a revision; for an `add run` op the
@@ -1736,8 +1745,10 @@ public partial class WordHandler
             "textoutline", "textfill", "w14shadow", "w14glow", "w14reflection",
             "field", "formula", "ref", "id",
             // BUG-DUMP5-10: consumed up-front for the w:ins/w:del wrapper
-            // emit at the bottom of this method.
-            "revision",
+            // emit at the bottom of this method. Bare `revision` is no
+            // longer a valid key — creation = `revision.type`, action =
+            // `revision.action`.
+            "revision.type",
             // BUG-DUMP7-01: consumed up-front to emit <w:sym/> in place of <w:t>.
             "sym",
             // CONSISTENCY(markRPr-inherit-opt-out): consumed up-front (line ~1587)
@@ -1993,7 +2004,7 @@ public partial class WordHandler
         {
             if (string.IsNullOrEmpty(trackChangeId))
                 throw new InvalidOperationException(
-                    $"revision={trackChangeKind} requires an explicit revision.id; "
+                    $"revision.type={trackChangeKind} requires an explicit revision.id; "
                     + "moveFrom and moveTo must share the same id to be recognised as a "
                     + "pair by Word. Pass --prop revision.id=<n> on both sides.");
 

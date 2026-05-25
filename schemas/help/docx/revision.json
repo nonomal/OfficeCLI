@@ -1,0 +1,73 @@
+{
+  "$schema": "../_schema.json",
+  "format": "docx",
+  "element": "revision",
+  "parent": "paragraph|run|table|row|cell|section",
+  "operations": {
+    "add": false,
+    "set": true,
+    "get": true,
+    "query": true,
+    "remove": false
+  },
+  "paths": {
+    "positional": ["/revision[N]", "/body/p[N]/ins[M]", "/body/p[N]/del[M]"],
+    "selector": ["/revision", "/revision[@author=NAME]", "/revision[@type=ins|del|format|moveFrom|moveTo]", "/revision[@author=NAME][@type=TYPE]"]
+  },
+  "note": "Tracked-change marker. `query revision` enumerates every w:ins / w:del / w:moveFrom / w:moveTo / w:*PrChange in the document. Two disjoint property namespaces: `revision.type=ins|del|format|moveFrom|moveTo` creates a tracked change (used with add/set on the host run/paragraph/table/row/cell/section), while `revision.action=accept|reject` acts on existing markers via /revision selectors or native paths (/body/p[N], /body/p[N]/r[M], etc.). The two namespaces are mutually exclusive — mixing revision.action with any revision.type/.author/.date/.id key is rejected as ambiguous. Bare `revision=…` is no longer accepted.",
+  "properties": {
+    "type": {
+      "type": "enum",
+      "values": ["ins", "del", "moveTo", "moveFrom", "format"],
+      "add": false, "set": false, "get": true,
+      "examples": ["query /revision[@type=ins]"],
+      "readback": "revision type (read-only on the revision node; create with --prop revision.type=… on the host element)",
+      "enforcement": "report"
+    },
+    "text": {
+      "type": "string",
+      "description": "text content for ins / content marker for del (read-only).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "concatenated text (read-only)",
+      "enforcement": "report"
+    },
+    "author": {
+      "type": "string",
+      "add": false, "set": false, "get": true,
+      "examples": ["query /revision[@author=Alice]"],
+      "readback": "revision author (read-only on the revision node; supply with --prop revision.author=… when creating)",
+      "enforcement": "report"
+    },
+    "date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp (read-only on the revision node).",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "Date attribute (read-only)",
+      "enforcement": "report"
+    },
+    "id": {
+      "type": "integer",
+      "description": "w:id attribute. Stable across save; pair moveFrom/moveTo by reusing the same id.",
+      "add": false, "set": false, "get": true,
+      "examples": [],
+      "readback": "revision id (read-only)",
+      "enforcement": "report"
+    },
+    "action": {
+      "type": "enum",
+      "values": ["accept", "reject"],
+      "add": false, "set": true, "get": false,
+      "examples": [
+        "set /revision --prop revision.action=accept",
+        "set '/revision[@author=Alice]' --prop revision.action=reject",
+        "set '/revision[@type=ins]' --prop revision.action=accept",
+        "set /revision[3] --prop revision.action=accept",
+        "set /body/p[1]/r[2] --prop revision.action=reject"
+      ],
+      "readback": "(action is a verb — not surfaced on get)",
+      "enforcement": "strict"
+    }
+  }
+}

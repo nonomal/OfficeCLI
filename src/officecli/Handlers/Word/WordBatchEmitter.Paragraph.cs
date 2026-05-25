@@ -50,13 +50,13 @@ public static partial class WordBatchEmitter
         if (props.Remove("paraMarkIns.author", out var pmiAuthor))
         {
             props["revision.author"] = pmiAuthor;
-            // Strip revision=format / revision.date from a sibling pPrChange
-            // so the bare-revision path on AddParagraph fires instead of the
+            // Strip revision.type=format / revision.date from a sibling pPrChange
+            // so the bare-attribution path on AddParagraph fires instead of the
             // pPrChange path. pPrChange round-trip on paragraphs that are
             // ALSO newly inserted is a corner case we accept losing for now
             // (rare in practice; pPrChange semantics overlap with paraMarkIns
             // on a fresh paragraph anyway).
-            props.Remove("revision");
+            props.Remove("revision.type");
         }
         if (props.Remove("paraMarkIns.date", out var pmiDate))
         {
@@ -492,7 +492,7 @@ public static partial class WordBatchEmitter
             || r.Format.ContainsKey("ligatures")
             || r.Format.ContainsKey("numForm")
             || r.Format.ContainsKey("numSpacing")
-            || r.Format.ContainsKey("revision")
+            || r.Format.ContainsKey("revision.type")
             || r.Format.ContainsKey("sym")) return false;
         // BUG-FIELD-COLLAPSE: a synthetic field run carries `instruction=…` —
         // collapse would lose the field chain on replay.

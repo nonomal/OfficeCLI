@@ -1,29 +1,40 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 //
-// Phase 6 of the revision (trackChange) redesign — selector + per-target
-// accept/reject. Replaces the legacy `set / --prop acceptAllChanges=all`
-// magic-property entry with a uniform path-style addressing:
+// All Set-side revision logic for Word. Two sections, distinct call shapes:
 //
-//   set <doc> /revision --prop revision=accept                  # all
-//   set <doc> '/revision[@author=Alice]' --prop revision=accept # by author
-//   set <doc> '/revision[@type=ins]' --prop revision=reject     # by type
-//   set <doc> '/revision[@author=Bob][@type=del]' --prop revision=accept
-//   set <doc> /revision[3] --prop revision=accept               # by index
+//   SECTION 1 — Creation decorator (was Set.TrackChange.cs)
+//     BeginTrackChangeIfRequested + HasTrackChangeKey. Called from Set() on
+//     EVERY Run / Paragraph / Table / Row / Cell / SectionProperties target.
+//     If the input carries any of revision.type / revision.author / revision.date
+//     / revision.id, snapshots the current rPr/pPr/etc and returns a wrap action
+//     that appends rPrChange/pPrChange/tblPrChange/trPrChange/tcPrChange/
+//     sectPrChange AFTER SetElement mutates state.
 //
-// All forms start with `/` to satisfy the CLI no-slash-reject guard
-// (CONSISTENCY(no-slash-reject) in CommandBuilder.Set.cs) — selector-mode
-// inside `set` is otherwise disabled on the user-facing CLI to prevent
-// typo-induced doc corruption. The leading slash makes the revision
-// dispatch explicit and consistent with `/body/p[N]` etc.
+//   SECTION 2 — Action dispatchers (selector + native-path)
+//     IsRevisionSelectorPath / IsRevisionActionRequest plus
+//     SetRevisionsBySelector / SetRevisionByNativePath. Routed BEFORE Section 1
+//     in Set.cs (revision.action is action, not creation). Handles:
+//       set <doc> /revision --prop revision.action=accept                  # all
+//       set <doc> '/revision[@author=Alice]' --prop revision.action=accept # by author
+//       set <doc> '/revision[@type=ins]' --prop revision.action=reject     # by type
+//       set <doc> '/revision[@author=Bob][@type=del]' --prop revision.action=accept
+//       set <doc> /revision[3] --prop revision.action=accept               # by index
+//       set <doc> /body/p[N]/r[M] --prop revision.action=accept            # native path
+//     All synthetic-selector forms start with `/` to satisfy
+//     CONSISTENCY(no-slash-reject) in CommandBuilder.Set.cs.
 //
-// Action values accepted: accept / reject (case-insensitive).
+// Key namespace (canonical, no aliases — see d9e812f3):
+//   revision.type    — creation kind  (ins/del/format/moveFrom/moveTo)
+//   revision.action  — action verb    (accept/reject)
+//   revision.author / .date / .id — creation attribution (mixing with
+//   revision.action is rejected as ambiguous; see dispatcher guards).
+// The bare `revision` key is intentionally absent from both forms.
 //
-// Path-shift safety: matching elements are processed in reverse document
-// order. Some accept/reject actions remove sibling content (delete-runs,
-// paragraph-merge on ¶ del); walking forward would shift later /revision[N]
-// indexes mid-iteration. Reverse traversal keeps each remaining index
-// valid until its turn.
+// Path-shift safety (Section 2): action dispatchers process matching elements
+// in REVERSE document order. Some accept/reject actions remove sibling content
+// (delete-runs, paragraph-merge on ¶ del); walking forward would shift later
+// /revision[N] indexes mid-iteration.
 
 using System.Text.RegularExpressions;
 using DocumentFormat.OpenXml;
@@ -33,6 +44,349 @@ namespace OfficeCli.Handlers;
 
 public partial class WordHandler
 {
+    // ========================================================================
+    // SECTION 1 — Creation decorator (rPrChange / pPrChange / *PrChange capture)
+    //
+    // Wiring contract (see Set(string, Dictionary<string,string>)):
+    //   1. resolve the target element
+    //   2. call BeginTrackChangeIfRequested; replace the user's properties dict
+    //      with the returned (stripped) dict before dispatching to SetElement
+    //   3. after SetElement returns successfully, invoke the returned wrapAction
+    //      (no-op when no creation key was present)
+    //
+    // Scope:
+    //   - Run / Paragraph / Table / TableRow / TableCell / SectionProperties
+    //   - RTL cascade keys (font.cs / bold.cs / italic.cs / size.cs) are
+    //     rejected when combined with revision.* — the cascade writes across
+    //     runs and would smear the rPrChange snapshot.
+    //   - An element that already carries a pending *PrChange is rejected
+    //     (caller must accept/reject the existing one first).
+    // ========================================================================
+
+    /// <summary>Sentinel for the no-op case (no creation keys in the input).
+    /// Returning the same Dictionary instance lets the caller short-circuit
+    /// without allocating a copy.</summary>
+    private static readonly Action _trackChangeNoop = static () => { };
+
+    /// <summary>Reject the bare `revision` key with a pointed error.
+    ///
+    /// The branch `feat/trackchange-redesign` split the overloaded `revision`
+    /// key into two disjoint namespaces:
+    ///   • `revision.type=ins|del|format|moveFrom|moveTo` — create a new revision
+    ///   • `revision.action=accept|reject`                — act on an existing one
+    /// A bare `revision=…` literal is no longer valid. Without this guard the
+    /// key would fall through to the generic unsupported-property bucket with
+    /// a non-actionable error ("unsupported property: revision"); callers
+    /// migrating from older scripts/dumps would have no signal pointing them
+    /// at the new namespace. Called from Set() entry and from AddRun /
+    /// AddParagraph so both surfaces give the same actionable message.</summary>
+    internal static void RejectBareRevisionKey(Dictionary<string, string> properties)
+    {
+        if (properties.TryGetValue("revision", out var v))
+            throw new ArgumentException(
+                $"bare `revision={v}` is no longer accepted. Use "
+                + "`revision.type=ins|del|format|moveFrom|moveTo` to create a "
+                + "tracked change, or `revision.action=accept|reject` to act "
+                + "on an existing one.");
+    }
+
+    /// <summary>Inspect <paramref name="properties"/> for revision.* creation
+    /// keys. When present, snapshot the element's current rPr/pPr clone and
+    /// return:
+    ///   - <c>stripped</c>: copy of <paramref name="properties"/> with creation
+    ///     keys removed (so downstream Set helpers don't surface them as
+    ///     unsupported);
+    ///   - <c>wrapAction</c>: builds and appends the *PrChange (containing the
+    ///     snapshot) to the now-mutated parent. The caller must invoke this
+    ///     AFTER the Set succeeds.
+    /// When no creation key is present, returns the input dict unchanged and a
+    /// no-op action (cheap fast path).</summary>
+    private (Dictionary<string, string> stripped, Action wrapAction)
+        BeginTrackChangeIfRequested(OpenXmlElement element, Dictionary<string, string> properties)
+    {
+        if (!HasTrackChangeKey(properties))
+            return (properties, _trackChangeNoop);
+
+        // ---- guard 1: only Run / Paragraph / Table / TableRow / TableCell /
+        // SectionProperties supported ----
+        if (element is not Run
+            && element is not Paragraph
+            && element is not Table
+            && element is not TableRow
+            && element is not TableCell
+            && element is not SectionProperties)
+            throw new InvalidOperationException(
+                "trackChange capture on set is only supported for run / paragraph / table / "
+                + "table-row / table-cell / section elements; other element kinds are not yet implemented.");
+
+        // ---- guard 2: RTL cascade props would smear the snapshot ----
+        foreach (var k in properties.Keys)
+        {
+            var lk = k.ToLowerInvariant();
+            if (lk is "font.cs" or "font.complexscript" or "font.complex"
+                  or "bold.cs" or "italic.cs" or "size.cs"
+                  or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
+                  or "boldcs" or "italiccs" or "sizecs")
+                throw new InvalidOperationException(
+                    "RTL cascade properties are not supported with trackChange yet");
+        }
+
+        // ---- extract revision.* sub-keys (case-insensitive) ----
+        string? tcAuthor = null, tcDate = null, tcId = null;
+        foreach (var (k, v) in properties)
+        {
+            var lk = k.ToLowerInvariant();
+            if (lk == "revision.author") tcAuthor = v;
+            else if (lk == "revision.date") tcDate = v;
+            else if (lk == "revision.id") tcId = v;
+        }
+        var author = string.IsNullOrEmpty(tcAuthor) ? "OfficeCLI" : tcAuthor!;
+        DateTime date = DateTime.UtcNow;
+        if (!string.IsNullOrEmpty(tcDate) && DateTime.TryParse(tcDate, out var parsed))
+            date = parsed;
+        var idStr = string.IsNullOrEmpty(tcId) ? GenerateRevisionId() : tcId!;
+
+        // ---- strip revision.* creation keys from the dict passed to SetElement ----
+        // (revision.action never reaches this decorator — it's routed in Set.cs
+        // before TrackChange runs; the strip below is conservatively scoped to
+        // creation keys only.)
+        var stripped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in properties)
+        {
+            var lk = k.ToLowerInvariant();
+            if (lk is "revision.type" or "revision.author" or "revision.date" or "revision.id")
+                continue;
+            stripped[k] = v;
+        }
+
+        // ---- snapshot + plan the wrap based on element kind ----
+        if (element is Run run)
+        {
+            var existingRPr = run.GetFirstChild<RunProperties>();
+            if (existingRPr?.GetFirstChild<RunPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending rPrChange; accept/reject existing first");
+
+            // Snapshot: deep-clone the current rPr's CHILDREN into a
+            // <w:rPr> body, which we will host inside
+            // <w:rPrChange><w:rPr>...</w:rPr></w:rPrChange>. Schema-wise the
+            // inner element is the bare <w:rPr> (ECMA-376 §17.13.5.31) — the
+            // SDK exposes it via the PreviousRunProperties strongly-typed
+            // subclass; using a plain RunProperties round-trips as an
+            // unknown sibling element. Use PreviousRunProperties.
+            var snapshotInner = new PreviousRunProperties();
+            if (existingRPr != null)
+            {
+                foreach (var child in existingRPr.ChildElements)
+                {
+                    if (child is RunPropertiesChange) continue;
+                    snapshotInner.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var rPr = run.GetFirstChild<RunProperties>()
+                          ?? run.PrependChild(new RunProperties());
+                var rprChange = new RunPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                rprChange.AppendChild(snapshotInner);
+                // Schema CT_RPr places rPrChange last; AppendChild is correct.
+                rPr.AppendChild(rprChange);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is Paragraph para)
+        {
+            var existingPPr = para.ParagraphProperties;
+            if (existingPPr?.GetFirstChild<ParagraphPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending pPrChange; accept/reject existing first");
+
+            // Snapshot the pPr. The strongly-typed child class for the <w:pPr>
+            // inside <w:pPrChange> is ParagraphPropertiesExtended in
+            // DocumentFormat.OpenXml 3.x — NOT PreviousParagraphProperties
+            // (despite the parallel naming with PreviousRunProperties used by
+            // rPrChange). Confirmed empirically: writing PreviousParagraphProperties
+            // round-trips to ParagraphPropertiesExtended after save+reload,
+            // breaking strongly-typed reads. Use ParagraphPropertiesExtended on
+            // write so write and read see the same SDK type.
+            var previous = new ParagraphPropertiesExtended();
+            if (existingPPr != null)
+            {
+                foreach (var child in existingPPr.ChildElements)
+                {
+                    if (child is ParagraphPropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var pPr = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
+                var pprChange = new ParagraphPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                pprChange.AppendChild(previous);
+                // Schema CT_PPr places pPrChange last; AppendChild is correct.
+                pPr.AppendChild(pprChange);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is Table tbl)
+        {
+            var existingTblPr = tbl.GetFirstChild<TableProperties>();
+            if (existingTblPr?.GetFirstChild<TablePropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending tblPrChange; accept/reject existing first");
+
+            // For sect/tbl/tc/tr the SDK does NOT have an *Extended quirk —
+            // only Previous*Properties classes exist. Use them directly.
+            var previous = new PreviousTableProperties();
+            if (existingTblPr != null)
+            {
+                foreach (var child in existingTblPr.ChildElements)
+                {
+                    if (child is TablePropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var tblPr = tbl.GetFirstChild<TableProperties>()
+                            ?? tbl.PrependChild(new TableProperties());
+                var change = new TablePropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                tblPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is TableRow tr)
+        {
+            var existingTrPr = tr.GetFirstChild<TableRowProperties>();
+            if (existingTrPr?.GetFirstChild<TableRowPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending trPrChange; accept/reject existing first");
+
+            var previous = new PreviousTableRowProperties();
+            if (existingTrPr != null)
+            {
+                foreach (var child in existingTrPr.ChildElements)
+                {
+                    if (child is TableRowPropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var trPr = tr.GetFirstChild<TableRowProperties>()
+                           ?? tr.PrependChild(new TableRowProperties());
+                var change = new TableRowPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                trPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else if (element is TableCell tc)
+        {
+            var existingTcPr = tc.GetFirstChild<TableCellProperties>();
+            if (existingTcPr?.GetFirstChild<TableCellPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending tcPrChange; accept/reject existing first");
+
+            var previous = new PreviousTableCellProperties();
+            if (existingTcPr != null)
+            {
+                foreach (var child in existingTcPr.ChildElements)
+                {
+                    if (child is TableCellPropertiesChange) continue;
+                    previous.AppendChild(child.CloneNode(true));
+                }
+            }
+
+            Action wrap = () =>
+            {
+                var tcPr = tc.GetFirstChild<TableCellProperties>()
+                           ?? tc.PrependChild(new TableCellProperties());
+                var change = new TableCellPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                tcPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+        else
+        {
+            // SectionProperties — path /body/sectPr resolves to SectionProperties
+            // itself, not a parent container. Snapshot SELF's children
+            // (excluding existing sectPrChange).
+            var sectPr = (SectionProperties)element;
+            if (sectPr.GetFirstChild<SectionPropertiesChange>() != null)
+                throw new InvalidOperationException(
+                    "element already has a pending sectPrChange; accept/reject existing first");
+
+            var previous = new PreviousSectionProperties();
+            foreach (var child in sectPr.ChildElements)
+            {
+                if (child is SectionPropertiesChange) continue;
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            Action wrap = () =>
+            {
+                var change = new SectionPropertiesChange
+                {
+                    Author = author,
+                    Date = date,
+                    Id = idStr,
+                };
+                change.AppendChild(previous);
+                sectPr.AppendChild(change);
+            };
+            return (stripped, wrap);
+        }
+    }
+
+    private static bool HasTrackChangeKey(Dictionary<string, string> properties)
+    {
+        // Match creation keys only. revision.action is action — not creation —
+        // and must not trigger this decorator.
+        foreach (var k in properties.Keys)
+        {
+            var lk = k.ToLowerInvariant();
+            if (lk is "revision.type" or "revision.author" or "revision.date" or "revision.id")
+                return true;
+        }
+        return false;
+    }
+
+    // ========================================================================
+    // SECTION 2 — Action dispatchers (selector + native-path accept/reject)
+    // ========================================================================
+
     /// <summary>Single revision marker discovered in document order.</summary>
     private sealed record RevisionRef(
         OpenXmlElement Element,
@@ -41,25 +395,20 @@ public partial class WordHandler
         DateTime? Date,
         string? Id);
 
-    /// <summary>True if <paramref name="path"/> is a revision selector / index
-    /// path that the revision dispatcher should claim. Matches bare `revision`,
-    /// `revision[...attr-filter...]`, and `/revision[N]` (the indexed form
-    /// surfaced by `query revision`).</summary>
     /// <summary>True when <paramref name="properties"/> carries
-    /// `revision=accept` or `revision=reject` — i.e. the caller is asking
-    /// for an ACTION on existing revisions, not creating a new one. Used to
-    /// route native-path mutations (`/body/p[N]/r[M]`) to
-    /// <see cref="SetRevisionByNativePath"/> instead of the creation-side
-    /// Set.TrackChange decorator.
+    /// `revision.action=accept` or `revision.action=reject` — i.e. the
+    /// caller is asking for an ACTION on existing revisions, not creating
+    /// a new one. Used to route native-path mutations
+    /// (`/body/p[N]/r[M]`) to <see cref="SetRevisionByNativePath"/>
+    /// instead of the creation-side Set.TrackChange decorator.
     ///
-    /// Mixing the action form with any creation sub-key (revision.author /
-    /// revision.date / revision.id) is rejected up-front in the dispatcher
-    /// as an ambiguous intent — accept/reject takes no attribution.</summary>
+    /// Mixing the action with any creation key (revision.type /
+    /// revision.author / revision.date / revision.id) is rejected
+    /// up-front in <see cref="SetRevisionByNativePath"/> /
+    /// <see cref="SetRevisionsBySelector"/> as ambiguous intent.</summary>
     private static bool IsRevisionActionRequest(Dictionary<string, string> properties)
     {
-        if (!properties.TryGetValue("revision", out var v)) return false;
-        var lower = v?.Trim().ToLowerInvariant();
-        return lower is "accept" or "reject";
+        return properties.ContainsKey("revision.action");
     }
 
     /// <summary>Accept/reject every revision marker structurally tied to the
@@ -79,21 +428,23 @@ public partial class WordHandler
         Modified = true;
         var unsupported = new List<string>();
 
-        if (!properties.TryGetValue("revision", out var action))
-            throw new ArgumentException("revision action requires --prop revision=accept|reject");
+        if (!properties.TryGetValue("revision.action", out var action))
+            throw new ArgumentException("revision action requires --prop revision.action=accept|reject");
         var act = action.Trim().ToLowerInvariant();
         if (act is not ("accept" or "reject"))
             throw new ArgumentException(
-                $"revision must be `accept` or `reject` (got `{action}`)");
-        // Reject mixing action + creation attribution — accept/reject takes
-        // no author/date/id. If the caller wanted attribution, they meant
-        // the creation form (revision=ins/del/format + revision.author=...).
+                $"revision.action must be `accept` or `reject` (got `{action}`)");
+        // Reject mixing action + any creation key — accept/reject takes
+        // no type/author/date/id. If the caller wanted attribution, they
+        // meant the creation form (revision.type=ins + revision.author=...).
         foreach (var k in properties.Keys)
         {
+            if (string.Equals(k, "revision.action", StringComparison.OrdinalIgnoreCase))
+                continue;
             if (k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException(
-                    $"revision={act} (action) cannot be mixed with `{k}` "
-                    + "(creation attribution); use one form at a time");
+                    $"revision.action={act} cannot be mixed with `{k}` "
+                    + "(creation key); use one form at a time");
         }
 
         var parts = ParsePath(path);
@@ -129,7 +480,7 @@ public partial class WordHandler
         if (marker.Ancestors().Any(a => ReferenceEquals(a, target))) return true;
         // Marker wraps target (target is the inner Run of an InsertedRun /
         // DeletedRun / MoveFromRun / MoveToRun). Restricted to these four
-        // wrapper types so `set /body/p[1] --prop revision=accept` doesn't
+        // wrapper types so `set /body/p[1] --prop revision.action=accept` doesn't
         // also pick up sectPrChange / tblPrChange at parent scope.
         if (marker is InsertedRun || marker is DeletedRun
             || marker is MoveFromRun || marker is MoveToRun)
@@ -156,16 +507,26 @@ public partial class WordHandler
         Modified = true;
         var unsupported = new List<string>();
 
-        if (!properties.TryGetValue("revision", out var action) || string.IsNullOrEmpty(action))
+        if (!properties.TryGetValue("revision.action", out var action) || string.IsNullOrEmpty(action))
         {
             throw new ArgumentException(
-                "revision selector requires --prop revision=accept|reject");
+                "revision selector requires --prop revision.action=accept|reject");
         }
         var act = action.Trim().ToLowerInvariant();
         if (act is not ("accept" or "reject"))
         {
             throw new ArgumentException(
-                $"revision must be `accept` or `reject` (got `{action}`)");
+                $"revision.action must be `accept` or `reject` (got `{action}`)");
+        }
+        // Reject mixing action + any creation key on the selector path too.
+        foreach (var k in properties.Keys)
+        {
+            if (string.Equals(k, "revision.action", StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (k.StartsWith("revision.", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException(
+                    $"revision.action={act} cannot be mixed with `{k}` "
+                    + "(creation key); use one form at a time");
         }
 
         var indexMatch = Regex.Match(path, @"^/revision\[(\d+)\]$");

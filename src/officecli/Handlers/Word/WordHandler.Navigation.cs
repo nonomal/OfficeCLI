@@ -988,8 +988,35 @@ public partial class WordHandler
                 children = seg.Name.ToLowerInvariant() switch
                 {
                     "p" => current.Elements<Paragraph>().Cast<OpenXmlElement>(),
+                    // BUG-D1-TXBX-RUN-INDEX: /<para>/r[N] must enumerate the
+                    // SAME runs NodeBuilder surfaces as paragraph children —
+                    // i.e. skip runs that live INSIDE a child textbox
+                    // (their canonical path is /<para>/textbox[N]/p[M]/r[K]).
+                    // Without this filter, a paragraph hosting 3 textbox
+                    // drawings (Card A / B / C side-by-side) resolves r[2] to
+                    // a text run INSIDE Card A's textbox content instead of
+                    // Card B's drawing run, so WordBatchEmitter probes the
+                    // wrong XML, IsTextboxDrawing returns false, and Cards
+                    // B/C silently degrade to plain `add r` rows on dump
+                    // round-trip — losing the textboxes entirely and
+                    // misaligning every subsequent /body/textbox[K] index.
+                    // Mirrors GetAllRuns in WordHandler.Helpers (also skips
+                    // SimpleField/SdtRun-nested runs for the same path-
+                    // stability reason).
                     "r" => current.Descendants<Run>()
                         .Where(r => r.GetFirstChild<CommentReference>() == null)
+                        .Where(r => r.Ancestors<SdtRun>().FirstOrDefault() == null)
+                        .Where(r => r.Ancestors<SimpleField>().FirstOrDefault() == null)
+                        .Where(r =>
+                        {
+                            var tbc = r.Ancestors<TextBoxContent>().FirstOrDefault();
+                            if (tbc == null) return true;
+                            foreach (var anc in tbc.Ancestors())
+                            {
+                                if (ReferenceEquals(anc, current)) return false;
+                            }
+                            return true;
+                        })
                         .Cast<OpenXmlElement>(),
                     "tbl" => current.Elements<Table>().Cast<OpenXmlElement>(),
                     "tr" => current.Elements<TableRow>().Cast<OpenXmlElement>(),

@@ -234,14 +234,14 @@
       "readback": "keyword list string",
       "enforcement": "report"
     },
-    "revision": {
+    "revisionNumber": {
       "type": "string",
       "add": false,
       "set": true,
       "get": true,
-      "description": "docProps/core.xml Revision field.",
+      "description": "docProps/core.xml Revision field — workbook save counter.",
       "examples": [
-        "--prop revision=3"
+        "--prop revisionNumber=3"
       ],
       "readback": "revision number string",
       "enforcement": "report"

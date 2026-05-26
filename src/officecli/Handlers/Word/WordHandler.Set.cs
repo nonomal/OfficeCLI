@@ -80,7 +80,7 @@ public partial class WordHandler
             foreach (var (key, value) in properties)
             {
                 var k = key.ToLowerInvariant();
-                if (k is "find" or "replace" or "scope" or "regex") continue;
+                if (k is "find" or "replace" or "regex") continue;
                 // revision.* (creation) carries author/date/id/type for wrapping
                 // matched runs (w:ins/w:del) or capturing rPrChange/pPrChange.
                 // revision.action is for /revision selectors, never for find.

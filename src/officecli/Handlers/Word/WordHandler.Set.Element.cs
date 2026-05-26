@@ -796,9 +796,19 @@ public partial class WordHandler
                     }
                     else if (!GenericXmlQuery.TryCreateTypedChild(EnsureRunProperties(run), key, value))
                     {
-                        unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid run props: text, bold, italic, font, size, color, underline, strike, highlight, caps, smallcaps, superscript, subscript, shading, link, formula)"
-                            : key);
+                        // Help users who reach for paragraph vocabulary on a
+                        // run — `align`/`halign`/`alignment` is paragraph- or
+                        // ptab-only OOXML, never a run prop. Name the
+                        // canonical concept explicitly so the unsupported
+                        // notice points the way to the right path.
+                        var lk = key.ToLowerInvariant();
+                        var isAlignmentKey = lk is "align" or "halign" or "alignment";
+                        var detail = isAlignmentKey
+                            ? $"{key} (alignment is a paragraph/ptab property, not a run prop)"
+                            : (unsupported.Count == 0
+                                ? $"{key} (valid run props: text, bold, italic, font, size, color, underline, strike, highlight, caps, smallcaps, superscript, subscript, shading, link, formula)"
+                                : key);
+                        unsupported.Add(detail);
                     }
                     break;
             }

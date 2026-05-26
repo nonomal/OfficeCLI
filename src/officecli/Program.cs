@@ -5,6 +5,14 @@
 // Ensure UTF-8 output on all platforms (Windows defaults to system codepage e.g. GBK)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
+// Snapshot the OS user culture BEFORE we pin the thread to Invariant.
+// Read by `create --locale` (when no explicit tag is given) to bake the
+// user's actual locale into the new doc, mirroring what Word / Pages /
+// other producers do on the host machine. Stashed once at startup so
+// subsequent reads of CultureInfo.CurrentCulture (which we deliberately
+// force to Invariant below) don't lose the original signal.
+OfficeCli.Core.LocaleFontRegistry.OsLocaleSnapshot = System.Globalization.CultureInfo.CurrentCulture.Name;
+
 // officecli is a CLI / AI tool that produces machine-format output (OOXML,
 // JSON, CSS, canonical DocumentNode.Format values) and accepts the same on
 // input. All three formats fix '.' as the decimal separator. Pin the

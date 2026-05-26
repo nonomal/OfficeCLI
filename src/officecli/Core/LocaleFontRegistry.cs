@@ -63,6 +63,89 @@ public static class LocaleFontRegistry
     }
 
     /// <summary>
+    /// OS user culture captured once at process startup, before the rest of
+    /// the cli forces the thread-current culture to Invariant for
+    /// deterministic OOXML / JSON / CSS output (see Program.cs). Read by
+    /// <see cref="ResolveEffectiveLocale"/> to recover the user's actual
+    /// language even though <c>CultureInfo.CurrentCulture</c> reports
+    /// Invariant from inside command handlers. Set by Program.cs and
+    /// treated as immutable from then on. Tests assign directly to
+    /// override.
+    /// </summary>
+    public static string? OsLocaleSnapshot { get; set; }
+
+    /// <summary>
+    /// Pick the effective locale for a newly-created document: explicit
+    /// `--locale` wins when supplied; otherwise fall back to the OS user
+    /// culture captured at startup so Arabic/Hebrew/Chinese/… users get a
+    /// doc shaped for their language without having to repeat the locale
+    /// on every invocation.
+    ///
+    /// The startup snapshot honors CFLocale on macOS, $LANG / $LC_ALL on
+    /// Linux, and the OS user UI culture on Windows. In CI / Docker
+    /// images without locale config the runtime reports InvariantCulture
+    /// (empty Name), and bare `LANG=C` / `LANG=POSIX` map to the same —
+    /// treat all three as "no locale" so AI agents and pipelines don't
+    /// accidentally bake the build machine's culture into output docs.
+    /// </summary>
+    public static string? ResolveEffectiveLocale(string? explicitLocale)
+    {
+        if (!string.IsNullOrWhiteSpace(explicitLocale)) return explicitLocale;
+        var name = OsLocaleSnapshot;
+        if (string.IsNullOrEmpty(name)) return null;
+        if (name.Equals("C", StringComparison.OrdinalIgnoreCase)) return null;
+        if (name.Equals("POSIX", StringComparison.OrdinalIgnoreCase)) return null;
+        // Latin-script Western locales (en/fr/de/es/it/pt/nl/ru/pl/…) carry
+        // no locale-specific instruction — the doc would get the same
+        // Calibri / LTR baseline either way. Skip them so a default-shell
+        // English/French/… user keeps the modern Calibri baseline rather
+        // than the older Times New Roman we'd otherwise bake from
+        // <see cref="Resolve"/>. Explicit `--locale en-US` still goes
+        // through (it expresses intent — "I want this Latin font slot
+        // pinned"). This is the auto-detect-only filter.
+        var lang = name.Replace('_', '-').ToLowerInvariant().Split('-')[0];
+        if (lang is "en" or "fr" or "de" or "es" or "it" or "pt" or "nl" or "ru" or "pl")
+            return null;
+        return name;
+    }
+
+    /// <summary>
+    /// Locale-implied reading direction. RTL when the locale's primary
+    /// script flows right-to-left: Arabic, Hebrew, Yiddish, Urdu, Persian
+    /// (Farsi), Kashmiri, Sindhi, Uighur, Pashto, N'Ko, Dhivehi, Syriac,
+    /// and Kurdish written in Arabic script. Used by BlankDocCreator to
+    /// stamp <w:bidi/> defaults on sectPr and pPrDefault so users with
+    /// `--locale ar-SA` (etc.) don't have to set direction=rtl on every
+    /// paragraph they add.
+    /// </summary>
+    public static bool IsRightToLeft(string? locale)
+    {
+        if (string.IsNullOrWhiteSpace(locale)) return false;
+        var lang = locale.Replace('_', '-').ToLowerInvariant().Split('-')[0];
+        return lang switch
+        {
+            "ar"   // Arabic
+            or "he" // Hebrew
+            or "iw" // Hebrew (legacy ISO 639-1)
+            or "yi" // Yiddish
+            or "ji" // Yiddish (legacy)
+            or "ur" // Urdu
+            or "fa" // Persian / Farsi
+            or "ps" // Pashto
+            or "sd" // Sindhi
+            or "ks" // Kashmiri
+            or "ug" // Uighur
+            or "ku" // Kurdish (Arabic-script variants — Sorani most commonly)
+            or "ckb" // Central Kurdish (Sorani)
+            or "dv" // Dhivehi / Maldivian
+            or "syr" // Syriac
+            or "nqo" // N'Ko
+                => true,
+            _ => false
+        };
+    }
+
+    /// <summary>
     /// Returns a CSS font-family fallback fragment for the locale's CJK script,
     /// used by HTML/SVG renderers when the document's declared font isn't
     /// installed on the rendering machine.

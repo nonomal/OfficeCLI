@@ -93,12 +93,22 @@ public static class BlankDocCreator
         using var doc = WordprocessingDocument.Create(path, WordprocessingDocumentType.Document);
         var mainPart = doc.AddMainDocumentPart();
 
-        // Section with A4 page size, standard margins, and no docGrid snap
+        // Locale-implied RTL — Arabic, Hebrew, Persian, Urdu, … get bidi
+        // defaults stamped onto sectPr + pPrDefault so users don't have to
+        // set direction=rtl on every paragraph.
+        bool isRtl = OfficeCli.Core.LocaleFontRegistry.IsRightToLeft(locale);
+
+        // Section with A4 page size, standard margins, and no docGrid snap.
+        // <w:bidi/> on sectPr makes the section's layout RTL (column order,
+        // anchor edge for page numbers, etc.) when the locale is RTL.
+        // CT_SectPr schema order: pgSz → pgMar → … → bidi → docGrid.
         var sectPr = new SectionProperties(
             new PageSize { Width = WordPageDefaults.A4WidthTwips, Height = WordPageDefaults.A4HeightTwips },
-            new PageMargin { Top = 1440, Right = 1800U, Bottom = 1440, Left = 1800U },
-            new DocGrid { Type = DocGridValues.Default }
+            new PageMargin { Top = 1440, Right = 1800U, Bottom = 1440, Left = 1800U }
         );
+        if (isRtl)
+            sectPr.AppendChild(new BiDi());
+        sectPr.AppendChild(new DocGrid { Type = DocGridValues.Default });
 
         // Compatibility: do not compress punctuation spacing
         // Schema order: characterSpacingControl must come before compat in w:settings
@@ -258,10 +268,19 @@ public static class BlankDocCreator
             };
             if (!string.IsNullOrEmpty(locEa)) minDocDefaultFonts.EastAsia = locEa;
             if (!string.IsNullOrEmpty(locCs)) minDocDefaultFonts.ComplexScript = locCs;
+            // pPrDefault/bidi for RTL locales — sets paragraph direction as
+            // doc-wide default so any paragraph added later inherits RTL
+            // without per-paragraph direction=rtl. Schema-correct location
+            // for the default — rPrDefault/rtl is rejected by the OOXML
+            // validator (CT_RPrDefault excludes <w:rtl/>); pPrDefault/bidi
+            // is the canonical path Word uses.
+            var pPrDefaultBase = isRtl ? new ParagraphPropertiesBaseStyle(new BiDi()) : null;
             stylesPart.Styles = new Styles(
                 new DocDefaults(
                     new RunPropertiesDefault(new RunPropertiesBaseStyle(minDocDefaultFonts)),
-                    new ParagraphPropertiesDefault()
+                    pPrDefaultBase != null
+                        ? new ParagraphPropertiesDefault(pPrDefaultBase)
+                        : new ParagraphPropertiesDefault()
                 )
             );
             stylesPart.Styles.Save();
@@ -307,6 +326,8 @@ public static class BlankDocCreator
                 Default = true,
             };
 
+            // pPrDefault/bidi for RTL locales — see minimal-path comment above.
+            var pPrDefaultBaseN = isRtl ? new ParagraphPropertiesBaseStyle(new BiDi()) : null;
             stylesPart.Styles = new Styles(
                 new DocDefaults(
                     new RunPropertiesDefault(
@@ -316,7 +337,9 @@ public static class BlankDocCreator
                             new FontSizeComplexScript { Val = "22" }
                         )
                     ),
-                    new ParagraphPropertiesDefault()
+                    pPrDefaultBaseN != null
+                        ? new ParagraphPropertiesDefault(pPrDefaultBaseN)
+                        : new ParagraphPropertiesDefault()
                 ),
                 normalStyle
             );

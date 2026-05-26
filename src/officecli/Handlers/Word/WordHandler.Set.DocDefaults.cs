@@ -115,26 +115,38 @@ public partial class WordHandler
             }
             case "docdefaults.rtl" or "docdefaults.direction" or "docdefaults.dir":
             {
-                // <w:rtl/> on rPrDefault makes RTL the document-wide default;
-                // explicit run rtl=false overrides per-run. Mirrors bold/italic.
-                // Stays hand-rolled (does NOT route through ApplyRunFormatting)
-                // because <w:rtl/> in StyleRunProperties context round-trips
-                // as OpenXmlUnknownElement, which RemoveAllChildren<RightToLeftText>
-                // wouldn't catch on a re-toggle. Also handles unknown-element
-                // cleanup so toggle-off after reload works.
-                var rPr = EnsureRunPropsDefault();
+                // <w:bidi/> on pPrDefault makes RTL the document-wide default
+                // for paragraphs.
+                //
+                // Previously written as <w:rtl/> in rPrDefault/rPr — that
+                // location is rejected by the OOXML validator (CT_RPrDefault
+                // does not include <w:rtl/> in its content model) even though
+                // Word still renders it. <w:bidi/> in pPrDefault/pPr is the
+                // canonical "this document's paragraphs are RTL by default"
+                // path that Word emits itself and validates cleanly.
+                var pPr = EnsureParaPropsDefault();
                 bool rtlOn = key.ToLowerInvariant() == "docdefaults.rtl"
                     ? IsTruthy(value)
                     : ParseDirectionRtl(value);
-                rPr.RemoveAllChildren<RightToLeftText>();
-                foreach (var unknown in rPr.ChildElements
-                    .OfType<DocumentFormat.OpenXml.OpenXmlUnknownElement>()
-                    .Where(e => e.LocalName == "rtl").ToList())
-                    unknown.Remove();
-                // <w:rtl/> sits late in CT_RPr (after vertAlign), so AppendChild
-                // is schema-correct here — unlike Bold/Italic which must precede
-                // Color/FontSize.
-                if (rtlOn) rPr.AppendChild(new RightToLeftText());
+                // Typed property setter — OpenXml SDK places <w:bidi/> at its
+                // schema-correct slot (between autoSpaceDN and adjustRightInd,
+                // before spacing/jc) regardless of which other pPr children
+                // already exist.
+                pPr.BiDi = null;
+                // Clean up the legacy rPrDefault/<w:rtl/> shape — files
+                // produced before this migration carry it and a re-toggle
+                // here should leave the doc in the canonical state.
+                var rPrLegacy = _doc.MainDocumentPart?.StyleDefinitionsPart
+                    ?.Styles?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle;
+                if (rPrLegacy != null)
+                {
+                    rPrLegacy.RemoveAllChildren<RightToLeftText>();
+                    foreach (var unknown in rPrLegacy.ChildElements
+                        .OfType<DocumentFormat.OpenXml.OpenXmlUnknownElement>()
+                        .Where(e => e.LocalName == "rtl").ToList())
+                        unknown.Remove();
+                }
+                if (rtlOn) pPr.BiDi = new BiDi();
                 SaveStyles();
                 return true;
             }
@@ -334,14 +346,19 @@ public partial class WordHandler
                 node.Format["docDefaults.bold"] = true;
             if (rPr.GetFirstChild<Italic>() != null)
                 node.Format["docDefaults.italic"] = true;
-            if (rPr.GetFirstChild<RightToLeftText>() != null)
-                node.Format["docDefaults.rtl"] = true;
         }
 
         // Paragraph properties defaults
         var pPr = docDefaults.ParagraphPropertiesDefault?.ParagraphPropertiesBaseStyle;
         if (pPr != null)
         {
+            // docDefaults.rtl reads from pPrDefault/bidi (the schema-correct
+            // location). The legacy rPrDefault/rtl shape produced by older
+            // versions of officecli is silently ignored on readback — set
+            // docdefaults.rtl=true once to migrate the doc into canonical form.
+            if (pPr.GetFirstChild<BiDi>() != null)
+                node.Format["docDefaults.rtl"] = true;
+
             var jc = pPr.GetFirstChild<Justification>();
             if (jc?.Val?.Value != null)
                 node.Format["docDefaults.alignment"] = jc.Val.InnerText;

@@ -15,11 +15,14 @@ static partial class CommandBuilder
         var setFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
         var setPathArg = new Argument<string>("path") { Description = "DOM path to the element. The 'selected' pseudo-path is deprecated for mutations: use `get selected` to capture path(s) first, then `set <path>` (or a `batch` file for multi-select) so the target lives in the command line, not in transient watch-server state." };
         var propsOpt = new Option<string[]>("--prop") { Description = "Property to set (key=value)", AllowMultipleArgumentsPerToken = true };
+        // Selector: top-level alternative to --prop find=VALUE. r"..." prefix triggers regex (project-wide CONSISTENCY(find-regex)).
+        var findOpt = new Option<string?>("--find") { Description = "Find this text/pattern (literal substring; `r\"...\"` prefix enables regex). Equivalent to --prop find=VALUE." };
 
         var setCommand = new Command("set", "Modify a document node's properties") { TreatUnmatchedTokensAsErrors = false };
         setCommand.Add(setFileArg);
         setCommand.Add(setPathArg);
         setCommand.Add(propsOpt);
+        setCommand.Add(findOpt);
         setCommand.Add(jsonOption);
         setCommand.Add(forceOption);
 
@@ -28,7 +31,32 @@ static partial class CommandBuilder
             var file = result.GetValue(setFileArg)!;
             var path = result.GetValue(setPathArg)!;
             var props = result.GetValue(propsOpt);
+            var findFlag = result.GetValue(findOpt);
             var force = result.GetValue(forceOption);
+
+            // Selector-flag migration: --find is the canonical top-level form;
+            // --prop find=VALUE remains accepted but emits a deprecation hint.
+            // Merging --find into the props array (as "find=<value>") keeps
+            // every downstream consumer (handlers, resident server, batch)
+            // working with zero changes — the flag is pure syntactic sugar.
+            var hasPropFind = props?.Any(p => p.StartsWith("find=", StringComparison.OrdinalIgnoreCase)) == true;
+            if (!string.IsNullOrEmpty(findFlag))
+            {
+                if (hasPropFind)
+                {
+                    var err = "Cannot combine --find and --prop find=. Use --find only.";
+                    if (json) Console.WriteLine(OutputFormatter.WrapEnvelopeError(err));
+                    else Console.Error.WriteLine($"Error: {err}");
+                    return 1;
+                }
+                var merged = props?.ToList() ?? new List<string>();
+                merged.Add($"find={findFlag}");
+                props = merged.ToArray();
+            }
+            else if (hasPropFind)
+            {
+                Console.Error.WriteLine("Hint: prefer `--find VALUE` over `--prop find=VALUE` (selector keys are migrating out of --prop).");
+            }
 
             // BUG-BT-R5-01: support the `selected` pseudo-path (mark and get
             // already do). Expand to the first selected path and recursively

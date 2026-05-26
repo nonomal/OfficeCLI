@@ -164,26 +164,26 @@ static partial class CommandBuilder
         var queryFileArg = new Argument<FileInfo>("file") { Description = "Office document path (required even with open/close mode)" };
         var selectorArg = new Argument<string>("selector") { Description = "CSS-like selector (e.g. paragraph[style=Normal] > run[font!=Arial])" };
 
-        var queryTextOpt = new Option<string?>("--text") { Description = "Filter results to elements containing this text (case-insensitive)" };
+        var queryFindOpt = new Option<string?>("--find") { Description = "Filter results to elements containing this text (case-insensitive substring)" };
 
         var queryCommand = new Command("query", "Query document elements with CSS-like selectors");
         queryCommand.Add(queryFileArg);
         queryCommand.Add(selectorArg);
         queryCommand.Add(jsonOption);
-        queryCommand.Add(queryTextOpt);
+        queryCommand.Add(queryFindOpt);
 
         queryCommand.SetAction(result => { var json = result.GetValue(jsonOption); return SafeRun(() =>
         {
             var file = result.GetValue(queryFileArg)!;
             var selector = result.GetValue(selectorArg)!;
-            var textFilter = result.GetValue(queryTextOpt);
+            var textFilter = result.GetValue(queryFindOpt);
 
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "query";
                 req.Json = json;
                 req.Args["selector"] = selector;
-                if (textFilter != null) req.Args["text"] = textFilter;
+                if (textFilter != null) req.Args["find"] = textFilter;
             }, json) is {} rc) return rc;
 
             var format = json ? OutputFormat.Json : OutputFormat.Text;

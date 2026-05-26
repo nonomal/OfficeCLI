@@ -1490,7 +1490,7 @@ public class ResidentServer : IDisposable
             filters = AttributeFilter.NormalizeKeys(filters, ExcelHandler.ResolveCellAttributeAlias);
         }
         var (results, warnings) = AttributeFilter.ApplyWithWarnings(_handler.Query(selector), filters);
-        var textFilter = req.GetArgOrNull("text");
+        var textFilter = req.GetArgOrNull("find");
         if (!string.IsNullOrEmpty(textFilter))
             results = results.Where(n => n.Text != null && n.Text.Contains(textFilter, StringComparison.OrdinalIgnoreCase)).ToList();
         // CONSISTENCY(query-json-children): hydrate Children from Get(path, depth=1)

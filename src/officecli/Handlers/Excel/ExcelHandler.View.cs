@@ -170,7 +170,13 @@ public partial class ExcelHandler
             int oleCount = CountSheetOleObjects(worksheetPart);
             var oleInfo = oleCount > 0 ? $", {oleCount} ole object(s)" : "";
 
-            sb.AppendLine($"\u251c\u2500\u2500 \"{name}\" ({rowCount} rows \u00d7 {colCount} cols{formulaInfo}{errorInfo}{pivotInfo}{oleInfo})");
+            int tableCount = worksheetPart.TableDefinitionParts.Count();
+            var tableInfo = tableCount > 0 ? $", {tableCount} table(s)" : "";
+
+            int chartCount = worksheetPart.DrawingsPart is { } dp ? GetExcelCharts(dp).Count : 0;
+            var chartInfo = chartCount > 0 ? $", {chartCount} chart(s)" : "";
+
+            sb.AppendLine($"\u251c\u2500\u2500 \"{name}\" ({rowCount} rows \u00d7 {colCount} cols{formulaInfo}{errorInfo}{tableInfo}{chartInfo}{pivotInfo}{oleInfo})");
         }
 
         return sb.ToString().TrimEnd();
@@ -339,6 +345,8 @@ public partial class ExcelHandler
                     if (IsExcelErrorValue(cell, GetCellDisplayValue(cell))) errorCount++;
 
             int oleCount = CountSheetOleObjects(worksheetPart);
+            int tableCount = worksheetPart.TableDefinitionParts.Count();
+            int chartCount = worksheetPart.DrawingsPart is { } dp ? GetExcelCharts(dp).Count : 0;
             var sheetObj = new JsonObject
             {
                 ["name"] = name,
@@ -346,6 +354,8 @@ public partial class ExcelHandler
                 ["cols"] = colCount,
                 ["formulas"] = formulaCount,
                 ["errorCells"] = errorCount,
+                ["tables"] = tableCount,
+                ["charts"] = chartCount,
                 ["oleObjects"] = oleCount
             };
             sheetsArray.Add((JsonNode)sheetObj);

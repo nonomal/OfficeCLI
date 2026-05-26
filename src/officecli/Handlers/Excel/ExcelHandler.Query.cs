@@ -1169,17 +1169,31 @@ public partial class ExcelHandler
             return results;
         }
 
-        // Handle table queries
+        // Handle table queries.
+        // CONSISTENCY(xlsx/detected-table): `listobject` returns only real
+        // ListObjects (OOXML <table> elements). `table` additionally returns
+        // heuristically detected table-shaped blocks (type="detectedtable",
+        // stable=false) so an agent gets both real and inferred tables in one
+        // call. Detection never fabricates /table[N] paths — detected blocks
+        // carry honest range paths (/Sheet!A1:D10).
         if (elementName is "table" or "listobject")
         {
+            bool includeDetected = elementName == "table";
             foreach (var (sheetName, worksheetPart) in GetWorksheets())
             {
                 if (parsed.Sheet != null && !sheetName.Equals(parsed.Sheet, StringComparison.OrdinalIgnoreCase))
                     continue;
 
                 var tableParts = worksheetPart.TableDefinitionParts.ToList();
+                var realRanges = new List<(int c1, int r1, int c2, int r2)>();
                 for (int i = 0; i < tableParts.Count; i++)
+                {
                     results.Add(TableToNode(sheetName, worksheetPart, i + 1, 0));
+                    if (includeDetected && TryParseRange(tableParts[i].Table?.Reference?.Value, out var rng))
+                        realRanges.Add(rng);
+                }
+                if (includeDetected)
+                    results.AddRange(DetectTables(sheetName, worksheetPart, realRanges));
             }
             return results;
         }
@@ -1760,4 +1774,136 @@ public partial class ExcelHandler
         }
         return null;
     }
+
+    // CONSISTENCY(xlsx/detected-table): strict, high-precision detection of
+    // table-shaped data blocks that are NOT real ListObjects. Design goals
+    // (in priority order): (1) whatever is reported is almost certainly a real
+    // table — favour false negatives over false positives; (2) fast — relies on
+    // Excel's sparse cell storage, so cost is O(non-empty cells), independent of
+    // the declared sheet dimension; (3) report every qualifying block on the
+    // sheet. Detected blocks carry honest range paths and stable=false.
+    //
+    // A block qualifies only if ALL hold:
+    //   - its top-left anchor has no occupied cell directly above or to the left
+    //   - the anchor row is a contiguous run of >= 2 non-empty TEXT cells (the
+    //     header) — text = non-empty, not numeric, not a formula
+    //   - at least one data row exists below the header within the header span
+    //   - it does not overlap any real ListObject range (dedup)
+    private List<DocumentNode> DetectTables(
+        string sheetName, WorksheetPart worksheetPart,
+        List<(int c1, int r1, int c2, int r2)> realRanges)
+    {
+        var results = new List<DocumentNode>();
+        var sheetData = GetSheet(worksheetPart).GetFirstChild<SheetData>();
+        if (sheetData == null) return results;
+
+        // 1. One sparse pass: occupied map keyed by (col,row) → (value, isText).
+        var occupied = new Dictionary<(int col, int row), (string val, bool isText)>();
+        foreach (var row in sheetData.Elements<Row>())
+        {
+            foreach (var cell in row.Elements<Cell>())
+            {
+                if (cell.CellReference?.Value is not string cref) continue;
+                int colIdx, rowNum;
+                try { var (cn, rn) = ParseCellReference(cref); colIdx = ColumnNameToIndex(cn); rowNum = rn; }
+                catch { continue; }
+                var val = GetCellDisplayValue(cell);
+                if (string.IsNullOrEmpty(val)) continue;
+                bool isText = cell.CellFormula == null
+                    && !double.TryParse(val, System.Globalization.NumberStyles.Any,
+                                        System.Globalization.CultureInfo.InvariantCulture, out _);
+                occupied[(colIdx, rowNum)] = (val, isText);
+            }
+        }
+        if (occupied.Count == 0) return results;
+
+        // 2. Top-left anchors: occupied, nothing above, nothing to the left.
+        var anchors = occupied.Keys
+            .Where(k => !occupied.ContainsKey((k.col, k.row - 1))
+                     && !occupied.ContainsKey((k.col - 1, k.row)))
+            .OrderBy(k => k.row).ThenBy(k => k.col)
+            .ToList();
+
+        var claimed = new HashSet<(int, int)>();
+
+        foreach (var (ac, ar) in anchors)
+        {
+            if (claimed.Contains((ac, ar))) continue;
+
+            // 3. Header span: contiguous non-empty TEXT cells rightward from anchor.
+            int c = ac;
+            while (occupied.TryGetValue((c, ar), out var hc) && hc.isText) c++;
+            int headerEndCol = c - 1;
+            if (headerEndCol - ac + 1 < 2) continue;  // strict: >= 2 columns
+
+            // 4. Row extent: scan down while any cell within the header span is
+            //    occupied. A fully blank row is the block boundary.
+            int lastDataRow = ar;
+            for (int r = ar + 1; ; r++)
+            {
+                bool rowHasData = false;
+                for (int cc = ac; cc <= headerEndCol; cc++)
+                    if (occupied.ContainsKey((cc, r))) { rowHasData = true; break; }
+                if (!rowHasData) break;
+                lastDataRow = r;
+            }
+            if (lastDataRow == ar) continue;  // strict: >= 1 data row
+
+            // 5. Dedup against real ListObjects.
+            var block = (ac, ar, headerEndCol, lastDataRow);
+            if (realRanges.Any(rr => RangesOverlap(rr, block))) continue;
+
+            for (int rr2 = ar; rr2 <= lastDataRow; rr2++)
+                for (int cc = ac; cc <= headerEndCol; cc++)
+                    claimed.Add((cc, rr2));
+
+            var colNames = new List<string>();
+            for (int cc = ac; cc <= headerEndCol; cc++)
+                colNames.Add(occupied.TryGetValue((cc, ar), out var hv) ? hv.val : "");
+
+            var startRef = IndexToColumnName(ac) + ar;
+            var endRef = IndexToColumnName(headerEndCol) + lastDataRow;
+            var rangeRef = $"{startRef}:{endRef}";
+
+            var node = new DocumentNode
+            {
+                Path = $"/{sheetName}/{rangeRef}",
+                Type = "detectedtable",
+                Text = colNames.FirstOrDefault() ?? "",
+                Preview = rangeRef,
+            };
+            node.Format["source"] = "header-sniff";
+            node.Format["stable"] = false;
+            node.Format["ref"] = rangeRef;
+            node.Format["columns"] = string.Join(",", colNames);
+            node.Format["dataRange"] = $"{IndexToColumnName(ac)}{ar + 1}:{endRef}";
+            node.ChildCount = colNames.Count;
+            results.Add(node);
+        }
+
+        return results;
+    }
+
+    private static bool TryParseRange(string? rangeRef, out (int c1, int r1, int c2, int r2) range)
+    {
+        range = default;
+        if (string.IsNullOrEmpty(rangeRef)) return false;
+        var parts = rangeRef.Split(':');
+        try
+        {
+            var (c1, r1) = ParseCellReference(parts[0].Replace("$", ""));
+            if (parts.Length == 1)
+            {
+                range = (ColumnNameToIndex(c1), r1, ColumnNameToIndex(c1), r1);
+                return true;
+            }
+            var (c2, r2) = ParseCellReference(parts[1].Replace("$", ""));
+            range = (ColumnNameToIndex(c1), r1, ColumnNameToIndex(c2), r2);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    private static bool RangesOverlap((int c1, int r1, int c2, int r2) a, (int c1, int r1, int c2, int r2) b)
+        => a.c1 <= b.c2 && b.c1 <= a.c2 && a.r1 <= b.r2 && b.r1 <= a.r2;
 }

@@ -587,15 +587,9 @@ internal static class OleHelper
         }
 
         // Wrap in a CFB container with a single stream named "\x01Ole10Native".
-        // Default (non-transacted) mode writes through on dispose; calling
-        // Commit() in that mode throws NotSupportedException.
-        using var cfbMs = new MemoryStream();
-        using (var root = OpenMcdf.RootStorage.Create(cfbMs, OpenMcdf.Version.V3, OpenMcdf.StorageModeFlags.LeaveOpen))
-        {
-            using var cfbStream = root.CreateStream("\u0001Ole10Native");
-            cfbStream.Write(streamBody, 0, streamBody.Length);
-        }
-        return cfbMs.ToArray();
+        // The CFB writer is owned in-tree (Core/CompoundFile.cs) so there is
+        // no third-party structured-storage dependency.
+        return CompoundFile.WriteSingleStream("\u0001Ole10Native", streamBody);
     }
 
     /// <summary>
@@ -616,27 +610,23 @@ internal static class OleHelper
 
         try
         {
-            using var ms = new MemoryStream(raw, writable: false);
-            using var root = OpenMcdf.RootStorage.Open(ms, OpenMcdf.StorageModeFlags.LeaveOpen);
-            if (!root.TryOpenStream("\u0001Ole10Native", out var nativeStream) || nativeStream == null)
-                return raw;
-            using (nativeStream)
-            {
-                // Parse Ole10Native header: uint32 totalSize, uint16 version,
-                // cstring name, cstring path, 8 bytes reserved, cstring temp,
-                // uint32 payloadSize, bytes payload.
-                using var br = new BinaryReader(nativeStream);
-                br.ReadUInt32();          // totalSize
-                br.ReadUInt16();          // version
-                ReadCString(br);          // displayName
-                ReadCString(br);          // origPath
-                br.ReadUInt32();          // reserved1
-                br.ReadUInt32();          // reserved2
-                ReadCString(br);          // tempPath
-                uint payloadSize = br.ReadUInt32();
-                if (payloadSize > int.MaxValue) return raw;
-                return br.ReadBytes((int)payloadSize);
-            }
+            byte[]? native = CompoundFile.ReadStream(raw, "\u0001Ole10Native");
+            if (native == null) return raw;
+
+            // Parse Ole10Native header: uint32 totalSize, uint16 version,
+            // cstring name, cstring path, 8 bytes reserved, cstring temp,
+            // uint32 payloadSize, bytes payload.
+            using var br = new BinaryReader(new MemoryStream(native, writable: false));
+            br.ReadUInt32();          // totalSize
+            br.ReadUInt16();          // version
+            ReadCString(br);          // displayName
+            ReadCString(br);          // origPath
+            br.ReadUInt32();          // reserved1
+            br.ReadUInt32();          // reserved2
+            ReadCString(br);          // tempPath
+            uint payloadSize = br.ReadUInt32();
+            if (payloadSize > int.MaxValue) return raw;
+            return br.ReadBytes((int)payloadSize);
         }
         catch
         {

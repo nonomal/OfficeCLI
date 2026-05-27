@@ -2078,12 +2078,13 @@ public partial class PowerPointHandler
                     return false;
                 // Regular entrance/exit/emphasis: SDK PresetClass set + PresetId set.
                 if (ctn.PresetClass != null && ctn.PresetId != null) return true;
-                // Motion path: SDK has no enum for "motion", so it's stored as a
-                // raw attribute and PresetClass parses to null. Match via the
-                // raw attribute + AnimateMotion descendant.
+                // Motion path: emitted as presetClass="path" (legacy builds wrote
+                // "motion"). The "path" form parses into the SDK PresetClass enum
+                // and is already caught by the PresetId branch above, but keep an
+                // explicit match for the legacy "motion" raw attribute too.
                 var rawCls = ctn.GetAttributes()
                     .FirstOrDefault(a => a.LocalName == "presetClass").Value;
-                if (rawCls == "motion" && ctn.Descendants<AnimateMotion>().Any())
+                if (rawCls is "path" or "motion" && ctn.Descendants<AnimateMotion>().Any())
                     return true;
                 return false;
             })
@@ -2156,9 +2157,12 @@ public partial class PowerPointHandler
         // Surface as class=motion + path=<preset|"custom"> + d=<raw path> so
         // round-trip through Set/Get/Remove uses the same path= vocabulary as
         // AddMotionAnimation. CONSISTENCY(animation-motion-presets).
+        // Motion paths now emit presetClass="path" (legacy builds wrote "motion").
+        // Both carry a child p:animMotion; require it so a non-motion "path"-class
+        // effect is never misclassified. CLI vocabulary stays class=motion.
         var rawClsAttr = effectCTn.GetAttributes()
             .FirstOrDefault(a => a.LocalName == "presetClass").Value;
-        if (rawClsAttr == "motion")
+        if (rawClsAttr is "path" or "motion" && effectCTn.Descendants<AnimateMotion>().Any())
         {
             var animMotion = effectCTn.Descendants<AnimateMotion>().FirstOrDefault();
             var pathStr = animMotion?.Path?.Value ?? "";

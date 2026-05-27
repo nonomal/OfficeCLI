@@ -1881,7 +1881,11 @@ public partial class PowerPointHandler
             StartConditionList = stCond,
             ChildTimeNodeList = new ChildTimeNodeList(animMotion)
         };
-        effectCTn.SetAttribute(new OpenXmlAttribute("presetClass", string.Empty, "motion"));
+        // ST_TLTimeNodePresetClassType: motion paths use "path" (entr/exit/emph/
+        // path/verb/mediacall). "motion" is NOT a valid enum value — PowerPoint
+        // rejects the whole file (0x80070570). EMIT "path" only. Readback/remove/
+        // set still recognize legacy "motion" for files written by older builds.
+        effectCTn.SetAttribute(new OpenXmlAttribute("presetClass", string.Empty, "path"));
         if (easingAccel > 0) effectCTn.Acceleration = easingAccel;
         if (easingDecel > 0) effectCTn.Deceleration = easingDecel;
 
@@ -1929,9 +1933,12 @@ public partial class PowerPointHandler
                 return null;
             })
             .Where(n => n != null)
-            // Only remove groups that contain a motion presetClass
+            // Only remove groups that contain a motion presetClass. Match the
+            // canonical "path" (now emitted) and legacy "motion" (older builds).
             .Where(n => n!.Descendants<CommonTimeNode>()
-                .Any(c => c.GetAttributes().Any(a => a.LocalName == "presetClass" && a.Value == "motion")))
+                .Any(c => c.GetAttributes().Any(a => a.LocalName == "presetClass"
+                    && a.Value is "path" or "motion")
+                    && c.Descendants<AnimateMotion>().Any()))
             .Distinct().ToList();
 
         foreach (var n in toRemove) n!.Remove();
@@ -2072,15 +2079,21 @@ public partial class PowerPointHandler
         foreach (var shapeTarget in allShapeTargets)
         {
             // Find the effect CommonTimeNode (the one with PresetClass + PresetId)
-            // Skip motion path CTns (presetClass="motion" — not a valid SDK enum)
+            // Skip motion path CTns — emitted as presetClass="path", legacy
+            // builds wrote "motion". Both carry a child p:animMotion; the
+            // entrance/exit/emphasis effects never do, so disambiguate on it.
             CommonTimeNode? effectCTn = null;
             OpenXmlElement? cur = shapeTarget;
             while (cur != null)
             {
-                if (cur is CommonTimeNode ctn && ctn.PresetClass != null && ctn.PresetId != null)
+                if (cur is CommonTimeNode ctn && ctn.PresetId != null
+                    && (ctn.PresetClass != null
+                        || ctn.GetAttributes().Any(a => a.LocalName == "presetClass")))
                 {
                     var rawCls2 = ctn.GetAttributes().FirstOrDefault(a => a.LocalName == "presetClass").Value ?? "";
-                    if (rawCls2 != "motion") { effectCTn = ctn; break; }
+                    bool isMotion = ctn.Descendants<AnimateMotion>().Any()
+                        && rawCls2 is "path" or "motion";
+                    if (!isMotion) { effectCTn = ctn; break; }
                 }
                 cur = cur.Parent;
             }
@@ -2133,7 +2146,8 @@ public partial class PowerPointHandler
                 if (cur is CommonTimeNode ctn)
                 {
                     var rawCls = ctn.GetAttributes().FirstOrDefault(a => a.LocalName == "presetClass").Value ?? "";
-                    if (rawCls == "motion")
+                    // "path" (canonical emit) or "motion" (legacy) + child animMotion
+                    if (rawCls is "path" or "motion" && ctn.Descendants<AnimateMotion>().Any())
                     {
                         var animMotion = ctn.Descendants<AnimateMotion>().FirstOrDefault();
                         if (animMotion?.Path?.Value != null)

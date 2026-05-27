@@ -1294,8 +1294,9 @@ public static partial class PptxBatchEmitter
     // Direction was added to PopulateAnimationNode in this same change — without
     // it, fly-down would round-trip as fly-up (AddAnimation default).
     //
-    // Motion-path animations are excluded by the Query (presetClass="motion"
-    // never surfaces under selector "animation"). Other exotic timing
+    // Motion-path animations are routed through the verbatim raw-timing
+    // passthrough (flagged exotic on presetClass="path" / <p:animMotion>), so
+    // they are not re-emitted here. Other exotic timing
     // constructs (sequence groupings, conditional triggers) are silently
     // dropped — the visible effects round-trip.
     // Per-shape animation emit. Accepts a pre-filtered list of animation

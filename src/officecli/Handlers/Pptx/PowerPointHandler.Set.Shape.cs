@@ -1238,7 +1238,9 @@ public partial class PowerPointHandler
             })
             .Where(n => n != null
                 && n.Descendants<CommonTimeNode>().Any(c =>
-                    c.GetAttributes().Any(a => a.LocalName == "presetClass" && a.Value == "motion")))
+                    c.GetAttributes().Any(a => a.LocalName == "presetClass"
+                        && a.Value is "path" or "motion")
+                    && c.Descendants<AnimateMotion>().Any()))
             .Distinct()
             .ToList();
         foreach (var n in toRemove) n!.Remove();

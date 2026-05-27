@@ -1531,6 +1531,20 @@ public partial class ExcelHandler
                 if (computedValue != null)
                     node.Format["computedValue"] = computedValue;
             }
+            // R10-1: a freshly-added formula cell has no DataType and no cached
+            // <x:v>, so the type heuristic above defaulted to Number. When the
+            // evaluator produced a non-numeric result (e.g. IF(...,"yes","no"),
+            // CONCATENATE(...)), classify as String — the same verdict Excel
+            // writes once it caches the value (t="str"). Only override the
+            // null-CellValue Number default; never touch an explicit DataType.
+            if (cell.DataType?.HasValue != true
+                && string.IsNullOrEmpty(rawCached)
+                && !string.IsNullOrEmpty(computedValue)
+                && !double.TryParse(computedValue, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out _))
+            {
+                node.Format["type"] = "String";
+            }
             node.Format["evaluated"] = !string.IsNullOrEmpty(rawCached) || computedValue != null;
         }
         // Array formula readback — keys match Set input

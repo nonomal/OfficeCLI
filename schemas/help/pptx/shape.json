@@ -22,12 +22,12 @@
   "properties": {
     "size": {
       "type": "font-size",
-      "description": "font size — Add/Set forwards to the first run; Get exposes the inheritance-resolved value as effective.size, not bare size.",
+      "description": "font size — Add/Set forwards to the first run; Get returns the bare size when every run shares the same explicit FontSize (non-mixed). When sizes are mixed or no run carries an explicit size, bare size is suppressed and the inheritance-resolved effective.size is emitted instead.",
       "aliases": ["fontSize", "fontsize", "font.size"],
-      "add": true, "set": true, "get": false,
+      "add": true, "set": true, "get": true,
       "examples": ["--prop size=14", "--prop size=14pt", "--prop size=10.5pt"],
-      "readback": "n/a at shape level — read effective.size on the shape, or size on the inner run",
-      "enforcement": "strict"
+      "readback": "unit-qualified pt (e.g. \"32pt\") when all runs share one explicit FontSize; suppressed when sizes are mixed (read per-run size on the inner run) or absent (read effective.size)",
+      "enforcement": "report"
     },
     "evaluated": {
       "type": "bool",

@@ -125,7 +125,10 @@ public partial class ExcelHandler
         var cfWorksheet = FindWorksheet(cfSheetName)
             ?? throw new ArgumentException($"Sheet not found: {cfSheetName}");
 
-        var sqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+        // R22-2: a path-tail range (/Sheet1/A1:A3) is the sqref fallback before
+        // the hardcoded "A1:A10" — previously csSegments[1] was silently ignored.
+        var cfPathRange = cfSegments.Length > 1 && !string.IsNullOrEmpty(cfSegments[1]) ? cfSegments[1] : "A1:A10";
+        var sqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", cfPathRange), "ref");
         var minVal = properties.ContainsKey("min") ? properties["min"] : (string?)null;
         var maxVal = properties.ContainsKey("max") ? properties["max"] : (string?)null;
         var cfColor = properties.GetValueOrDefault("color", "638EC6");
@@ -271,8 +274,10 @@ public partial class ExcelHandler
         var csWorksheet = FindWorksheet(csSheetName)
             ?? throw new ArgumentException($"Sheet not found: {csSheetName}");
 
-        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/formulacf branches
-        var csSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/formulacf branches.
+        // R22-2: path-tail range is the fallback before the hardcoded default.
+        var csPathRange = csSegments.Length > 1 && !string.IsNullOrEmpty(csSegments[1]) ? csSegments[1] : "A1:A10";
+        var csSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", csPathRange), "ref");
         var minColor = properties.GetValueOrDefault("mincolor", "F8696B");
         var maxColor = properties.GetValueOrDefault("maxcolor", "63BE7B");
         var midColor = properties.GetValueOrDefault("midcolor");
@@ -327,8 +332,10 @@ public partial class ExcelHandler
         var isWorksheet = FindWorksheet(isSheetName)
             ?? throw new ArgumentException($"Sheet not found: {isSheetName}");
 
-        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/formulacf branches
-        var isSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/formulacf branches.
+        // R22-2: path-tail range is the fallback before the hardcoded default.
+        var isPathRange = isSegments.Length > 1 && !string.IsNullOrEmpty(isSegments[1]) ? isSegments[1] : "A1:A10";
+        var isSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", isPathRange), "ref");
         var iconSetName = properties.GetValueOrDefault("iconset") ?? properties.GetValueOrDefault("icons", "3TrafficLights1");
         var reverse = properties.TryGetValue("reverse", out var revVal) && IsTruthy(revVal);
         var showValue = !properties.TryGetValue("showvalue", out var svVal) || IsTruthy(svVal);
@@ -387,8 +394,10 @@ public partial class ExcelHandler
         var fcfWorksheet = FindWorksheet(fcfSheetName)
             ?? throw new ArgumentException($"Sheet not found: {fcfSheetName}");
 
-        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches
-        var fcfSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches.
+        // R22-2: path-tail range is the fallback before the hardcoded default.
+        var fcfPathRange = fcfSegments.Length > 1 && !string.IsNullOrEmpty(fcfSegments[1]) ? fcfSegments[1] : "A1:A10";
+        var fcfSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", fcfPathRange), "ref");
         var fcfFormula = properties.GetValueOrDefault("formula")
             ?? throw new ArgumentException("Formula-based conditional formatting requires 'formula' property (e.g. formula=$A1>100)");
 
@@ -460,10 +469,12 @@ public partial class ExcelHandler
         var cisWorksheet = FindWorksheet(cisSheetName)
             ?? throw new ArgumentException($"Sheet not found: {cisSheetName}");
 
-        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches
+        // CONSISTENCY(cf-sqref): three-level fallback matches dataBar/colorScale branches.
+        // R22-2: path-tail range is the fallback before the hardcoded default.
+        var cisPathRange = cisSegments.Length > 1 && !string.IsNullOrEmpty(cisSegments[1]) ? cisSegments[1] : "A1:A10";
         var cisSqref = ValidateSqref(properties.GetValueOrDefault("sqref")
             ?? properties.GetValueOrDefault("range")
-            ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+            ?? properties.GetValueOrDefault("ref", cisPathRange), "ref");
         var opStr = (properties.GetValueOrDefault("operator") ?? "greaterThan").Trim();
         var opVal = opStr.ToLowerInvariant() switch
         {
@@ -569,7 +580,9 @@ public partial class ExcelHandler
         var cfNewSheetName = cfNewSegments[0];
         var cfNewWorksheet = FindWorksheet(cfNewSheetName)
             ?? throw new ArgumentException($"Sheet not found: {cfNewSheetName}");
-        var cfNewSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", "A1:A10"), "ref");
+        // R22-2: path-tail range is the fallback before the hardcoded default.
+        var cfNewPathRange = cfNewSegments.Length > 1 && !string.IsNullOrEmpty(cfNewSegments[1]) ? cfNewSegments[1] : "A1:A10";
+        var cfNewSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", cfNewPathRange), "ref");
         var cfNewPriority = NextCfPriority(GetSheet(cfNewWorksheet));
 
         ConditionalFormattingRule cfNewRule;

@@ -287,6 +287,7 @@ officecli set "$OUTPUT" '/slide[6]' --name="s6-cta-title"
 officecli set "$OUTPUT" '/slide[6]' --name="s6-cta-desc" 
   --prop x=4.5cm --prop y=10cm
 
+officecli close "$OUTPUT"
 echo "Validation..."
 officecli validate "$OUTPUT"
-officecli view outline "$OUTPUT"
+officecli view "$OUTPUT" outline

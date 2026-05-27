@@ -172,6 +172,7 @@ cat << 'JSON_EOF' | officecli batch "$FILE"
 ]
 JSON_EOF
 
+officecli close "$FILE"
 echo "Done building. Validating PPT..."
 officecli validate "$FILE"
 officecli view "$FILE" outline

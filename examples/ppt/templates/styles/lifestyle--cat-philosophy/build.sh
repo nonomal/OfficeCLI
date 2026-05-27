@@ -122,4 +122,5 @@ echo '[
   {"command":"add","parent":"/slide[5]","type":"shape","props":{"name":"s5-sub","text":"今天你给主子开罐头了吗？","font":"Source Han Sans","size":"32","color":"4A3B32","align":"center","x":"4cm","y":"11cm","width":"26cm","height":"2cm"}}
 ]' | officecli batch "$FILE"
 
+officecli close "$FILE"
 echo "Done."

@@ -34,4 +34,5 @@ officecli add "$FILE" /slide[4] --type shape --prop preset=ellipse --prop x=0cm 
 officecli add "$FILE" /slide[4] --type shape --prop preset=rect --prop text="结论：同化完成度 99%" --prop x=18cm --prop y=6cm --prop width=14cm --prop height=3cm --prop color=FFFFFF --prop size=36 --prop bold=true --prop align=left --prop fill=none --prop line=none --prop name="ConcTitle"
 officecli add "$FILE" /slide[4] --type shape --prop preset=rect --prop text="人类已自愿成为“铲屎官”。\n地球占领计划基本达成。\n下一步：控制罐头生产线。" --prop x=18cm --prop y=9.5cm --prop width=14cm --prop height=6cm --prop color=FFFFFF --prop size=24 --prop align=left --prop fill=none --prop line=none --prop name="ConcText"
 
+officecli close "$FILE"
 echo "Presentation created successfully: $FILE"

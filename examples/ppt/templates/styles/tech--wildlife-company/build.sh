@@ -282,6 +282,7 @@ cat slide7.json | officecli batch "$FILENAME"
 echo "Slide 7 complete (cta)"
 
 # Validate
+officecli close "$FILENAME"
 echo "Validating PPT..."
 officecli validate "$FILENAME"
 

@@ -125,6 +125,8 @@ slide5 = [
   {"command":"set","path":"/slide[5]/shape[25]","props":{"x":"4cm","y":"11cm"}}
 ]
 run_batch("slide5", slide5)
+
+subprocess.run(["officecli", "close", file_name], check=True)
 PYEOF
 
 python3 build_internal.py

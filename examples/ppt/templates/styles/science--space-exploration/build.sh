@@ -248,6 +248,7 @@ cat << 'BATCH_EOF' | officecli batch "$FILENAME"
 BATCH_EOF
 
 # ===== Validate =====
+officecli close "$FILENAME"
 echo "Validating..."
 officecli validate "$FILENAME"
 

@@ -158,5 +158,6 @@ cat commands.json | officecli batch "AURA_COFFEE.pptx"
 
 # 4. Clean up
 rm commands.json
+officecli close "AURA_COFFEE.pptx"
 echo "Build complete."
 

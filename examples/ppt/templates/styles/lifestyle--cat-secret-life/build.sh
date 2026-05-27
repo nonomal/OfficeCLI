@@ -233,6 +233,7 @@ officecli set "$PPT_FILE" '/slide[6]/shape[6]' --prop x=16cm --prop y=3cm --prop
 officecli set "$PPT_FILE" '/slide[6]/shape[28]' --prop x=3.9cm --prop y=6.5cm
 officecli set "$PPT_FILE" '/slide[6]/shape[29]' --prop x=3.9cm --prop y=9.5cm
 
+officecli close "$PPT_FILE"
 echo "Validating PPT..."
 officecli validate "$PPT_FILE"
 officecli view "$PPT_FILE" outline

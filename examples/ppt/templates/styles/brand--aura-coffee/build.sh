@@ -145,6 +145,7 @@ cat << 'JSON_EOF' > s5.json
 JSON_EOF
 officecli batch "$FILE" < s5.json
 
+officecli close "$FILE"
 echo "Validating PPT..."
 officecli validate "$FILE"
-officecli view outline "$FILE"
+officecli view "$FILE" outline

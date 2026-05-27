@@ -665,6 +665,7 @@ officecli raw-set "$OUT" /document --xpath "//w:body/w:sectPr" --action insertbe
 echo "Done: Scenario 10: Z-order Stacking"
 
 # ==================== Verification ====================
+officecli close "$OUT"
 echo ""
 echo "=========================================="
 echo "Document generated: $OUT"

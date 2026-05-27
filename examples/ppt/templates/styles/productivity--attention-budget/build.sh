@@ -280,3 +280,5 @@ cat <<'JSON' | officecli batch "$OUT"
   {"command":"set","path":"/slide[7]/shape[56]","props":{"x":"3.2cm","y":"16.6cm"}}
 ]
 JSON
+
+officecli close "$OUT"

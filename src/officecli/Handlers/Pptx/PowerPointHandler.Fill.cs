@@ -231,9 +231,9 @@ public partial class PowerPointHandler
     /// <summary>
     /// Apply pattern fill to ShapeProperties.
     /// Format: "<preset>" or "<preset>:<fgColor>" or "<preset>:<fgColor>:<bgColor>"
-    ///   preset: e.g. pct25, ltHorz, dkCross, weave, zigZag (Drawing.PresetPatternValues)
+    ///   preset: e.g. pct25, ltHorz, cross, weave, zigZag (Drawing.PresetPatternValues)
     ///   fgColor / bgColor: lenient hex/named/scheme color (defaults: fg=000000, bg=FFFFFF)
-    /// Examples: "pct25", "ltHorz:FF0000", "dkCross:red:white"
+    /// Examples: "pct25", "ltHorz:FF0000", "cross:red:white"
     /// </summary>
     private static void ApplyPatternFill(ShapeProperties spPr, string value)
     {
@@ -327,7 +327,7 @@ public partial class PowerPointHandler
             "cross" => Drawing.PresetPatternValues.Cross,
             "diagcross" => Drawing.PresetPatternValues.DiagonalCross,
             _ => throw new ArgumentException(
-                $"Unknown pattern preset: '{name}'. Examples: pct25, ltHorz, dkCross, weave, zigZag, wave, diagBrick, plaid.")
+                $"Unknown pattern preset: '{name}'. Examples: pct25, ltHorz, cross, diagCross, weave, zigZag, wave, diagBrick, plaid.")
         };
     }
 

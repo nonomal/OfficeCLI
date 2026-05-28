@@ -86,9 +86,12 @@
     },
     "format": {
       "type": "string",
-      "description": "switch-style format (e.g. '\\@ \"yyyy-MM-dd\"' for date).",
+      "description": "field format — bare picture string (e.g. 'yyyy-MM-dd' for DATE, '0.00%' for numeric). The handler wraps it into the OOXML '\\@ \"...\"' switch automatically; do NOT pass the '\\@' prefix yourself.",
       "add": true, "set": true, "get": true,
-      "examples": ["--prop format=\"yyyy-MM-dd\""],
+      "examples": [
+        "--prop format=\"yyyy-MM-dd\"",
+        "--prop format=\"0.00%\""
+      ],
       "readback": "instruction switches",
       "enforcement": "report"
     },

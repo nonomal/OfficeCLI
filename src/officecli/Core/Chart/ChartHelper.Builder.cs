@@ -27,6 +27,27 @@ internal static partial class ChartHelper
             chart.AppendChild(BuildChartTitle(title));
 
         var originalCategories = categories;
+
+        // R46 Major-3: pie / doughnut / pieOfPie / barOfPie all render exactly
+        // one series. When user passes `data=Name1:V1;Name2:V2;...` the splitter
+        // produces N single-value "series", and only seriesData[0] is consumed
+        // downstream — points 2..N are silently dropped. Coalesce here so the
+        // ; form means "N data points in one series" (categories = names).
+        // Mirrors the waterfall flattener at line ~214 in this file.
+        if ((kind is "pie" or "doughnut" or "pieofpie" or "barofpie")
+            && seriesData.Count > 1
+            && seriesData.All(s => s.values.Length == 1)
+            && originalCategories == null)
+        {
+            categories = seriesData.Select(s => s.name).ToArray();
+            originalCategories = categories;
+            var coalesced = seriesData.SelectMany(s => s.values).ToArray();
+            seriesData = new List<(string name, double[] values)>
+            {
+                ("Series 1", coalesced)
+            };
+        }
+
         if (categories == null && seriesData.Count > 0)
         {
             var maxLen = seriesData.Max(s => s.values.Length);

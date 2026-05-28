@@ -688,6 +688,26 @@ internal static partial class ChartHelper
         var seriesCount = CountSeries(plotArea);
         node.Format["seriesCount"] = seriesCount;
 
+        // R46 Major-3: emit per-series readback as `series{N}` = "Name:v1,v2,..."
+        // so a `data=` Add round-trips (and pie-chart coalesce's data points are
+        // visible). Mirrors the Setter input form (legacy series{N}=Name:1,2,3),
+        // so dump→replay through the same key works for all single/multi series
+        // charts. Reference-line overlay series are skipped (structural, not user).
+        var seriesForReadback = ReadAllSeries(plotArea);
+        var refMask = ReadReferenceLineMask(plotArea);
+        int emittedIdx = 0;
+        for (int si = 0; si < seriesForReadback.Count; si++)
+        {
+            if (si < refMask.Count && refMask[si]) continue;
+            emittedIdx++;
+            var (sName, sVals) = seriesForReadback[si];
+            var vJoined = string.Join(",", sVals.Select(v =>
+                v.ToString("G", System.Globalization.CultureInfo.InvariantCulture)));
+            node.Format[$"series{emittedIdx}"] = string.IsNullOrEmpty(sName) || sName == "?"
+                ? vJoined
+                : $"{sName}:{vJoined}";
+        }
+
         // Chart-level aggregate readback for series-level fan-out properties.
         // chart Set ('gradient' / 'marker') applies to every series — surface
         // the corresponding chart-level keys so a get-after-set round-trips

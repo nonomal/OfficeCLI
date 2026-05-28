@@ -410,7 +410,12 @@ public partial class PowerPointHandler
                 // Parse chart data. Use TryGetValue(case-insensitive) instead
                 // of LINQ FirstOrDefault to play well with TrackingPropertyDictionary.
                 string chartType = "column";
-                if (properties.TryGetValue("charttype", out var ct) || properties.TryGetValue("type", out ct))
+                // R46: `kind=` is a natural alias for chart type (mirrors the
+                // pptx Add vocabulary for shape/picture). Accept all three so
+                // user/AI authors can stay consistent across element kinds.
+                if (properties.TryGetValue("charttype", out var ct)
+                    || properties.TryGetValue("type", out ct)
+                    || properties.TryGetValue("kind", out ct))
                     chartType = ct;
                 // CONSISTENCY(chart-grouping-alias): `grouping=stacked` /
                 // `grouping=percentStacked` is the common user vocabulary

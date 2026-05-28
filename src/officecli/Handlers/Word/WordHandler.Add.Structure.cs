@@ -1711,7 +1711,9 @@ public partial class WordHandler
         {
             throw new ArgumentException(
                 $"Header of type '{HeaderFooterTypeName(preHeaderType)}' already exists in this section. " +
-                "Remove the existing one first or use --prop type=<first|even>.");
+                "Remove the existing one first or use --prop type=<first|even>. " +
+                "(If you added a watermark, it creates default/first/even headers automatically — " +
+                "use 'set /watermark --prop text=...' to change watermark text, or 'remove /watermark' then re-add.)");
         }
 
         var headerPart = mainPartH.AddNewPart<HeaderPart>();

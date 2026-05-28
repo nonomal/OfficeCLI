@@ -58,7 +58,7 @@ public partial class PowerPointHandler
         if (!int.TryParse(trimmed, System.Globalization.NumberStyles.Integer,
                 System.Globalization.CultureInfo.InvariantCulture, out var ms) || ms < 0)
             throw new ArgumentException(
-                $"Invalid animation duration: '{duration}' (expected a non-negative integer in milliseconds, e.g. duration=500).");
+                $"Invalid animation duration: '{duration}' (duration — alias dur — accepts only a non-negative integer in milliseconds, not a unit-suffixed value like '2s'; use duration=500 or dur=2000).");
     }
 
     internal static void ValidateAnimationDelay(string? delay)

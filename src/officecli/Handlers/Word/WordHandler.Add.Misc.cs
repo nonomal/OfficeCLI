@@ -1138,7 +1138,17 @@ public partial class WordHandler
             ?? throw new InvalidOperationException("Document body not found");
 
         // Case-insensitive lookup to support camelCase keys like "sdtType", "controlType", etc.
-        var ciProps = new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase);
+        // CONSISTENCY(tracking-preservation): mirror WordHandler.Add.cs:32-40 — never copy a
+        // TrackingPropertyDictionary into a plain Dictionary, otherwise every TryGetValue
+        // here stops being recorded and unknown props silently slip through instead of
+        // surfacing as UNSUPPORTED warnings (handler-as-truth model). The dispatcher
+        // already gives us an OrdinalIgnoreCase Dictionary or a TrackingPropertyDictionary,
+        // so the only honest move is to pass it through unchanged when possible.
+        var ciProps = properties is OfficeCli.Core.TrackingPropertyDictionary
+            ? properties
+            : (properties.Comparer == StringComparer.OrdinalIgnoreCase
+                ? properties
+                : new Dictionary<string, string>(properties, StringComparer.OrdinalIgnoreCase));
 
         // Add a Structured Document Tag (Content Control)
         // Canonical key is "type" (per schemas/help/docx/sdt.json); "sdttype" / "controltype"
@@ -1203,7 +1213,10 @@ public partial class WordHandler
                 case "dropdown" or "dropdownlist":
                 {
                     var ddl = new SdtContentDropDownList();
-                    if (ciProps.TryGetValue("items", out var items))
+                    // CONSISTENCY(sdt-items-alias): accept "choices" as alias for "items"
+                    // — matches the natural CLI vocabulary users reach for first.
+                    if (ciProps.TryGetValue("items", out var items)
+                        || ciProps.TryGetValue("choices", out items))
                     {
                         foreach (var li in ParseSdtItems(items))
                             ddl.AppendChild(li);
@@ -1214,7 +1227,8 @@ public partial class WordHandler
                 case "combobox" or "combo":
                 {
                     var cb = new SdtContentComboBox();
-                    if (ciProps.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items)
+                        || ciProps.TryGetValue("choices", out items))
                     {
                         foreach (var li in ParseSdtItems(items))
                             cb.AppendChild(li);
@@ -1317,7 +1331,10 @@ public partial class WordHandler
                 case "dropdown" or "dropdownlist":
                 {
                     var ddl = new SdtContentDropDownList();
-                    if (ciProps.TryGetValue("items", out var items))
+                    // CONSISTENCY(sdt-items-alias): accept "choices" as alias for "items"
+                    // — matches the natural CLI vocabulary users reach for first.
+                    if (ciProps.TryGetValue("items", out var items)
+                        || ciProps.TryGetValue("choices", out items))
                     {
                         foreach (var li in ParseSdtItems(items))
                             ddl.AppendChild(li);
@@ -1328,7 +1345,8 @@ public partial class WordHandler
                 case "combobox" or "combo":
                 {
                     var cb = new SdtContentComboBox();
-                    if (ciProps.TryGetValue("items", out var items))
+                    if (ciProps.TryGetValue("items", out var items)
+                        || ciProps.TryGetValue("choices", out items))
                     {
                         foreach (var li in ParseSdtItems(items))
                             cb.AppendChild(li);

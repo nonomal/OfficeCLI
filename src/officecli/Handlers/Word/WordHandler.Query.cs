@@ -2160,6 +2160,17 @@ public partial class WordHandler
         {
             var allRevs = EnumerateRevisions();
             var sharedIds = ComputeSharedRevisionIds(allRevs);
+            // R46 Major-4: apply parsed.Attributes via the shared MatchesFilter
+            // predicate used by Set.Revision — so `query revision[@type=ins]`,
+            // `[@author=Alice]`, `[@id=X]` all narrow correctly and share
+            // semantics with the Set side (no divergent attribute parsing).
+            Dictionary<string, string>? filterDict = null;
+            if (parsed.Attributes.Count > 0)
+            {
+                filterDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (attrKey, rawVal) in parsed.Attributes)
+                    filterDict[attrKey] = rawVal;
+            }
             int revIdx = 0;
             foreach (var rev in allRevs)
             {
@@ -2167,6 +2178,8 @@ public partial class WordHandler
                 var text = ExtractRevisionText(rev);
                 if (parsed.ContainsText != null
                     && !text.Contains(parsed.ContainsText, StringComparison.OrdinalIgnoreCase))
+                { revIdx--; continue; }
+                if (filterDict != null && !MatchesFilter(rev, filterDict))
                 { revIdx--; continue; }
                 results.Add(BuildRevisionNode(rev, revIdx, text, sharedIds));
             }

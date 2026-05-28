@@ -848,7 +848,7 @@ public partial class WordHandler
             Type = "revision",
             Text = text,
         };
-        node.Format["revision.type"] = rev.Kind;
+        node.Format["revision.type"] = NormalizeRevisionKindShort(rev.Kind);
         if (!string.IsNullOrEmpty(rev.Author))
             node.Format["revision.author"] = rev.Author!;
         if (rev.Date != null)
@@ -1040,6 +1040,32 @@ public partial class WordHandler
         }
         return true;
     }
+
+    /// <summary>R46 Minor-1: normalise internal verbose kind names to schema
+    /// canonical short form for readback. Internal storage stays verbose
+    /// (matches OOXML element names); only the user-facing surface is short.
+    /// Mirrors the alias table in <see cref="RevisionTypeMatches"/>.</summary>
+    private static string NormalizeRevisionKindShort(string kind) => kind switch
+    {
+        "insertion" => "ins",
+        "deletion" => "del",
+        "formatChange" => "format",
+        "paragraphChange" => "paragraph",
+        "sectionChange" => "format",
+        "tableChange" => "format",
+        "rowChange" => "format",
+        "cellChange" => "format",
+        "gridChange" => "grid",
+        "rowInsertion" => "rowIns",
+        "rowDeletion" => "rowDel",
+        "cellInsertion" => "cellIns",
+        "cellDeletion" => "cellDel",
+        "paragraphMarkInsertion" => "paraMarkIns",
+        "paragraphMarkDeletion" => "paraMarkDel",
+        "moveFrom" => "moveFrom",
+        "moveTo" => "moveTo",
+        _ => kind,
+    };
 
     /// <summary>Lenient type alias matching. `ins` matches insertion;
     /// `del` matches deletion; `format` matches formatChange and the

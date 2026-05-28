@@ -89,8 +89,12 @@ public partial class WordHandler
             if (openCount != closeCount)
                 throw new ArgumentException($"Malformed selector: unclosed bracket in '{selector}'");
 
+            // R46 Major-4: accept optional leading `@` on attribute names so
+            // `revision[@type=ins]` (the path/Get convention) parses identically
+            // to `revision[type=ins]`. Without this the `@`-form silently yields
+            // an empty attrs dict and the query returns ALL elements unfiltered.
             foreach (System.Text.RegularExpressions.Match m in
-                System.Text.RegularExpressions.Regex.Matches(attrPart, @"\[(\w+)(\\?!?=)([^\]]+)\]"))
+                System.Text.RegularExpressions.Regex.Matches(attrPart, @"\[@?(\w+)(\\?!?=)([^\]]+)\]"))
             {
                 var key = m.Groups[1].Value;
                 var op = m.Groups[2].Value.Replace("\\", "");

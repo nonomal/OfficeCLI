@@ -1,0 +1,325 @@
+// Copyright 2025 OfficeCLI (officecli.ai)
+// SPDX-License-Identifier: Apache-2.0
+
+using System.Text;
+using System.Text.RegularExpressions;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
+using OfficeCli.Core;
+using Drawing = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeCli.Handlers;
+
+public partial class PowerPointHandler
+{
+
+    private static double ParseFontSize(string value) =>
+        ParseHelpers.ParseFontSize(value);
+
+    private static bool ParsePptDirectionRtl(string value) => value.ToLowerInvariant() switch
+    {
+        "rtl" or "righttoleft" or "right-to-left" or "true" or "1" => true,
+        "ltr" or "lefttoright" or "left-to-right" or "false" or "0" or "" => false,
+        _ => throw new ArgumentException($"Invalid direction value: '{value}'. Valid values: rtl, ltr (also accepts true/false, 1/0, righttoleft/lefttoright, right-to-left/left-to-right; case-insensitive).")
+    };
+
+    /// <summary>
+    /// Format an EMU value as points for round-trip with bare-number Add/Set input
+    /// on PPTX paragraph indent. 12700 EMU = 1pt; output formatted with up to 2
+    /// decimals (e.g. "1pt", "0.5pt", "-12pt"). CONSISTENCY(pptx-bare-as-points).
+    /// </summary>
+    private static string FormatPptIndentPoints(long emu)
+    {
+        var pt = emu / 12700.0;
+        return pt.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "pt";
+    }
+
+    /// <summary>
+    /// Normalize DrawingML alignment abbreviations to human-readable values.
+    /// OOXML stores "l", "r", "ctr", "just" etc. — we return "left", "right", "center", "justify".
+    /// </summary>
+    private static string NormalizeAlignment(string innerText) => innerText switch
+    {
+        "l" => "left",
+        "r" => "right",
+        "ctr" => "center",
+        "just" => "justify",
+        "dist" => "distributed",
+        _ => innerText
+    };
+
+    /// <summary>
+    /// Reorder children of a DrawingML RunProperties / EndParagraphRunProperties /
+    /// DefaultRunProperties element into schema-valid order.
+    /// Stable within the same order bucket to preserve relative order of existing fills.
+    /// Unknown child types are pushed to the end (preserved but last).
+    /// </summary>
+    internal static void ReorderDrawingRunProperties(OpenXmlCompositeElement rPr)
+    {
+        if (rPr == null || !rPr.HasChildren) return;
+
+        int OrderOf(OpenXmlElement el)
+        {
+            var t = el.GetType();
+            foreach (var (type, order) in DrawingRunPropChildOrder)
+                if (type == t) return order;
+            return int.MaxValue;
+        }
+
+        var children = rPr.ChildElements.ToList();
+        // Check if already sorted — avoid unnecessary reflows
+        bool needsReorder = false;
+        for (int i = 1; i < children.Count; i++)
+        {
+            if (OrderOf(children[i]) < OrderOf(children[i - 1]))
+            {
+                needsReorder = true;
+                break;
+            }
+        }
+        if (!needsReorder) return;
+
+        // Stable sort by schema order
+        var sorted = children
+            .Select((el, idx) => (el, ord: OrderOf(el), idx))
+            .OrderBy(t => t.ord)
+            .ThenBy(t => t.idx)
+            .Select(t => t.el)
+            .ToList();
+
+        foreach (var c in children) c.Remove();
+        foreach (var c in sorted) rPr.AppendChild(c);
+    }
+
+    /// <summary>
+    /// Read a GradientFill element and return a string representation (C1-C2[-angle] or radial:C1-C2[-focus]).
+    /// </summary>
+    /// <summary>
+    /// Read a gradient stop color, handling both RgbColorModelHex and SchemeColor.
+    /// Without this, scheme-color stops (accent1/dark1/...) read back as "#?" because
+    /// FormatHexColor receives the literal "?" placeholder.
+    /// </summary>
+    private static string ReadGradientStopColor(Drawing.GradientStop gs)
+    {
+        var rgb = gs.GetFirstChild<Drawing.RgbColorModelHex>();
+        if (rgb?.Val?.Value != null) return ParseHelpers.FormatHexColor(rgb.Val.Value);
+        var scheme = gs.GetFirstChild<Drawing.SchemeColor>();
+        // .Val.Value is an EnumValue<SchemeColorValues> — its ToString() returns the
+        // enum object's CLR name ("SchemeColorValues { }"), not the semantic OOXML
+        // name. Use InnerText to get "accent1"/"dark1"/... so the emitted gradient
+        // string round-trips through BuildGradientFill's color parser.
+        // CONSISTENCY(scheme-color-roundtrip): emit canonical long name
+        // (dark1/light1/hyperlink/…) so OOXML internal short forms
+        // (dk1/lt1/hlink/…) round-trip through Get the same way
+        // ReadColorFromFill normalises them.
+        if (scheme?.Val?.InnerText != null)
+            return ParseHelpers.NormalizeSchemeColorName(scheme.Val.InnerText) ?? scheme.Val.InnerText;
+        var sys = gs.GetFirstChild<Drawing.SystemColor>();
+        if (sys?.Val?.InnerText != null) return sys.Val.InnerText;
+        var preset = gs.GetFirstChild<Drawing.PresetColor>();
+        if (preset?.Val?.InnerText != null) return preset.Val.InnerText;
+        return "?";
+    }
+
+    internal static string ReadGradientString(Drawing.GradientFill gradFill)
+    {
+        var stopEls = gradFill.GradientStopList?.Elements<Drawing.GradientStop>().ToList();
+        if (stopEls == null || stopEls.Count == 0) return "gradient";
+
+        var stopData = stopEls.Select(gs => (
+            color: ReadGradientStopColor(gs),
+            pos: gs.Position?.Value
+        )).ToList();
+
+        // Check if positions deviate >1% from even distribution (1000 units)
+        bool hasCustomPos = false;
+        int n = stopData.Count;
+        for (int i = 0; i < n; i++)
+        {
+            var expectedPos = n == 1 ? 0 : (int)((long)i * 100000 / (n - 1));
+            var actualPos = (int)(stopData[i].pos ?? 0);
+            if (Math.Abs(actualPos - expectedPos) > 1000) { hasCustomPos = true; break; }
+        }
+
+        var stopStrs = stopData.Select((s, i) =>
+            hasCustomPos && s.pos.HasValue
+                ? $"{s.color}@{s.pos.Value / 1000}"
+                : s.color
+        ).ToList();
+
+        var pathGrad = gradFill.GetFirstChild<Drawing.PathGradientFill>();
+        if (pathGrad != null)
+        {
+            var fillRect = pathGrad.GetFirstChild<Drawing.FillToRectangle>();
+            var focus = "center";
+            if (fillRect != null)
+            {
+                var fl = fillRect.Left?.Value ?? 50000;
+                var ft = fillRect.Top?.Value ?? 50000;
+                focus = (fl, ft) switch
+                {
+                    (0, 0) => "tl",
+                    ( >= 100000, 0) => "tr",
+                    (0, >= 100000) => "bl",
+                    ( >= 100000, >= 100000) => "br",
+                    _ => "center"
+                };
+            }
+            // R24 — OOXML distinguishes "path" (shape-following) from "radial"
+            // via the @path attribute. Background.cs reader already
+            // distinguishes; this helper used to flatten everything to
+            // "radial:" so dump→replay of a path gradient became a radial.
+            var prefix = pathGrad.Path?.Value == Drawing.PathShadeValues.Shape ? "path" : "radial";
+            return $"{prefix}:{string.Join("-", stopStrs)}-{focus}";
+        }
+
+        var linear = gradFill.GetFirstChild<Drawing.LinearGradientFill>();
+        var deg = linear?.Angle?.HasValue == true ? linear.Angle.Value / 60000.0 : 0.0;
+        var degStr = deg % 1 == 0 ? $"{(int)deg}" : $"{deg:0.##}";
+        return $"linear;{string.Join(";", stopStrs)};{degStr}";
+    }
+
+    /// <summary>
+    /// Apply run-level formatting to a PPT run's RunProperties.
+    /// </summary>
+    private static void ApplyPptRunFormatting(Drawing.Run run, string key, string value, Shape? shape = null)
+    {
+        var rPr = run.RunProperties ?? run.PrependChild(new Drawing.RunProperties());
+        switch (key.ToLowerInvariant())
+        {
+            case "bold":
+                rPr.Bold = IsTruthy(value);
+                break;
+            case "italic":
+                rPr.Italic = IsTruthy(value);
+                break;
+            case "size":
+                rPr.FontSize = (int)Math.Round(ParseFontSize(value) * 100, MidpointRounding.AwayFromZero);
+                break;
+            case "color":
+                rPr.RemoveAllChildren<Drawing.SolidFill>();
+                rPr.PrependChild(BuildSolidFill(value));
+                break;
+            case "font":
+                // Bare 'font' targets all common scripts (Latin + EastAsian).
+                // Use 'font.latin' / 'font.ea' / 'font.cs' for per-script control
+                // (e.g. Japanese / Korean / Arabic documents).
+                rPr.RemoveAllChildren<Drawing.LatinFont>();
+                rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+                rPr.AppendChild(new Drawing.LatinFont { Typeface = value });
+                rPr.AppendChild(new Drawing.EastAsianFont { Typeface = value });
+                ReorderDrawingRunProperties(rPr);
+                break;
+            case "font.latin":
+                rPr.RemoveAllChildren<Drawing.LatinFont>();
+                rPr.AppendChild(new Drawing.LatinFont { Typeface = value });
+                ReorderDrawingRunProperties(rPr);
+                break;
+            case "font.ea" or "font.eastasia" or "font.eastasian":
+                rPr.RemoveAllChildren<Drawing.EastAsianFont>();
+                rPr.AppendChild(new Drawing.EastAsianFont { Typeface = value });
+                ReorderDrawingRunProperties(rPr);
+                break;
+            case "font.cs" or "font.complexscript" or "font.complex":
+                rPr.RemoveAllChildren<Drawing.ComplexScriptFont>();
+                rPr.AppendChild(new Drawing.ComplexScriptFont { Typeface = value });
+                ReorderDrawingRunProperties(rPr);
+                break;
+            case "underline":
+                var ulVal = value.ToLowerInvariant() switch
+                {
+                    "true" or "single" => Drawing.TextUnderlineValues.Single,
+                    "double" => Drawing.TextUnderlineValues.Double,
+                    "heavy" => Drawing.TextUnderlineValues.Heavy,
+                    "false" or "none" => Drawing.TextUnderlineValues.None,
+                    _ => new Drawing.TextUnderlineValues(value)
+                };
+                rPr.Underline = ulVal;
+                break;
+            case "strikethrough" or "strike":
+                var stVal = value.ToLowerInvariant() switch
+                {
+                    "true" or "single" => Drawing.TextStrikeValues.SingleStrike,
+                    "double" => Drawing.TextStrikeValues.DoubleStrike,
+                    "false" or "none" => Drawing.TextStrikeValues.NoStrike,
+                    _ => new Drawing.TextStrikeValues(value)
+                };
+                rPr.Strike = stVal;
+                break;
+            case "superscript":
+                rPr.Baseline = IsTruthy(value) ? 30000 : 0;
+                break;
+            case "subscript":
+                rPr.Baseline = IsTruthy(value) ? -25000 : 0;
+                break;
+            case "charspacing" or "spacing" or "letterspacing":
+                var csPt = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase)
+                    ? ParseHelpers.SafeParseDouble(value[..^2], "charspacing")
+                    : ParseHelpers.SafeParseDouble(value, "charspacing");
+                rPr.Spacing = (int)Math.Round(csPt * 100, MidpointRounding.AwayFromZero);
+                break;
+            case "highlight":
+                rPr.RemoveAllChildren<Drawing.Highlight>();
+                if (!string.Equals(value, "none", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(value, "false", StringComparison.OrdinalIgnoreCase))
+                {
+                    var hl = new Drawing.Highlight();
+                    hl.AppendChild(BuildSolidFillColor(value));
+                    rPr.AppendChild(hl);
+                }
+                break;
+        }
+    }
+
+    // CT_TextParagraphProperties child schema rank (OOXML DrawingML):
+    //   lnSpc, spcBef, spcAft, buClr*, buSzPct/Pts/Tx, buFontTx/buFont,
+    //   buNone/buAutoNum/buChar/buBlip, tabLst, defRPr, extLst
+    // PowerPoint silently drops out-of-order children. Any code that injects
+    // a child into <a:pPr> after the element may already contain higher-rank
+    // siblings (typical when the user calls Set repeatedly in reverse order)
+    // must route through InsertPPrChild so the schema position is honoured.
+    // CONSISTENCY(schema-order-pptx): mirrors the spPr fix pattern proven by
+    // PptxSpPrSchemaOrderTests / PptxSchemaOrderR51Tests.
+    private static readonly string[] PPrChildSchemaOrder =
+    {
+        "lnSpc", "spcBef", "spcAft",
+        "buClr", "buClrTx",
+        "buSzPct", "buSzPts", "buSzTx",
+        "buFont", "buFontTx",
+        "buNone", "buAutoNum", "buChar", "buBlip",
+        "tabLst", "defRPr", "extLst",
+    };
+
+    private static int PPrChildRank(OpenXmlElement el)
+    {
+        var idx = Array.IndexOf(PPrChildSchemaOrder, el.LocalName);
+        return idx < 0 ? int.MaxValue : idx;
+    }
+
+    /// <summary>
+    /// Insert <paramref name="child"/> into a <c>&lt;a:pPr&gt;</c> at the
+    /// schema-required position so the resulting XML validates regardless of
+    /// the order in which properties were set. Caller is responsible for
+    /// removing any pre-existing same-typed child first.
+    /// </summary>
+    internal static void InsertPPrChild(Drawing.ParagraphProperties pProps, OpenXmlElement child)
+    {
+        var newRank = PPrChildRank(child);
+        // Find the first existing child whose rank is strictly greater — the
+        // new element must precede it. Same idiom as spPr/PresetGeometry fix.
+        OpenXmlElement? insertBefore = null;
+        foreach (var existing in pProps.ChildElements)
+        {
+            if (PPrChildRank(existing) > newRank)
+            {
+                insertBefore = existing;
+                break;
+            }
+        }
+        if (insertBefore != null)
+            pProps.InsertBefore(child, insertBefore);
+        else
+            pProps.AppendChild(child);
+    }
+}

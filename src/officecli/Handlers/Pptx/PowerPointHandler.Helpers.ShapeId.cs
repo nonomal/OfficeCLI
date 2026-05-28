@@ -1,0 +1,129 @@
+// Copyright 2025 OfficeCLI (officecli.ai)
+// SPDX-License-Identifier: Apache-2.0
+
+using System.Text;
+using System.Text.RegularExpressions;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Presentation;
+using OfficeCli.Core;
+using Drawing = DocumentFormat.OpenXml.Drawing;
+
+namespace OfficeCli.Handlers;
+
+public partial class PowerPointHandler
+{
+
+    /// <summary>
+    /// Scan all slides to initialize the global shape ID counter.
+    /// Called once on document open (editable mode).
+    /// </summary>
+    private void InitShapeIdCounter()
+    {
+        const uint minStartId = 10000;
+        _usedShapeIds = new HashSet<uint>();
+        uint maxId = minStartId - 1;
+
+        foreach (var slidePart in GetSlideParts())
+        {
+            var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree;
+            if (shapeTree == null) continue;
+            foreach (var nvPr in shapeTree.Descendants<NonVisualDrawingProperties>())
+            {
+                if (nvPr.Id?.HasValue == true)
+                {
+                    _usedShapeIds.Add(nvPr.Id.Value);
+                    if (nvPr.Id.Value > maxId)
+                        maxId = nvPr.Id.Value;
+                }
+            }
+        }
+
+        _nextShapeId = maxId + 1;
+        if (_nextShapeId < maxId) // uint overflow
+            _nextShapeId = minStartId;
+    }
+
+    /// <summary>
+    /// Return true if <paramref name="id"/> is already claimed by any cNvPr in
+    /// the given shapeTree, or globally in <see cref="_usedShapeIds"/>.
+    /// </summary>
+    private bool ShapeIdInUse(ShapeTree shapeTree, uint id)
+    {
+        if (_usedShapeIds != null && _usedShapeIds.Contains(id))
+            return true;
+        if (shapeTree != null)
+        {
+            foreach (var nvPr in shapeTree.Descendants<NonVisualDrawingProperties>())
+            {
+                if (nvPr.Id?.HasValue == true && nvPr.Id.Value == id)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// CONSISTENCY(dump-replay-id): honor a caller-supplied "id" property so
+    /// that dump→batch round-trip preserves @id=N references; mirrors docx
+    /// Add.Structure.cs:1118 for numbering ids. id=0 / non-numeric / missing
+    /// → auto-assign via <see cref="GenerateUniqueShapeId"/>. Collisions with
+    /// an in-use id throw rather than silently renumber.
+    /// </summary>
+    private uint AcquireShapeId(ShapeTree shapeTree, Dictionary<string, string> properties)
+    {
+        if (properties != null
+            && properties.TryGetValue("id", out var idStr)
+            && uint.TryParse(idStr, out var requestedId)
+            && requestedId > 0)
+        {
+            if (ShapeIdInUse(shapeTree, requestedId))
+                throw new ArgumentException(
+                    $"id {requestedId} already in use in this shapeTree. " +
+                    "Use a different id or omit to auto-assign.");
+            _usedShapeIds?.Add(requestedId);
+            if (requestedId >= _nextShapeId)
+                _nextShapeId = requestedId + 1;
+            return requestedId;
+        }
+        return GenerateUniqueShapeId(shapeTree);
+    }
+
+    /// <summary>
+    /// Generate a unique deterministic cNvPr.Id across all slides.
+    /// Uses global instance counter for reproducible, non-repeating IDs.
+    /// </summary>
+    private uint GenerateUniqueShapeId(ShapeTree shapeTree)
+    {
+        const uint minStartId = 10000;
+        var startId = _nextShapeId;
+        while (true)
+        {
+            var id = _nextShapeId;
+            _nextShapeId++;
+            if (_nextShapeId < id) // uint overflow
+                _nextShapeId = minStartId;
+            if (_usedShapeIds.Add(id))
+                return id;
+            if (_nextShapeId == startId)
+                throw new InvalidOperationException("No available shape ID slots");
+        }
+    }
+
+    /// <summary>
+    /// Get the cNvPr.Id for an element, or null if not available.
+    /// Works for Shape, Picture, GraphicFrame, ConnectionShape, GroupShape.
+    /// </summary>
+    internal static uint? GetCNvPrId(OpenXmlElement element)
+    {
+        return element switch
+        {
+            Shape s => s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+            Picture p => p.NonVisualPictureProperties?.NonVisualDrawingProperties?.Id?.Value,
+            GraphicFrame gf => gf.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value,
+            ConnectionShape c => c.NonVisualConnectionShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+            GroupShape g => g.NonVisualGroupShapeProperties?.NonVisualDrawingProperties?.Id?.Value,
+            _ => null
+        };
+    }
+}

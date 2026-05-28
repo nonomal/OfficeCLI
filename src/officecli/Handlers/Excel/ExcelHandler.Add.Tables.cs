@@ -1119,18 +1119,23 @@ public partial class ExcelHandler
                     existingCell.CellValue = new CellValue("Total");
                     existingCell.DataType = new EnumValue<CellValues>(CellValues.String);
                 }
+                else if (ci > 0 && tokRaw == "")
+                {
+                    // Default non-first column (no explicit token) = SUM
+                    trfEnum = TotalsRowFunctionValues.Sum;
+                    subtotalCode = 109;
+                    tblCols[ci].TotalsRowFunction = trfEnum;
+                    var dataStartRow = hasHeader ? startRow + 1 : startRow;
+                    var dataEndRow = (int)totalRowIdx - 1;
+                    var formulaRange = $"{colLetter}{dataStartRow}:{colLetter}{dataEndRow}";
+                    existingCell.CellFormula = new CellFormula($"SUBTOTAL({subtotalCode},{formulaRange})");
+                }
                 else if (trfEnum == TotalsRowFunctionValues.None)
                 {
                     // Skip — leave cell empty, no function set.
                 }
                 else
                 {
-                    // Default non-first column (no explicit token) = SUM
-                    if (ci > 0 && tokRaw == "")
-                    {
-                        trfEnum = TotalsRowFunctionValues.Sum;
-                        subtotalCode = 109;
-                    }
                     tblCols[ci].TotalsRowFunction = trfEnum;
                     var dataStartRow = hasHeader ? startRow + 1 : startRow;
                     var dataEndRow = (int)totalRowIdx - 1;

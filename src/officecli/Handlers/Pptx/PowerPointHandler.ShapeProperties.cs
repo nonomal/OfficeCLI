@@ -639,14 +639,23 @@ public partial class PowerPointHandler
                     // same vocabulary works at the shape surface.
                     var bodyPr = shape.TextBody?.Elements<Drawing.BodyProperties>().FirstOrDefault();
                     if (bodyPr == null) { unsupported.Add(key); break; }
+                    // OOXML semantics:
+                    //   Vertical    = 90° CCW (bottom-to-top — what most users call "vert")
+                    //   Vertical270 = 270° CCW (top-to-bottom — the rarer rotation)
+                    // The old switch collapsed "vert" and "vert270" both to Vertical270, so
+                    // textDirection=vert silently produced the wrong rotation. Split into
+                    // distinct cases and add "eavert" (East Asian vertical) which OOXML
+                    // supports as its own enum member.
                     bodyPr.Vertical = value.ToLowerInvariant() switch
                     {
                         "horizontal" or "horz" or "none" => Drawing.TextVerticalValues.Horizontal,
-                        "vertical" or "vert" or "vert270" => Drawing.TextVerticalValues.Vertical270,
-                        "vertical270" => Drawing.TextVerticalValues.Vertical270,
-                        "vertical90" or "vert90" => Drawing.TextVerticalValues.Vertical,
+                        "vertical" or "vert" or "vertical90" or "vert90" => Drawing.TextVerticalValues.Vertical,
+                        "vertical270" or "vert270" => Drawing.TextVerticalValues.Vertical270,
+                        // Note: SDK enum member spelling is "EastAsianVetical" (typo
+                        // present in DocumentFormat.OpenXml 3.x); serialized XML is "eaVert".
+                        "eavert" or "eavertical" => Drawing.TextVerticalValues.EastAsianVetical,
                         "stacked" or "wordartvert" => Drawing.TextVerticalValues.WordArtVertical,
-                        _ => throw new ArgumentException($"Invalid textDirection: '{value}'. Valid: horizontal, vertical, vertical90, vertical270, stacked.")
+                        _ => throw new ArgumentException($"Invalid textDirection: '{value}'. Valid: horizontal, vertical (=vert / vertical90, 90° CCW), vertical270 (=vert270, 270° CCW), eaVert, stacked.")
                     };
                     break;
                 }
@@ -2335,14 +2344,19 @@ public partial class PowerPointHandler
                 case "textdirection" or "textdir" or "vert":
                 {
                     var tcPrTd = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    // OOXML semantics: Vertical = 90° CCW (bottom-to-top), Vertical270 =
+                    // 270° CCW (top-to-bottom). Old code collapsed both "vert" and
+                    // "vert270" to Vertical270 (wrong rotation for "vert"). Split, and
+                    // accept eaVert (East Asian vertical) consistent with shape-level set.
                     tcPrTd.Vertical = value.ToLowerInvariant() switch
                     {
                         "horizontal" or "horz" or "none" => Drawing.TextVerticalValues.Horizontal,
-                        "vertical" or "vert" or "vert270" => Drawing.TextVerticalValues.Vertical270,
-                        "vertical270" => Drawing.TextVerticalValues.Vertical270,
-                        "vertical90" or "vert90" => Drawing.TextVerticalValues.Vertical,
+                        "vertical" or "vert" or "vertical90" or "vert90" => Drawing.TextVerticalValues.Vertical,
+                        "vertical270" or "vert270" => Drawing.TextVerticalValues.Vertical270,
+                        // Note: SDK enum spelling is EastAsianVetical (typo); XML is "eaVert".
+                        "eavert" or "eavertical" => Drawing.TextVerticalValues.EastAsianVetical,
                         "stacked" or "wordartvert" => Drawing.TextVerticalValues.WordArtVertical,
-                        _ => throw new ArgumentException($"Invalid textDirection: '{value}'. Valid: horizontal, vertical, vertical90, vertical270, stacked.")
+                        _ => throw new ArgumentException($"Invalid textDirection: '{value}'. Valid: horizontal, vertical (=vert / vertical90, 90° CCW), vertical270 (=vert270, 270° CCW), eaVert, stacked.")
                     };
                     break;
                 }

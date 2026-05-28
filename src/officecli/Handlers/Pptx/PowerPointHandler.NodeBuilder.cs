@@ -1209,6 +1209,9 @@ public partial class PowerPointHandler
                     "vert" => "vertical90",
                     "vert270" => "vertical270",
                     "wordArtVert" => "stacked",
+                    "eaVert" => "eaVert",
+                    "mongolianVert" => "mongolianVert",
+                    "wordArtVertRtl" => "wordArtVertRtl",
                     _ => bodyPr.Vertical.InnerText
                 };
             }

@@ -307,6 +307,21 @@ public partial class PowerPointHandler
                             Text = cellText
                         };
 
+                        // CONSISTENCY(empty-run-preserve): mirror R43 b209ac10
+                        // for table cells. PowerPoint persists an empty cell
+                        // as <a:p><a:r><a:rPr lang="en-US"/><a:t/></a:r></a:p>
+                        // — the run-bearing form carries IME / cursor state.
+                        // AddTable's blank-cell seed uses <a:endParaRPr/>
+                        // instead, so dump→replay of a run-bearing empty cell
+                        // silently flips to the endParaRPr form. Surface a
+                        // Format marker the emitter can read to decide
+                        // whether to issue `set tc[K] text=""` (which forces
+                        // the run-bearing form via AppendLineWithTabs) even
+                        // though the cell text itself is empty.
+                        bool hasAnyRun = cell.TextBody?.Descendants<Drawing.Run>().Any() == true;
+                        if (string.IsNullOrEmpty(cellText) && hasAnyRun)
+                            cellNode.Format["hasEmptyRun"] = true;
+
                         // Cell fill (blip, gradient, or solid)
                         var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();
                         var cellBlipFill = tcPr?.GetFirstChild<Drawing.BlipFill>();

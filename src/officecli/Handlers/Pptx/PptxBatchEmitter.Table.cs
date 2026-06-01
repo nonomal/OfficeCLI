@@ -67,9 +67,19 @@ public static partial class PptxBatchEmitter
                 if (cell.Type != "tc") continue;
                 cIdx++;
                 var cellProps = FilterEmittableProps(cell.Format);
+                // CONSISTENCY(empty-run-preserve): NodeBuilder surfaces
+                // hasEmptyRun=true when the source cell carries a run-bearing
+                // empty paragraph (<a:r><a:rPr/><a:t/></a:r>). AddTable's
+                // blank-cell seed uses <a:endParaRPr/>, so dump→replay drifts
+                // unless we force the run-bearing form by issuing `set
+                // text=""` — which routes through AppendLineWithTabs and
+                // produces the canonical empty run.
+                bool forceEmptyText = cellProps.Remove("hasEmptyRun");
                 // Set tc accepts text= for replacing the cell's text body.
                 if (!string.IsNullOrEmpty(cell.Text))
                     cellProps["text"] = cell.Text!;
+                else if (forceEmptyText)
+                    cellProps["text"] = "";
                 if (cellProps.Count == 0) continue;
                 items.Add(new BatchItem
                 {

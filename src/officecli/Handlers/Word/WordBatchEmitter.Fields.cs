@@ -145,6 +145,40 @@ public static partial class WordBatchEmitter
                 i = end;
                 continue;
             }
+            // R14-bug1+2: legacy form field — the begin run carries
+            // <w:ffData>, surfaced by Navigation as ffName/ffType/ffDefault/
+            // ffMaxLength/ffChecked/… on the fieldChar node. The plain `field`
+            // synth would drive BuildFieldAddProps through its default arm,
+            // emit `instr=FORMTEXT`, and AddField (via the formtext delegate
+            // arm) would rebuild a /formfield with NONE of the original
+            // ffData props (name, default, maxLength, items, helpText, …).
+            // Route to a `formfield` synth instead so TryEmitFieldRun emits
+            // `add formfield` carrying the full payload.
+            if (c.Format.TryGetValue("hasFormFieldData", out var hffd)
+                && hffd is bool hffdB && hffdB)
+            {
+                var ffSynth = new DocumentNode
+                {
+                    Path = c.Path,
+                    Type = "formfield",
+                    Text = display,
+                    Format = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["instruction"] = instruction.Trim()
+                    }
+                };
+                // Carry every ff* prop forward so TryEmitFormFieldRun can
+                // map them onto AddFormField's prop bag.
+                foreach (var (fk, fv) in c.Format)
+                {
+                    if (fv == null) continue;
+                    if (fk.StartsWith("ff", StringComparison.OrdinalIgnoreCase))
+                        ffSynth.Format[fk] = fv;
+                }
+                result.Add(ffSynth);
+                i = end;
+                continue;
+            }
             var synth = new DocumentNode
             {
                 Path = c.Path,

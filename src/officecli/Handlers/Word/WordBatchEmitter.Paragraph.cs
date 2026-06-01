@@ -121,10 +121,29 @@ public static partial class WordBatchEmitter
         // value as static text — PAGE/REF/SEQ/HYPERLINK/NUMPAGES degrade to
         // their evaluated string and stop auto-updating (BUG-X2-05 / X2-1).
         var fieldEntries = CollapseFieldChains(pNode.Children ?? new List<DocumentNode>());
+        // R14-bug1+2: each legacy form field embeds a BookmarkStart/End of its
+        // own name. AddFormField recreates that bookmark internally — if the
+        // emit pipeline also drops an `add bookmark name=X` row before the
+        // `add formfield name=X`, AddFormField throws on the duplicate. Filter
+        // bookmarks whose name matches a sibling formfield synth's ffName.
+        var formFieldNames = fieldEntries
+            .Where(e => e.Type == "formfield" && e.Format.TryGetValue("ffName", out _))
+            .Select(e => e.Format["ffName"]?.ToString() ?? "")
+            .Where(n => !string.IsNullOrEmpty(n))
+            .ToHashSet(StringComparer.Ordinal);
+        if (formFieldNames.Count > 0)
+        {
+            fieldEntries = fieldEntries
+                .Where(e => !(e.Type == "bookmark"
+                    && e.Format.TryGetValue("name", out var bn)
+                    && bn != null
+                    && formFieldNames.Contains(bn.ToString() ?? "")))
+                .ToList();
+        }
         // BUG-DUMP5-01/02: include break-typed children in the same ordered
         // list as runs so document-order is preserved on emit.
         var runs = fieldEntries
-            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "ptab" || c.Type == "break"
+            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "picture" || c.Type == "field" || c.Type == "formfield" || c.Type == "ptab" || c.Type == "break"
                 || c.Type == "equation"
                 || c.Type == "tab"
                 || c.Type == "bookmark"
@@ -135,7 +154,9 @@ public static partial class WordBatchEmitter
             .ToList();
         var breaks = runs.Where(c => c.Type == "break").ToList();
         var bookmarks = (pNode.Children ?? new List<DocumentNode>())
-            .Where(c => c.Type == "bookmark")
+            .Where(c => c.Type == "bookmark"
+                && !(c.Format.TryGetValue("name", out var bn) && bn != null
+                    && formFieldNames.Contains(bn.ToString() ?? "")))
             .ToList();
         var inlineSdts = (pNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "sdt")
@@ -264,6 +285,7 @@ public static partial class WordBatchEmitter
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
             if (TryEmitEquationRun(run, paraTargetPath, items)) continue;
+            if (TryEmitFormFieldRun(run, paraTargetPath, items)) continue;
             if (TryEmitFieldRun(run, paraTargetPath, items, ctx)) continue;
             // R10-bug1: OLE/embedded-object runs surface as type="ole" (see
             // CreateOleNode in WordHandler.ImageHelpers.cs). The Add side
@@ -521,6 +543,10 @@ public static partial class WordBatchEmitter
         var r = runs[0];
         // Picture / ptab runs need their own typed `add` rows.
         if (r.Type == "picture" || r.Type == "ptab") return false;
+        // R14-bug1+2: legacy form field synth — needs its own typed
+        // `add formfield` row; collapsing into `add p` flattens the
+        // ffData wrapper into paragraph props that AddParagraph ignores.
+        if (r.Type == "formfield") return false;
         // BUG-DUMP6-05 / BUG-DUMP10-05: hyperlink-wrapped run (url, anchor,
         // or tooltip-only via isHyperlink sentinel) must re-emit as
         // `add hyperlink` — `add p` does not consume url/anchor.
@@ -694,6 +720,48 @@ public static partial class WordBatchEmitter
             Parent = eqParent,
             Type = "equation",
             Props = eqProps
+        });
+        return true;
+    }
+
+    // R14-bug1+2: legacy form field synth from CollapseFieldChains. The
+    // begin run's <w:ffData> was unpacked onto ff*-prefixed Format keys
+    // (ffName, ffType, ffDefault, ffMaxLength, ffChecked, ffItems,
+    // ffHelpText, ffStatusText, ffEntryMacro, ffExitMacro, ffCalcOnExit,
+    // ffTextType, ffTextFormat, ffCheckBoxSize, ffEnabled). Map back to
+    // AddFormField's accepted keys (drop the `ff` prefix, lowercase the
+    // first letter) so replay rebuilds the FieldChar + FormFieldData +
+    // Bookmark chain with every original wrapper intact.
+    private static bool TryEmitFormFieldRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
+    {
+        if (run.Type != "formfield") return false;
+        var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // CONSISTENCY(formfield-keys): AddFormField accepts type/formfieldtype,
+        // name, default, maxLength, checked, items, helpText, statusText,
+        // entryMacro, exitMacro, calcOnExit, textType, textFormat,
+        // checkBoxSize, enabled. Mirror the AddFormField accepted vocabulary.
+        foreach (var (k, v) in run.Format)
+        {
+            if (v == null) continue;
+            if (!k.StartsWith("ff", StringComparison.OrdinalIgnoreCase)) continue;
+            // Strip the "ff" prefix and lowercase the first remaining char so
+            // ffName→name, ffDefault→default, etc.
+            if (k.Length <= 2) continue;
+            var bare = char.ToLowerInvariant(k[2]) + k.Substring(3);
+            var sv = v.ToString();
+            if (string.IsNullOrEmpty(sv)) continue;
+            props[bare] = sv!;
+        }
+        // Preserve cached display text where AddFormField would otherwise
+        // emit the placeholder symbol (text input) or "false" (checkbox).
+        if (!string.IsNullOrEmpty(run.Text) && !props.ContainsKey("text"))
+            props["text"] = run.Text!;
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = paraTargetPath,
+            Type = "formfield",
+            Props = props,
         });
         return true;
     }

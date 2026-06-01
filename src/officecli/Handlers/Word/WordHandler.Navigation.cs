@@ -1811,7 +1811,83 @@ public partial class WordHandler
                 if (fldCharEl.Dirty?.Value == true)
                     node.Format["dirty"] = true;
                 if (fldCharEl.FormFieldData != null)
+                {
                     node.Format["hasFormFieldData"] = true;
+                    // R14-bug1+2: surface the ffData payload on the fieldChar
+                    // begin node so WordBatchEmitter.CollapseFieldChains can
+                    // emit a `type=formfield` synth carrying the full
+                    // ffData props (name, default, maxLength, checkBox.size,
+                    // checkBox.default, ddList items, helpText, statusText,
+                    // entryMacro, exitMacro, calcOnExit, textInput.type,
+                    // textInput.format). Without these keys, the dump
+                    // emitted a bare `add field instr=FORMTEXT` row that
+                    // walked the BuildFieldAddProps default arm and lost
+                    // every ffData wrapper on replay.
+                    var ffd = fldCharEl.FormFieldData;
+                    var ffName = ffd.GetFirstChild<FormFieldName>()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(ffName))
+                        node.Format["ffName"] = ffName;
+                    var ffEnabled = ffd.GetFirstChild<Enabled>();
+                    if (ffEnabled != null)
+                        node.Format["ffEnabled"] = ffEnabled.Val?.Value ?? true;
+                    var ffHelp = ffd.GetFirstChild<HelpText>()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(ffHelp))
+                        node.Format["ffHelpText"] = ffHelp;
+                    var ffStatus = ffd.GetFirstChild<StatusText>()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(ffStatus))
+                        node.Format["ffStatusText"] = ffStatus;
+                    var ffEntry = ffd.GetFirstChild<EntryMacro>()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(ffEntry))
+                        node.Format["ffEntryMacro"] = ffEntry;
+                    var ffExit = ffd.GetFirstChild<ExitMacro>()?.Val?.Value;
+                    if (!string.IsNullOrEmpty(ffExit))
+                        node.Format["ffExitMacro"] = ffExit;
+                    var ffCalc = ffd.GetFirstChild<CalculateOnExit>();
+                    if (ffCalc != null)
+                        node.Format["ffCalcOnExit"] = ffCalc.Val?.Value ?? true;
+
+                    var ti = ffd.GetFirstChild<TextInput>();
+                    var cb = ffd.GetFirstChild<CheckBox>();
+                    var dd = ffd.GetFirstChild<DropDownListFormField>();
+                    if (ti != null)
+                    {
+                        node.Format["ffType"] = "text";
+                        var tDef = ti.GetFirstChild<DefaultTextBoxFormFieldString>()?.Val?.Value;
+                        if (!string.IsNullOrEmpty(tDef))
+                            node.Format["ffDefault"] = tDef;
+                        var tMax = ti.GetFirstChild<MaxLength>()?.Val?.Value;
+                        if (tMax != null && tMax.Value != 0)
+                            node.Format["ffMaxLength"] = (int)tMax;
+                        var tTyp = ti.GetFirstChild<TextBoxFormFieldType>()?.Val?.InnerText;
+                        if (!string.IsNullOrEmpty(tTyp))
+                            node.Format["ffTextType"] = tTyp;
+                        var tFmt = ti.GetFirstChild<Format>()?.Val?.Value;
+                        if (!string.IsNullOrEmpty(tFmt))
+                            node.Format["ffTextFormat"] = tFmt;
+                    }
+                    else if (cb != null)
+                    {
+                        node.Format["ffType"] = "checkbox";
+                        var cChecked = cb.GetFirstChild<Checked>();
+                        var cDefault = cb.GetFirstChild<DefaultCheckBoxFormFieldState>();
+                        var isChk = cChecked?.Val?.Value ?? cDefault?.Val?.Value ?? false;
+                        node.Format["ffChecked"] = isChk;
+                        var cSize = cb.GetFirstChild<FormFieldSize>()?.Val?.Value;
+                        if (!string.IsNullOrEmpty(cSize))
+                            node.Format["ffCheckBoxSize"] = cSize;
+                    }
+                    else if (dd != null)
+                    {
+                        node.Format["ffType"] = "dropdown";
+                        var items = dd.Elements<ListEntryFormField>()
+                            .Select(li => li.Val?.Value ?? "").ToList();
+                        if (items.Count > 0)
+                            node.Format["ffItems"] = string.Join(",", items);
+                        var dSel = dd.GetFirstChild<DropDownListSelection>()?.Val?.Value;
+                        if (dSel != null)
+                            node.Format["ffDefault"] = (int)dSel;
+                    }
+                }
             }
         }
         if (node.Type == "run")

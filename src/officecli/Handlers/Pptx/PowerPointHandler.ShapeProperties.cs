@@ -12,6 +12,15 @@ namespace OfficeCli.Handlers;
 
 public partial class PowerPointHandler
 {
+    // CONSISTENCY(merge-bool-form): real PowerPoint emits xsd:boolean attrs
+    // hMerge / vMerge as "1" / "0". OpenXml SDK's BooleanValue(true)
+    // serialises as "true" by default — diff-friendly for tests but a visible
+    // drift versus the source XML. Wrap construction in a helper that pins
+    // the lexical form to "1" so dump→replay round-trips the canonical
+    // attribute value (also accepted by PowerPoint, but minimises noise).
+    private static DocumentFormat.OpenXml.BooleanValue OneOnBool()
+        => new DocumentFormat.OpenXml.BooleanValue(true) { InnerText = "1" };
+
     private static List<Drawing.Run> GetAllRuns(Shape shape)
     {
         return shape.TextBody?.Elements<Drawing.Paragraph>()
@@ -1863,7 +1872,7 @@ public partial class PowerPointHandler
                             var gsCells = gsRow.Elements<Drawing.TableCell>().ToList();
                             var gsIdx = gsCells.IndexOf(cell);
                             for (int mi = gsIdx + 1; mi < gsIdx + span && mi < gsCells.Count; mi++)
-                                gsCells[mi].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                gsCells[mi].HorizontalMerge = OneOnBool();
                             // BUG-R5-table-merge BUG-8: when the anchor cell
                             // already has rowSpan>1, the corner cells in each
                             // continuation row need both hMerge=true (covered
@@ -1879,8 +1888,8 @@ public partial class PowerPointHandler
                                     var rowCells = gsRows[ri].Elements<Drawing.TableCell>().ToList();
                                     for (int ci = gsIdx + 1; ci < gsIdx + span && ci < rowCells.Count; ci++)
                                     {
-                                        rowCells[ci].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
-                                        rowCells[ci].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                        rowCells[ci].HorizontalMerge = OneOnBool();
+                                        rowCells[ci].VerticalMerge = OneOnBool();
                                     }
                                 }
                             }
@@ -1939,11 +1948,11 @@ public partial class PowerPointHandler
                         {
                             var belowCells = rsRows2[ri].Elements<Drawing.TableCell>().ToList();
                             if (rsColIdx2 < belowCells.Count)
-                                belowCells[rsColIdx2].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                belowCells[rsColIdx2].VerticalMerge = OneOnBool();
                             for (int ci = rsColIdx2 + 1; ci < rsColIdx2 + rsAnchorGridSpan && ci < belowCells.Count; ci++)
                             {
-                                belowCells[ci].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
-                                belowCells[ci].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                belowCells[ci].HorizontalMerge = OneOnBool();
+                                belowCells[ci].VerticalMerge = OneOnBool();
                             }
                         }
                     }
@@ -1971,7 +1980,7 @@ public partial class PowerPointHandler
                         span = System.Math.Max(1, System.Math.Min(span, cells.Count - idx));
                         cell.GridSpan = new DocumentFormat.OpenXml.Int32Value(span);
                         for (int mi = idx + 1; mi < idx + span && mi < cells.Count; mi++)
-                            cells[mi].HorizontalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                            cells[mi].HorizontalMerge = OneOnBool();
                     }
                     else
                     {
@@ -1999,7 +2008,7 @@ public partial class PowerPointHandler
                         {
                             var belowCells = rows[ri].Elements<Drawing.TableCell>().ToList();
                             if (colIdx < belowCells.Count)
-                                belowCells[colIdx].VerticalMerge = new DocumentFormat.OpenXml.BooleanValue(true);
+                                belowCells[colIdx].VerticalMerge = OneOnBool();
                         }
                     }
                     else

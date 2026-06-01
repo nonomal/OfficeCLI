@@ -649,6 +649,18 @@ internal static partial class ChartHelper
         var bubbleChart = plotArea.GetFirstChild<C.BubbleChart>();
         var bubbleScale = bubbleChart?.GetFirstChild<C.BubbleScale>()?.Val?.Value;
         if (bubbleScale != null && bubbleScale != 100) node.Format["bubbleScale"] = (int)bubbleScale;
+        // fuzzer-1: <c:sizeRepresents val="width|area"> — controls how
+        // bubble z-values map to bubble radius. PowerPoint defaults to
+        // "area" when the element is absent. Emit only when explicitly
+        // "width" so the default round-trip stays the empty element shape.
+        var sizeReprVal = bubbleChart?.GetFirstChild<C.SizeRepresents>()?.Val?.Value;
+        if (sizeReprVal != null && sizeReprVal == C.SizeRepresentsValues.Width)
+            node.Format["sizeRepresents"] = "width";
+        // fuzzer-2: <c:showNegBubbles val="0|1"> — controls visibility of
+        // bubbles whose z-value is negative. Schema default is true; emit
+        // only when explicitly false so untouched charts stay clean.
+        var showNegVal = bubbleChart?.GetFirstChild<C.ShowNegativeBubbles>()?.Val?.Value;
+        if (showNegVal == false) node.Format["showNegBubbles"] = "false";
 
         // DataLabels additional detail
         if (dataLabels != null)

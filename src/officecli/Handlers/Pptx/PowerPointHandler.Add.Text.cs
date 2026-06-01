@@ -442,7 +442,21 @@ public partial class PowerPointHandler
         }
         else
         {
-            targetPara.AppendChild(br);
+            // OOXML schema: <a:br> must precede <a:endParaRPr> inside <a:p>.
+            // AddParagraph seeds an empty paragraph that already carries an
+            // <a:endParaRPr> (and the seeded shape factory adds it whenever
+            // a body-text placeholder is materialised). Appending the break
+            // unconditionally drops it AFTER endParaRPr and PowerPoint refuses
+            // the file (0x80070570) because the schema forbids that order.
+            // Insert before the first endParaRPr when present so the break
+            // lands in the only legal slot — between runs/breaks and the
+            // closing endParaRPr. Falls back to append when the paragraph
+            // has no endParaRPr seed.
+            var endParaRPr = targetPara.GetFirstChild<Drawing.EndParagraphRunProperties>();
+            if (endParaRPr != null)
+                targetPara.InsertBefore(br, endParaRPr);
+            else
+                targetPara.AppendChild(br);
         }
 
         var brIdx = targetPara.Elements<Drawing.Break>().ToList().FindIndex(b => ReferenceEquals(b, br)) + 1;

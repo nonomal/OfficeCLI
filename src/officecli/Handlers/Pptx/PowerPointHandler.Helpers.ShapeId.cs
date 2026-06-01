@@ -91,10 +91,22 @@ public partial class PowerPointHandler
             // a caller-supplied id (dump→replay round-trip) the relevant
             // scope is the parent shapeTree. Without this, dump emitted
             // id=2 on every slide would error from slide 2 onward.
+            //
+            // CONSISTENCY(sptree-root-id-not-a-sibling): the shapeTree's own
+            // <p:nvGrpSpPr><p:cNvPr id="1"/></p:nvGrpSpPr> is the wrapper, not
+            // a child shape. PowerPoint routinely authors a title placeholder
+            // with id=1 alongside the spTree root id=1 (see e.g. video.pptx
+            // slide2 — `<p:cNvPr id="1" name="">` for the group AND
+            // `<p:cNvPr id="1" name="Title">` for the title sp). Treating the
+            // root id as a collision blocks legitimate dump→replay of any
+            // such PowerPoint-authored slide.
             if (shapeTree != null)
             {
+                var rootNvPr = shapeTree.GetFirstChild<NonVisualGroupShapeProperties>()
+                    ?.GetFirstChild<NonVisualDrawingProperties>();
                 foreach (var nvPr in shapeTree.Descendants<NonVisualDrawingProperties>())
                 {
+                    if (ReferenceEquals(nvPr, rootNvPr)) continue;
                     if (nvPr.Id?.HasValue == true && nvPr.Id.Value == requestedId)
                         throw new ArgumentException(
                             $"id {requestedId} already in use in this shapeTree. " +

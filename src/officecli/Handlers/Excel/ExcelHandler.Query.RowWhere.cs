@@ -53,9 +53,10 @@ public partial class ExcelHandler
     //               column predicate, so skip it here.
     //   col.key   → force TABLE COLUMN — bypass the row-property / numeric guards
     //               so a column literally named `height` (or `2`) stays reachable.
-    // A bare key keeps the legacy precedence (row property wins, then numeric
-    // index, else column); bare keys that hit the row-property guard are reported
-    // via `bareAttrKeys` so the caller can flag a silent column-shadow collision.
+    // A bare key: a row-property name is taken as that property (reported via
+    // `bareAttrKeys` so the caller can flag a column-shadow collision); a bare
+    // number WITH an operator is rejected (reserved for the row index — use
+    // col.N); anything else is a column name.
     private static List<AttributeFilter.Condition> ParseRowColumnPredicates(
         string selector, out List<string> bareAttrKeys)
     {
@@ -69,11 +70,16 @@ public partial class ExcelHandler
             if (key.StartsWith('@')) continue;               // force row property
             bool forcedColumn = Regex.IsMatch(key, @"^col(?:umn)?\.", RegexOptions.IgnoreCase);
             if (!forcedColumn && RowAttributeKeys.Contains(key)) { bareAttrKeys.Add(key); continue; }
-            // A purely-numeric key reaching here is a digit-named COLUMN (e.g. a
-            // header literally "2"), NOT the positional `row[2]` index: this regex
-            // mandates an operator, so the bare index form (`row[2]`, no operator)
-            // never enters this loop — it is resolved by FilterSelectorPositionalIndex.
-            // Hence no int.TryParse skip; `row[2>40]` resolves the column named "2".
+            // A bare number is reserved for the positional row index, full stop.
+            // `row[2]` (no operator) is the 2nd row; a bare number WITH an operator
+            // (`row[2>40]`) is rejected outright rather than quietly meaning "the
+            // column named 2" — a number in brackets must always read as an index.
+            // To filter a digit-named column, be explicit with `col.2`.
+            if (!forcedColumn && int.TryParse(key, out _))
+                throw new ArgumentException(
+                    $"row[{key}{m.Groups[4].Value}{m.Groups[5].Value.Trim()}] is ambiguous: a bare number " +
+                    $"is read as the row index, so it cannot filter a column. " +
+                    $"Use 'col.{key}' to filter a column named '{key}', or 'row[{key}]' (no operator) for that row.");
             conds.Add(new AttributeFilter.Condition(key, MapRowPredicateOp(m.Groups[4].Value), m.Groups[5].Value.Trim()));
         }
         return conds;

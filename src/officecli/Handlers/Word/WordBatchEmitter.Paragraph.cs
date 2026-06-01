@@ -1293,13 +1293,23 @@ public static partial class WordBatchEmitter
         while (i < runs.Count)
         {
             var run = runs[i];
-            string? url = null, anchor = null;
+            string? url = null, anchor = null, hlParent = null;
             if (run.Type == "run" || run.Type == "r")
             {
                 if (run.Format.TryGetValue("url", out var u))
                     url = u?.ToString();
                 if (run.Format.TryGetValue("anchor", out var a))
                     anchor = a?.ToString();
+                // `_hyperlinkParent` (e.g. `/body/p[1]/hyperlink[2]`) is the
+                // unique-per-wrapper marker NodeBuilder stamps on every run
+                // hosted inside a `<w:hyperlink>`. Two sibling hyperlinks
+                // sharing the same target URL (e.g. two "Read more →" links
+                // pointing at /pricing) carry identical `url`/`anchor` but
+                // distinct `_hyperlinkParent` paths, so the URL-only equality
+                // pre-R12 collapsed them into one item whose text was
+                // "Read more →Read more →" — silent loss of the second link.
+                if (run.Format.TryGetValue("_hyperlinkParent", out var hp))
+                    hlParent = hp?.ToString();
             }
             if (string.IsNullOrEmpty(url) && string.IsNullOrEmpty(anchor))
             {
@@ -1307,7 +1317,9 @@ public static partial class WordBatchEmitter
                 i++;
                 continue;
             }
-            // Walk forward over consecutive runs with the same url/anchor.
+            // Walk forward over consecutive runs with the same url/anchor AND
+            // the same hyperlink-wrapper path. Differing `_hyperlinkParent`
+            // values mark a hyperlink boundary even when URL/anchor match.
             int j = i + 1;
             var sb = new System.Text.StringBuilder(run.Text ?? "");
             while (j < runs.Count)
@@ -1316,10 +1328,13 @@ public static partial class WordBatchEmitter
                 if (next.Type != "run" && next.Type != "r") break;
                 next.Format.TryGetValue("url", out var nUrlObj);
                 next.Format.TryGetValue("anchor", out var nAncObj);
+                next.Format.TryGetValue("_hyperlinkParent", out var nHlpObj);
                 var nUrl = nUrlObj?.ToString();
                 var nAnchor = nAncObj?.ToString();
+                var nHlParent = nHlpObj?.ToString();
                 if (!string.Equals(nUrl, url, StringComparison.Ordinal)) break;
                 if (!string.Equals(nAnchor, anchor, StringComparison.Ordinal)) break;
+                if (!string.Equals(nHlParent, hlParent, StringComparison.Ordinal)) break;
                 sb.Append(next.Text ?? "");
                 j++;
             }

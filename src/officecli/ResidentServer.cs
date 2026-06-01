@@ -1433,27 +1433,28 @@ public class ResidentServer : IDisposable
         {
             var (wItems, wWarnings) = WordBatchEmitter.EmitWordWithWarnings(word, path);
             items = wItems;
-            // R10-bug1: surface docx dump warnings via stderr so the
-            // envelope-builder in HandleClient picks them up as
-            // envelope.warnings — same wiring as the pptx branch below.
-            // R11 aux-parts: include the Reason on the stderr line so
-            // resident-routed callers see the same explanation the direct
-            // path (CommandBuilder.Dump.cs) puts in its envelope-side message.
-            foreach (var w in wWarnings)
-                Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
+            // CONSISTENCY(dump-text-clean-output): emit warnings to stderr
+            // only in --json mode. Text-mode pipelines (`dump 2>&1 | batch
+            // --input -`) saw warnings inlined after the JSON array and
+            // batch then failed to parse. JSON callers still see warnings
+            // via the envelope warnings[] field; text callers must inspect
+            // the envelope directly or re-run with --json.
+            if (req.Json)
+            {
+                foreach (var w in wWarnings)
+                    Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
+            }
         }
         else if (_handler is OfficeCli.Handlers.PowerPointHandler ppt)
         {
             var (pItems, pWarnings) = OfficeCli.Handlers.PptxBatchEmitter.EmitPptx(ppt, path);
             items = pItems;
-            // Surface unsupported-element warnings via stderr so the
-            // envelope-builder in HandleClient picks them up as
-            // envelope.warnings (matches non-resident dispatch in
-            // CommandBuilder.Dump.cs). R12a aux-parts: include Reason so
-            // resident-routed callers see the same explanation as the
-            // direct path.
-            foreach (var w in pWarnings)
-                Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
+            // CONSISTENCY(dump-text-clean-output): see docx branch above.
+            if (req.Json)
+            {
+                foreach (var w in pWarnings)
+                    Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
+            }
         }
         else
         {

@@ -107,12 +107,15 @@ static partial class CommandBuilder
                             Message = $"skipped {w.Element} at {w.Path}: {w.Reason}",
                             Code = "unsupported_element"
                         });
-                        // R11 aux-parts: include the reason on the stderr line
-                        // so resident-routed callers (whose BuildWarnings parses
-                        // stderr text back into envelope.warnings) also see the
-                        // explanation, not just "<element> at <path>". The
-                        // direct-path message above already includes Reason.
-                        Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
+                        // CONSISTENCY(dump-text-clean-output): emit warnings to
+                        // stderr only in --json mode (text-mode pipelines like
+                        // `dump 2>&1 | batch --input -` saw warnings mixed into
+                        // the JSON array and batch parse failed). JSON callers
+                        // pick warnings up via the envelope warnings[] field;
+                        // text callers must inspect the envelope directly or
+                        // re-run with --json.
+                        if (json)
+                            Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
                     }
                 }
             }
@@ -131,14 +134,13 @@ static partial class CommandBuilder
                             Message = $"skipped {w.Element} on {w.SlidePath}: {w.Reason}",
                             Code = "unsupported_element"
                         });
-                        // Human-visible stderr line; resident's BuildWarnings
-                        // also picks this up so resident-routed callers see
-                        // an equivalent envelope.warnings entry.
-                        // R12a aux-parts: include the reason so the stderr line
-                        // carries the same explanation as the envelope-side
-                        // message above (per-slide and per-aux-part warnings
-                        // both go through this branch).
-                        Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
+                        // CONSISTENCY(dump-text-clean-output): only emit to
+                        // stderr in --json mode. Text-mode callers piping
+                        // `dump 2>&1 | batch --input -` got warnings inlined
+                        // after the JSON array and `batch` then failed to
+                        // parse. See docx branch above for the rationale.
+                        if (json)
+                            Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
                     }
                 }
             }

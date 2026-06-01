@@ -190,6 +190,19 @@ public static partial class PptxBatchEmitter
         var pNs = System.Xml.Linq.XNamespace.Get(
             "http://schemas.openxmlformats.org/presentationml/2006/main");
 
+        // CT_Presentation child order (ECMA-376 §19.2.1.26) is significant —
+        // PowerPoint's strict validator (and replay's OOXML validator) flags
+        // any element that appears after a later-schema sibling as an
+        // "unexpected child". The relevant tail is:
+        //   …, custShowLst, photoAlbum, custDataLst, kinsoku,
+        //   defaultTextStyle, modifyVerifier, extLst.
+        // Emit in schema order so each `raw-set append` lands on the
+        // trailing-most slot at that moment. Previously extLst was appended
+        // before kinsoku / defaultTextStyle / photoAlbum, which then chained
+        // after extLst in the wrong order — PowerPoint refused the file
+        // (0x80070570) on every deck that carried both a section list and
+        // a deck-level default text style (gov_bja_template, …).
+
         // custShowLst — `<p:custShowLst><p:custShow><p:sldLst><p:sld r:id="…"/>`.
         var custShow = doc.Root.Element(pNs + "custShowLst");
         if (custShow != null)
@@ -209,12 +222,12 @@ public static partial class PptxBatchEmitter
                 Reason: "Custom slide shows reference slides by relationship id; replay's `add slide` mints fresh rIds, so the custShow targets may point at stale relationships. Verify in PowerPoint before relying on the round-tripped show."));
         }
 
-        // extLst — `<p:extLst><p:ext uri="…">…</p:ext>` (sectionLst, modifyVerifier,
-        // misc 2010+ extensions).
-        var ext = doc.Root.Element(pNs + "extLst");
-        if (ext != null)
+        // photoAlbum — flags marking the deck as a photo album
+        // (`<p:photoAlbum bw="…" showCaptions="…" layout="…" frame="…"/>`).
+        var photo = doc.Root.Element(pNs + "photoAlbum");
+        if (photo != null)
         {
-            var xml = CanonicalizeRawXml(ext.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
+            var xml = CanonicalizeRawXml(photo.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
             items.Add(new BatchItem
             {
                 Command = "raw-set",
@@ -224,17 +237,11 @@ public static partial class PptxBatchEmitter
                 Xml = xml,
             });
             ctx.Unsupported.Add(new UnsupportedWarning(
-                Element: "presentation.extLst",
+                Element: "presentation.photoAlbum",
                 SlidePath: "/presentation",
-                Reason: "Presentation extensions (sectionLst / modifyVerifier / …) may reference slides by rId; replay mints fresh rIds, so references can go stale. Section names survive; section → slide membership may need manual rewiring."));
+                Reason: "photoAlbum (PowerPoint Photo Album metadata: bw / captions / layout / frame attributes) is preserved verbatim via raw-set; no typed Set vocabulary exists for these attributes."));
         }
 
-        // CONSISTENCY(emit-presentation-extras): the typed Add/Set/EmitPresentationProps
-        // surface still doesn't model these presentation-level children, but
-        // dropping them silently broke deck-defaults round-trip. Same
-        // best-effort raw-set append + UnsupportedWarning strategy as
-        // custShowLst / extLst above. Order in spec: kinsoku, defaultTextStyle,
-        // photoAlbum (CT_Presentation §19.2.1.26).
         // kinsoku — East-Asian line-break rules (`<p:kinsoku invalChars=… hangChars=…/>`).
         var kins = doc.Root.Element(pNs + "kinsoku");
         if (kins != null)
@@ -275,12 +282,12 @@ public static partial class PptxBatchEmitter
                 Reason: "defaultTextStyle (deck-level paragraph defaults inherited by layouts/masters) is preserved verbatim via raw-set; no typed Set surface for individual level paragraph properties at this level yet."));
         }
 
-        // photoAlbum — flags marking the deck as a photo album
-        // (`<p:photoAlbum bw="…" showCaptions="…" layout="…" frame="…"/>`).
-        var photo = doc.Root.Element(pNs + "photoAlbum");
-        if (photo != null)
+        // extLst — MUST be last (CT_Presentation tail). `<p:extLst><p:ext uri="…">`
+        // carries sectionLst, modifyVerifier, misc 2010+ extensions.
+        var ext = doc.Root.Element(pNs + "extLst");
+        if (ext != null)
         {
-            var xml = CanonicalizeRawXml(photo.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
+            var xml = CanonicalizeRawXml(ext.ToString(System.Xml.Linq.SaveOptions.DisableFormatting));
             items.Add(new BatchItem
             {
                 Command = "raw-set",
@@ -290,9 +297,9 @@ public static partial class PptxBatchEmitter
                 Xml = xml,
             });
             ctx.Unsupported.Add(new UnsupportedWarning(
-                Element: "presentation.photoAlbum",
+                Element: "presentation.extLst",
                 SlidePath: "/presentation",
-                Reason: "photoAlbum (PowerPoint Photo Album metadata: bw / captions / layout / frame attributes) is preserved verbatim via raw-set; no typed Set vocabulary exists for these attributes."));
+                Reason: "Presentation extensions (sectionLst / modifyVerifier / …) may reference slides by rId; replay mints fresh rIds, so references can go stale. Section names survive; section → slide membership may need manual rewiring."));
         }
     }
 }

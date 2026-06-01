@@ -107,25 +107,34 @@ public partial class PowerPointHandler
         {
             // CONSISTENCY(color-input-form): srgbClr with an a:alpha child
             // encodes a per-stop opacity (gradients use it for fade-in/out
-            // stops). Use ReadColorFromFill's logic — wrap in a SolidFill
-            // shell so the canonical 8-digit #RRGGBBAA emit path runs, then
-            // also append color transforms (lumMod / shade / tint / …) the
-            // same way ReadColorFromFill does. Without this, a stop like
-            // <a:srgbClr val="00B4D8"><a:alpha val="30000"/></a:srgbClr>
-            // surfaced as bare "#00B4D8" and dump→replay dropped the alpha.
+            // stops). Wrap the trailing alpha byte into a CSS #RRGGBBAA when
+            // the conversion is lossless; otherwise fall back to a raw
+            // permille suffix (+alpha=N) so dump→replay preserves the OOXML
+            // ST_FixedPercentage value byte-for-byte. Without the lossless
+            // check, an alpha of 30000 permille → byte 0x4C → 29803 permille
+            // on parse, drifting the stop color every round-trip.
             var rgbCopy = (Drawing.RgbColorModelHex)rgb.CloneNode(true);
             var hex = ParseHelpers.FormatHexColor(rgb.Val.Value);
             var alphaVal = rgb.GetFirstChild<Drawing.Alpha>()?.Val?.Value;
-            string baseHex;
-            if (alphaVal == null || alphaVal >= 100000)
-                baseHex = hex;
-            else
+            string baseHex = hex;
+            string? alphaSuffix = null;
+            if (alphaVal != null && alphaVal < 100000)
             {
                 var alphaByte = (int)Math.Round(alphaVal.Value / 100000.0 * 255);
                 alphaByte = Math.Clamp(alphaByte, 0, 255);
-                baseHex = $"{hex}{alphaByte:X2}";
+                // CONSISTENCY(gradient-alpha-permille): round-trip the byte
+                // back through the same formula SanitizeColorForOoxml uses
+                // on parse ((int)(byte/255.0*100000)) — if it lands on the
+                // original permille we can safely use the compact 8-hex
+                // form; otherwise the suffix carries the exact integer.
+                var roundtrip = (int)(alphaByte / 255.0 * 100000);
+                if (roundtrip == alphaVal.Value)
+                    baseHex = $"{hex}{alphaByte:X2}";
+                else
+                    alphaSuffix = $"+alpha={alphaVal.Value}";
             }
-            return AppendColorTransforms(baseHex, rgbCopy);
+            var withTransforms = AppendColorTransforms(baseHex, rgbCopy);
+            return alphaSuffix == null ? withTransforms : withTransforms + alphaSuffix;
         }
         var scheme = gs.GetFirstChild<Drawing.SchemeColor>();
         // .Val.Value is an EnumValue<SchemeColorValues> — its ToString() returns the

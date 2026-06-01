@@ -316,6 +316,15 @@ public static partial class PptxBatchEmitter
         if (spTreeOpen < 0 || spTreeClose <= spTreeOpen) return;
         var spTreeRegion = xml.Substring(spTreeOpen, spTreeClose - spTreeOpen);
 
+        // CONSISTENCY(mc-alt-zorder): preserve sibling order so 3D-model /
+        // emerging-content AlternateContent lands at the same z-order
+        // position the source intended. The semantic walk emits regular
+        // <p:sp>/<p:pic>/<p:graphicFrame> first, then this catch-all ran
+        // with action=append — pushing AlternateContent to the end of
+        // spTree and inverting z-order (3D model floated above text boxes
+        // it was meant to sit behind). Count how many shape-like siblings
+        // precede each AlternateContent in source order; insert before the
+        // (N+1)th renderable child on replay.
         int cursor = 0;
         while (true)
         {
@@ -325,28 +334,92 @@ public static partial class PptxBatchEmitter
             if (altEnd < 0) break;
             altEnd += "</mc:AlternateContent>".Length;
             var slice = spTreeRegion.Substring(altIdx, altEnd - altIdx);
-            cursor = altEnd;
 
             // Skip blocks owned by a specific emitter.
-            if (slice.Contains("am3d:", StringComparison.Ordinal)
+            bool skip = slice.Contains("am3d:", StringComparison.Ordinal)
                 || slice.Contains("Requires=\"am3d\"", StringComparison.Ordinal)
                 || slice.Contains("<dgm:relIds", StringComparison.Ordinal)
                 || slice.Contains("<p:oleObj", StringComparison.Ordinal)
                 || slice.Contains("<p:audio", StringComparison.Ordinal)
-                || slice.Contains("<p:video", StringComparison.Ordinal))
-                continue;
+                || slice.Contains("<p:video", StringComparison.Ordinal);
+
+            int precedingShapeCount = skip
+                ? 0
+                : CountRenderableSiblingsBefore(spTreeRegion, altIdx);
+            // siblings after this AlternateContent in source order — the
+            // replay file lays them out in the same order, so if any
+            // exist we can pin a positional `insertbefore` target. When
+            // none follow (AlternateContent was the last entry), append.
+            int followingShapeCount = skip
+                ? 0
+                : CountRenderableSiblingsBefore(spTreeRegion, spTreeRegion.Length)
+                    - precedingShapeCount - 1; // -1 for the AlternateContent itself
+
+            cursor = altEnd;
+            if (skip) continue;
 
             string canon;
             try { canon = NormalizeSlideRawSlice(slice); }
             catch { canon = slice; }
-            items.Add(new BatchItem
+
+            if (followingShapeCount > 0)
             {
-                Command = "raw-set",
-                Part = slidePath,
-                Xpath = "/p:sld/p:cSld/p:spTree",
-                Action = "append",
-                Xml = canon,
-            });
+                // Replay spTree (built by the semantic walk) lists
+                // structural <p:nvGrpSpPr>/<p:grpSpPr> followed by the
+                // appended shapes/pictures/graphicFrames/groupshapes/
+                // connectionShapes in source order. precedingShapeCount
+                // counts renderable elements before this AlternateContent
+                // in the source spTree, so the (N+1)th renderable child on
+                // replay is the right insertion target — earlier
+                // AlternateContent siblings (emitted before us in this
+                // same loop) bump the index when they sit before more
+                // renderable shapes too.
+                var renderableXpath =
+                    "/p:sld/p:cSld/p:spTree/*[self::p:sp or self::p:pic "
+                    + "or self::p:cxnSp or self::p:graphicFrame or self::p:grpSp "
+                    + "or self::mc:AlternateContent]"
+                    + $"[{precedingShapeCount + 1}]";
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = slidePath,
+                    Xpath = renderableXpath,
+                    Action = "insertbefore",
+                    Xml = canon,
+                });
+            }
+            else
+            {
+                // No renderable sibling follows in the source; append is
+                // the right action even relative to other AlternateContent
+                // blocks (which also append in source order).
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = slidePath,
+                    Xpath = "/p:sld/p:cSld/p:spTree",
+                    Action = "append",
+                    Xml = canon,
+                });
+            }
         }
+    }
+
+    // Count <p:sp>/<p:pic>/<p:cxnSp>/<p:graphicFrame>/<p:grpSp>/
+    // <mc:AlternateContent> opening tags before <paramref name="beforeOffset"/>
+    // in the spTree region. Self-closing variants count too. Used by
+    // EmitGenericAlternateContentForSlide to pin a sibling index.
+    private static int CountRenderableSiblingsBefore(string spTreeRegion, int beforeOffset)
+    {
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"<(?:p:sp|p:pic|p:cxnSp|p:graphicFrame|p:grpSp|mc:AlternateContent)\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        int count = 0;
+        foreach (System.Text.RegularExpressions.Match m in rx.Matches(spTreeRegion))
+        {
+            if (m.Index >= beforeOffset) break;
+            count++;
+        }
+        return count;
     }
 }

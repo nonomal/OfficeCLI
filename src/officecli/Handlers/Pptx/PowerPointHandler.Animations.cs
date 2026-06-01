@@ -2462,8 +2462,16 @@ public partial class PowerPointHandler
 
         if (trans.AdvanceAfterTime != null)
             node.Format["advanceTime"] = trans.AdvanceAfterTime.Value;
-        if (trans.AdvanceOnClick?.Value == false)
-            node.Format["advanceClick"] = false;
+        // CONSISTENCY(transition-advclick-preserve): surface the @advClick
+        // attribute whenever the source serialized it explicitly — both
+        // false (semantically meaningful: disable click-to-advance) AND
+        // true (preserves the byte-equal form some templates ship). The
+        // prior `== false` filter dropped `advClick="1"` on round-trip,
+        // forcing the Setter's strip-the-default normalization to win
+        // over the source's explicit emit. emit both forms; SetAdvanceClick
+        // continues to normalize on the write side.
+        if (trans.AdvanceOnClick?.HasValue == true)
+            node.Format["advanceClick"] = trans.AdvanceOnClick.Value;
     }
 
     /// <summary>

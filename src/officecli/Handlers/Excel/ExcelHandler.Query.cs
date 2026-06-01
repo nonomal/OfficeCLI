@@ -1626,21 +1626,51 @@ public partial class ExcelHandler
             // row[hidden=true] which filters row attributes. Column predicates
             // resolve header names against a ListObject — see
             // ExcelHandler.Query.RowWhere.cs.
-            var rowColPreds = ParseRowColumnPredicates(selector, out var bareAttrKeys);
-            // A bare key that names a row PROPERTY (height/hidden/...) is taken as
-            // that property. But if a bound table also has a column of that exact
-            // name, the bare form is genuinely ambiguous — error rather than
-            // silently shadow the column. The escape hatches: `col.<name>` forces
-            // the column, `@<name>` forces the row property.
-            foreach (var ak in bareAttrKeys)
+            // Parse the bracket(s) as one expression tree (single predicate,
+            // stacked [a][b], in-bracket `and`, or `or` / parens — uniformly).
+            // Classify the leaf predicates into table COLUMNS vs row PROPERTIES
+            // (height/hidden/...), then either run the tree-aware row-where over
+            // the columns or fall through to the generic post-filter for row
+            // properties. e.g. row[金额>5000 or 金额<100], row[Salary>5000][Age<40].
+            var rowExpr = AttributeFilter.ParseExpr(selector);
+            if (rowExpr != null)
             {
-                if (RowKeyCollidesWithColumn(ak, parsed.Sheet))
+                // `@key` forces ROW PROPERTY; `col.key` forces COLUMN. The '@' is
+                // stripped from leaf keys, so recover the forced set from the raw
+                // selector to keep it out of the column-shadow collision check.
+                var atForced = new HashSet<string>(
+                    Regex.Matches(selector, @"@([\w.]+)").Select(m => m.Groups[1].Value),
+                    StringComparer.OrdinalIgnoreCase);
+                int colCount = 0, attrCount = 0;
+                var collisionCandidates = new List<string>();
+                foreach (var lc in AttributeFilter.LeafConditions(rowExpr))
+                {
+                    bool forcedCol = Regex.IsMatch(lc.Key, @"^col(?:umn)?\.", RegexOptions.IgnoreCase);
+                    if (!forcedCol && int.TryParse(lc.Key, out _))
+                        throw new ArgumentException(
+                            $"row[{lc.Key} …] is ambiguous: a bare number is the row index, not a column filter. " +
+                            $"Use 'col.{lc.Key}' to filter a column named '{lc.Key}', or 'row[{lc.Key}]' (no operator) for that row.");
+                    if (!forcedCol && (atForced.Contains(lc.Key) || RowAttributeKeys.Contains(lc.Key)))
+                    {
+                        attrCount++;
+                        // A bare row-property name that ALSO names a real column is
+                        // ambiguous (col.<name> / @<name> disambiguate).
+                        if (!atForced.Contains(lc.Key)) collisionCandidates.Add(lc.Key);
+                    }
+                    else colCount++;
+                }
+                foreach (var ak in collisionCandidates)
+                    if (RowKeyCollidesWithColumn(ak, parsed.Sheet))
+                        throw new ArgumentException(
+                            $"row[{ak} …] is ambiguous: '{ak}' names both a row property and a table column. " +
+                            $"Use 'col.{ak}' to match the column, or '@{ak}' to match the row property.");
+                if (colCount > 0 && attrCount > 0)
                     throw new ArgumentException(
-                        $"row[{ak} …] is ambiguous: '{ak}' names both a row property and a table column. " +
-                        $"Use 'col.{ak}' to match the column, or '@{ak}' to match the row property.");
+                        "row[...] cannot mix table columns and row properties in one expression. Split into separate queries.");
+                if (colCount > 0)
+                    return QueryRowsByColumnPredicate(parsed.Sheet, rowExpr);
+                // pure row properties → fall through to the generic post-filter.
             }
-            if (rowColPreds.Count > 0)
-                return QueryRowsByColumnPredicate(parsed.Sheet, rowColPreds);
 
             // A pure-numeric `row[N]` is a positional index, not a filter; it is
             // resolved to that single row by FilterSelectorPositionalIndex (the

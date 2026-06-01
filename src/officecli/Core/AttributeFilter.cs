@@ -691,10 +691,32 @@ internal static class AttributeFilter
         if (TryFlatten(expr) is { } flat)
             return ApplyWithWarnings(query(selector), flat, applyAll);
 
-        return ApplyExprWithWarnings(query(StripFilterBrackets(selector)), expr);
+        // Boolean path. Most elements are filtered by the generic engine on the
+        // broad result, so strip the brackets and query bare. Elements that
+        // resolve their OWN virtual attributes — Excel `row` table-column values
+        // are attached by the handler's row-where, NOT present on a bare row —
+        // must receive the full selector so the handler can resolve them; the tree
+        // then re-confirms on the carried column values.
+        var queryStr = ElementResolvesOwnBoolean(selector) ? selector : StripFilterBrackets(selector);
+        return ApplyExprWithWarnings(query(queryStr), expr);
     }
 
-    private static IEnumerable<Condition> LeafConditions(FilterExpr expr) => expr switch
+    // True when the selector's element resolves its own virtual attributes that a
+    // bare query would not carry (Excel row/col table-column predicates). Such a
+    // selector must reach the handler with its brackets intact.
+    private static bool ElementResolvesOwnBoolean(string selector)
+    {
+        var s = Regex.Replace((selector ?? "").TrimStart(), @"^(?:[^/!\[]+!|/[^/]+/)", "");
+        return Regex.IsMatch(s, @"^(?:row|col|column)\[", RegexOptions.IgnoreCase);
+    }
+
+    /// <summary>Wrap a flat condition list as an expression (single predicate or AND).</summary>
+    public static FilterExpr FromConditions(IReadOnlyList<Condition> conds)
+        => conds.Count == 1
+            ? new PredicateExpr(conds[0])
+            : new AndExpr(conds.Select(c => (FilterExpr)new PredicateExpr(c)).ToList());
+
+    public static IEnumerable<Condition> LeafConditions(FilterExpr expr) => expr switch
     {
         PredicateExpr p => new[] { p.Cond },
         AndExpr a => a.Parts.SelectMany(LeafConditions),

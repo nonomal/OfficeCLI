@@ -30,14 +30,6 @@ public partial class ExcelHandler
         "height", "hidden", "outlineLevel", "collapsed", "customHeight",
     };
 
-    // [ "quoted name" | 'quoted name' | bareKey ] (op) (value)
-    // Quoted keys carry spaces ("Total Amount"); bare keys (Salary, 单价) do not.
-    // The bare-key group accepts a leading '@' (force row-property) and a
-    // `col.`/`column.` prefix (force column) — see ParseRowColumnPredicates.
-    private static readonly Regex RowColPredicateRegex = new(
-        @"\[\s*(?:""([^""]+)""|'([^']+)'|(@?[\w.]+))\s*(>=|<=|!=|~=|=|>|<)\s*([^\]]*)\]",
-        RegexOptions.Compiled);
-
     // Strip a `col.` / `column.` namespace prefix from a predicate key. The
     // prefix forces COLUMN interpretation at parse time; the resolver works on
     // the bare name. Case-insensitive. Returns the key unchanged when absent.
@@ -47,60 +39,16 @@ public partial class ExcelHandler
         return m.Success ? m.Groups[1].Value : key;
     }
 
-    // Parse the column predicates from a row selector. Disambiguation prefixes:
-    //   @key      → force ROW PROPERTY — handled by the row-attribute branch +
-    //               AttributeFilter post-filter (both strip the '@'); not a
-    //               column predicate, so skip it here.
-    //   col.key   → force TABLE COLUMN — bypass the row-property / numeric guards
-    //               so a column literally named `height` (or `2`) stays reachable.
-    // A bare key: a row-property name is taken as that property (reported via
-    // `bareAttrKeys` so the caller can flag a column-shadow collision); a bare
-    // number WITH an operator is rejected (reserved for the row index — use
-    // col.N); anything else is a column name.
-    private static List<AttributeFilter.Condition> ParseRowColumnPredicates(
-        string selector, out List<string> bareAttrKeys)
-    {
-        var conds = new List<AttributeFilter.Condition>();
-        bareAttrKeys = new List<string>();
-        foreach (Match m in RowColPredicateRegex.Matches(selector))
-        {
-            var key = m.Groups[1].Success ? m.Groups[1].Value
-                    : m.Groups[2].Success ? m.Groups[2].Value
-                    : m.Groups[3].Value;
-            if (key.StartsWith('@')) continue;               // force row property
-            bool forcedColumn = Regex.IsMatch(key, @"^col(?:umn)?\.", RegexOptions.IgnoreCase);
-            if (!forcedColumn && RowAttributeKeys.Contains(key)) { bareAttrKeys.Add(key); continue; }
-            // A bare number is reserved for the positional row index, full stop.
-            // `row[2]` (no operator) is the 2nd row; a bare number WITH an operator
-            // (`row[2>40]`) is rejected outright rather than quietly meaning "the
-            // column named 2" — a number in brackets must always read as an index.
-            // To filter a digit-named column, be explicit with `col.2`.
-            if (!forcedColumn && int.TryParse(key, out _))
-                throw new ArgumentException(
-                    $"row[{key}{m.Groups[4].Value}{m.Groups[5].Value.Trim()}] is ambiguous: a bare number " +
-                    $"is read as the row index, so it cannot filter a column. " +
-                    $"Use 'col.{key}' to filter a column named '{key}', or 'row[{key}]' (no operator) for that row.");
-            conds.Add(new AttributeFilter.Condition(key, MapRowPredicateOp(m.Groups[4].Value), m.Groups[5].Value.Trim()));
-        }
-        return conds;
-    }
-
-    private static AttributeFilter.FilterOp MapRowPredicateOp(string op) => op switch
-    {
-        ">=" => AttributeFilter.FilterOp.GreaterOrEqual,
-        "<=" => AttributeFilter.FilterOp.LessOrEqual,
-        ">"  => AttributeFilter.FilterOp.GreaterThan,
-        "<"  => AttributeFilter.FilterOp.LessThan,
-        "!=" => AttributeFilter.FilterOp.NotEqual,
-        "~=" => AttributeFilter.FilterOp.Contains,
-        _    => AttributeFilter.FilterOp.Equal,
-    };
 
     // Match table data rows whose cells satisfy every column predicate. Auto-
     // binds to the single ListObject that owns all referenced columns; throws on
     // no-match or cross-table ambiguity rather than silently picking one.
-    private List<DocumentNode> QueryRowsByColumnPredicate(string? sheetFilter, List<AttributeFilter.Condition> colConds)
+    private List<DocumentNode> QueryRowsByColumnPredicate(string? sheetFilter, AttributeFilter.FilterExpr expr)
     {
+        // Distinct leaf predicates drive column resolution and probe building; the
+        // expression tree (which may be `or` / parens, e.g. row[金额>5 or 金额<1])
+        // drives the actual row match via MatchesExpr.
+        var colConds = AttributeFilter.LeafConditions(expr).ToList();
         // A table that owns every referenced column. ListObjects are
         // authoritative (column names are stored metadata); detected tables are
         // a header-sniff heuristic (stable=false), so they are only consulted
@@ -184,7 +132,7 @@ public partial class ExcelHandler
                 var cell = FindCell(sheetData, $"{IndexToColumnName(cand.colAbsIndex[cond.Key])}{r}");
                 probe.Format[cond.Key] = cell != null ? GetCellDisplayValue(cell, eval) : "";
             }
-            if (!AttributeFilter.MatchAll(probe, colConds)) continue;
+            if (!AttributeFilter.MatchesExpr(probe, expr)) continue;
 
             var rowNode = new DocumentNode
             {

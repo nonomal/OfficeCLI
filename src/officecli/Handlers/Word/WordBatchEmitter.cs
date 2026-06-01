@@ -241,6 +241,10 @@ public static partial class WordBatchEmitter
         // BUG-DUMP11-01: chapter-numbering attributes on w:pgNumType.
         "chapStyle", "chapSep",
         "titlePage", "direction", "rtlGutter",
+        // pgBorders shorthand ('box' / 'none') — Set materialises four
+        // matching sides; Get/Navigation surfaces the presence. Without
+        // this key the round-trip silently dropped page borders.
+        "pgBorders",
         // BUG-DUMP11-03: <w:noEndnote/> section flag.
         "noEndnote",
         "lineNumbers", "lineNumberCountBy",

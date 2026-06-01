@@ -205,6 +205,18 @@ public partial class WordHandler
             if (sectPr.GetFirstChild<TitlePage>() != null)
                 node.Format["titlePage"] = true;
 
+            // Surface pgBorders presence as the same shorthand the Set side
+            // accepts ('box' / 'none'). Without readback the value silently
+            // disappeared on get and never surfaced in dump, so a `set /
+            // --prop pgBorders=box` round-trip lost the borders. Match the
+            // Set encoding: any PageBorders element with at least one side
+            // surfaces as `box` — the set side only ever writes that exact
+            // shape (four single-line sides), so a present element implies
+            // it. Future encodings can refine this to expose width / style
+            // / color individually once Set grows beyond the shorthand.
+            if (sectPr.GetFirstChild<PageBorders>() != null)
+                node.Format["pgBorders"] = "box";
+
             // Section-level RTL (Arabic / Hebrew page direction).
             if (sectPr.GetFirstChild<BiDi>() != null)
                 node.Format["direction"] = "rtl";

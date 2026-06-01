@@ -214,6 +214,21 @@ public static partial class PptxBatchEmitter
         var props = FilterEmittableProps(full.Format);
         DeferSlideJumpLink(props, replayPath, ctx);
 
+        // CONSISTENCY(placeholder-id-autoassign): NodeBuilder emits the source
+        // cNvPr.Id verbatim on every shape — including placeholders. But
+        // placeholder cNvPr ids on PowerPoint-authored decks are NOT globally
+        // unique; the title placeholder on every slide is typically id=1,
+        // and slides inheriting a layout's placeholder reuse the layout's
+        // id (often the small range 1..10 that real PowerPoint reserves).
+        // Replay imports that bag into AcquireShapeId which throws on
+        // intra-slide-tree collision — so a deck where two placeholders
+        // legitimately carry id=1 (e.g. layout-bound title + reused-from-
+        // layout shape) breaks the batch. Animation spid references target
+        // free-form shapes, not placeholders, so dropping the placeholder
+        // id is safe; AcquireShapeId auto-assigns a fresh one from the
+        // 10000+ range and the placeholder still resolves positionally.
+        props.Remove("id");
+
         items.Add(new BatchItem
         {
             Command = "add",

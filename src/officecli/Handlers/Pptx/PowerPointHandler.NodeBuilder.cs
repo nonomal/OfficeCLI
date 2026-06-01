@@ -412,7 +412,8 @@ public partial class PowerPointHandler
                             // CONSISTENCY(canonical-keys): always emit per-script
                             // slots when present (schema declares get:true).
                             if (cellLatin != null) cellNode.Format["font.latin"] = cellLatin;
-                            if (cellEa != null && cellEa != cellLatin) cellNode.Format["font.ea"] = cellEa;
+                            // CONSISTENCY(per-script-round-trip): see shape-level note.
+                            if (cellEa != null) cellNode.Format["font.ea"] = cellEa;
                             if (cellCs != null) cellNode.Format["font.cs"] = cellCs;
 
                             if (rp.FontSize?.HasValue == true)
@@ -856,7 +857,15 @@ public partial class PowerPointHandler
             // round-trips (CONSISTENCY(canonical-keys)). The redundant
             // `font` alias is kept for backward compat.
             if (fontLatinTf != null) node.Format["font.latin"] = fontLatinTf;
-            if (fontEaTf != null && fontEaTf != fontLatinTf) node.Format["font.ea"] = fontEaTf;
+            // CONSISTENCY(per-script-round-trip): emit font.ea / font.cs
+            // whenever the <a:ea>/<a:cs> element is present in source XML,
+            // even when its typeface equals the latin slot. The previous
+            // `fEa != fLatin` guard suppressed the readback for matching
+            // typefaces — round-trip then dropped the explicit <a:ea>/<a:cs>
+            // elements entirely. PowerPoint authors all three slots with
+            // matching typefaces on every run; without this, dump→replay
+            // lost every ea/cs element on Latin-only decks.
+            if (fontEaTf != null) node.Format["font.ea"] = fontEaTf;
             if (fontCsTf != null) node.Format["font.cs"] = fontCsTf;
 
             var fontSize = firstRun.RunProperties.FontSize?.Value;
@@ -1400,7 +1409,11 @@ public partial class PowerPointHandler
             // and `font.latin` violates the no-duplicate-alias rule in the
             // root CLAUDE.md "Canonical DocumentNode.Format Rules".
             if (fLatin != null) node.Format["font.latin"] = fLatin;
-            if (fEa != null && fEa != fLatin) node.Format["font.ea"] = fEa;
+            // CONSISTENCY(per-script-round-trip): emit font.ea / font.cs
+            // unconditionally when the source <a:ea>/<a:cs> element is
+            // present, even when its typeface matches latin — see the
+            // shape-level emit above for rationale.
+            if (fEa != null) node.Format["font.ea"] = fEa;
             if (fCs != null) node.Format["font.cs"] = fCs;
             var fs = run.RunProperties.FontSize?.Value;
             if (fs.HasValue) node.Format["size"] = $"{fs.Value / 100.0:0.##}pt";

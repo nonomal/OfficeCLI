@@ -1465,15 +1465,35 @@ public partial class PowerPointHandler
                             paraNode.Format["size"] = $"{endSz.Value / 100.0:0.##}pt";
                     }
 
-                    // Include runs at depth > 1
+                    // Include runs at depth > 1, interleaved with <a:br>
+                    // line breaks in source document order. Previously the
+                    // emit walked only <a:r> elements, so an in-paragraph
+                    // <a:br/> (PPT's hard line break inside a run sequence)
+                    // was silently dropped on dump→replay. AddLineBreak is
+                    // the replay-side counterpart (Add.Text.cs).
                     if (depth > 1)
                     {
                         int runIdx = 0;
-                        foreach (var run in paraRuns)
+                        int brIdx = 0;
+                        foreach (var child in para.Elements())
                         {
-                            paraNode.Children.Add(RunToNode(run,
-                                $"{shapePath}/paragraph[{paraIdx + 1}]/run[{runIdx + 1}]", part));
-                            runIdx++;
+                            if (child is Drawing.Run runChild)
+                            {
+                                paraNode.Children.Add(RunToNode(runChild,
+                                    $"{shapePath}/paragraph[{paraIdx + 1}]/run[{runIdx + 1}]", part));
+                                runIdx++;
+                            }
+                            else if (child is Drawing.Break brChild)
+                            {
+                                brIdx++;
+                                var brNode = new DocumentNode
+                                {
+                                    Path = $"{shapePath}/paragraph[{paraIdx + 1}]/linebreak[{brIdx}]",
+                                    Type = "linebreak",
+                                    Text = string.Empty,
+                                };
+                                paraNode.Children.Add(brNode);
+                            }
                         }
                     }
 

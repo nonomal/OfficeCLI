@@ -563,12 +563,23 @@ public static partial class PptxBatchEmitter
         DummyCtxStripSlideJump(props);
         var runs = (paraNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "run" || c.Type == "r").ToList();
+        // <a:br> hard line breaks live as siblings of <a:r> in the paragraph;
+        // NodeBuilder surfaces them as Type="linebreak" children in source
+        // document order. Preserve that order during the multi-child emit
+        // path so `add linebreak` interleaves between runs correctly.
+        var paraChildrenSeq = (paraNode.Children ?? new List<DocumentNode>())
+            .Where(c => c.Type == "run" || c.Type == "r" || c.Type == "linebreak" || c.Type == "br")
+            .ToList();
+        bool hasLineBreaks = paraChildrenSeq.Any(c => c.Type == "linebreak" || c.Type == "br");
 
         // CONSISTENCY(single-run-collapse): mirrors WordBatchEmitter.Paragraph
         // collapseSingleRun — fold a lone run's text + char props onto the
-        // paragraph add so simple cases stay one BatchItem.
+        // paragraph add so simple cases stay one BatchItem. Suppress the
+        // collapse when the paragraph also carries <a:br> children — the
+        // single-run shortcut never emits the break.
         bool collapseSingleRun = runs.Count == 1
-            && (paraNode.Children?.Count ?? 0) == 1;
+            && (paraNode.Children?.Count ?? 0) == 1
+            && !hasLineBreaks;
 
         if (collapseSingleRun)
         {
@@ -717,12 +728,40 @@ public static partial class PptxBatchEmitter
         // <a:endParaRPr>), so `set run[1]` would target a missing run. Only
         // rewrite-the-seed when an actual run was seeded (shape/textbox path).
         bool firstRunOnSeededParagraph = firstParagraph && runs.Count > 0 && seededParaHasRun;
-        for (int ri = 0; ri < runs.Count; ri++)
+        int riCounter = 0;
+        bool firstRunHandled = false;
+        foreach (var child in paraChildrenSeq)
         {
-            if (ri == 0 && firstRunOnSeededParagraph)
-                EmitFirstRunAsSet(runs[ri], paraParent, items, ctx);
-            else
-                EmitRun(runs[ri], paraParent, items, ctx, runIndex: ri + 1);
+            if (child.Type == "run" || child.Type == "r")
+            {
+                if (!firstRunHandled && firstRunOnSeededParagraph)
+                {
+                    EmitFirstRunAsSet(child, paraParent, items, ctx);
+                    firstRunHandled = true;
+                }
+                else
+                {
+                    EmitRun(child, paraParent, items, ctx, runIndex: riCounter + 1);
+                    firstRunHandled = true;
+                }
+                riCounter++;
+            }
+            else if (child.Type == "linebreak" || child.Type == "br")
+            {
+                // <a:br> hard line break inside the paragraph. AddLineBreak
+                // (Add.Text.cs) inserts at the end by default; per-position
+                // ordering relative to runs is what gives the visual line
+                // wrap, so emit the `add linebreak` AFTER the runs that
+                // precede it in source. The `--index` arg is not required
+                // because AddLineBreak appends, and we're walking children
+                // in source order — each linebreak lands where it was.
+                items.Add(new BatchItem
+                {
+                    Command = "add",
+                    Parent = paraParent,
+                    Type = "linebreak",
+                });
+            }
         }
     }
 

@@ -76,6 +76,13 @@ internal static partial class ChartHelper
         // would otherwise be silently dropped. Capture the dotted-only spec so
         // those builders can call ApplySeriesColor in addition to per-point.
         var dottedSeriesColors = ParseDottedSeriesColorsOnly(properties);
+        // Positional `colors=` list (per-data-point for single-series kinds),
+        // SEPARATE from `series{N}.color` (whole-series tint). Doughnut /
+        // pie / pie3D / pieofpie / barofpie use this so a user-supplied
+        // `series1.color=#C00000` does NOT also emit a spurious dPt#0 with
+        // the same fill (Get→dump→replay then surfaced both series1.color
+        // and point1.color, breaking byte-equality round-trip).
+        var pointColors = ParsePositionalColorsOnly(properties);
 
         switch (kind)
         {
@@ -178,7 +185,7 @@ internal static partial class ChartHelper
                 {
                     var series = BuildPieSeries(0, seriesData[0].name,
                         categories, seriesData[0].values);
-                    ApplyDataPointColors(series, seriesData[0].values.Length, colors);
+                    ApplyDataPointColors(series, seriesData[0].values.Length, pointColors);
                     ApplyDottedSeriesColors(new[] { (OpenXmlCompositeElement)series }, dottedSeriesColors);
                     pie3d.AppendChild(series);
                 }
@@ -187,7 +194,7 @@ internal static partial class ChartHelper
                 break;
             }
             case "pie":
-                chartElement = BuildPieChart(categories, seriesData, colors);
+                chartElement = BuildPieChart(categories, seriesData, pointColors);
                 ApplyDottedSeriesColors(((C.PieChart)chartElement).Elements<C.PieChartSeries>().Cast<OpenXmlCompositeElement>().ToArray(), dottedSeriesColors);
                 needsAxes = false;
                 break;
@@ -195,12 +202,12 @@ internal static partial class ChartHelper
             case "barofpie":
                 chartElement = BuildOfPieChart(
                     kind == "barofpie" ? C.OfPieValues.Bar : C.OfPieValues.Pie,
-                    categories, seriesData, colors);
+                    categories, seriesData, pointColors);
                 ApplyDottedSeriesColors(((C.OfPieChart)chartElement).Elements<C.PieChartSeries>().Cast<OpenXmlCompositeElement>().ToArray(), dottedSeriesColors);
                 needsAxes = false;
                 break;
             case "doughnut":
-                chartElement = BuildDoughnutChart(categories, seriesData, colors);
+                chartElement = BuildDoughnutChart(categories, seriesData, pointColors);
                 ApplyDottedSeriesColors(((C.DoughnutChart)chartElement).Elements<C.PieChartSeries>().Cast<OpenXmlCompositeElement>().ToArray(), dottedSeriesColors);
                 needsAxes = false;
                 break;

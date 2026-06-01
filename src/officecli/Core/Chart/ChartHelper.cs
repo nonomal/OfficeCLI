@@ -455,6 +455,25 @@ internal static partial class ChartHelper
         return dotted;
     }
 
+    /// <summary>
+    /// Positional-only `colors=` / `seriesColors=` array, returned unmerged.
+    /// Used by pie / doughnut / pieofpie / barofpie / stock builders where the
+    /// positional list maps to per-data-point dPt overrides, but `series{N}.
+    /// color` MUST NOT bleed into the dPt list (it routes through
+    /// ApplyDottedSeriesColors as a series-level fill instead). The merged
+    /// array from ParseSeriesColors conflates the two, so a doughnut with
+    /// only `series1.color=#C00000` emitted a spurious dPt#0 with the same
+    /// fill — Get readback then surfaced both `series1.color` AND
+    /// `point1.color`, breaking dump→replay byte-equality.
+    /// </summary>
+    internal static string[]? ParsePositionalColorsOnly(Dictionary<string, string> properties)
+    {
+        if (properties.TryGetValue("colors", out var colorsStr)
+            || properties.TryGetValue("seriesColors", out colorsStr))
+            return colorsStr.Split(',').Select(c => c.Trim()).ToArray();
+        return null;
+    }
+
     // ==================== ManualLayout Helpers ====================
 
     /// <summary>

@@ -1147,6 +1147,20 @@ public partial class PowerPointHandler
                 // silently rewriting the user's input. Now: exact-preset
                 // values emit the preset name, everything else emits the
                 // integer percent the Set side accepts.
+                //
+                // bt-B1: a source-authored <a:reflection> can carry arbitrary
+                // tuning attributes (blurRad, stA, endA, dist, dir, fadeDir,
+                // sx/sy, kx/ky, algn, …). ApplyReflection rebuilds the
+                // element from just the preset bucket and drops anything
+                // outside its known field set, so a custom-tuned reflection
+                // collapses to the nearest preset. Detect "this isn't a
+                // bare preset" by comparing the captured attribute set
+                // against ApplyReflection's emit (stA=52000 endA=300, the
+                // matching endPos, all other attrs default) — when any
+                // additional attribute is set, surface the element's
+                // OuterXml as `reflectionRaw` so Set can re-install it
+                // verbatim. The preset key is still emitted alongside for
+                // human readability / non-passthrough consumers.
                 var endPos = reflEl.EndPosition?.Value ?? 0;
                 node.Format["reflection"] = endPos switch
                 {
@@ -1155,6 +1169,9 @@ public partial class PowerPointHandler
                     100000 => "full",
                     _ => (endPos / 1000).ToString(System.Globalization.CultureInfo.InvariantCulture),
                 };
+                bool isPlainPreset = IsPlainReflectionPreset(reflEl);
+                if (!isPlainPreset)
+                    node.Format["reflectionRaw"] = reflEl.OuterXml;
             }
             var softEdge = activeEffectList.GetFirstChild<Drawing.SoftEdge>();
             if (softEdge?.Radius?.HasValue == true)

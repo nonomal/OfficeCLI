@@ -114,6 +114,38 @@ public partial class PowerPointHandler
         return false;
     }
 
+    /// <summary>
+    /// Match a captured <a:reflection> against the preset shape ApplyReflection
+    /// emits (blurRad=6350 stA=52000 stPos=0 endA=300 endPos∈{55000,90000,100000}
+    /// dist=0 dir=5400000 sy=-100000 algn=bl rotWithShape=0). When ANY attribute
+    /// differs — including user-authored blurRad/stA/endA/dist tuning — we treat
+    /// it as non-preset and surface the OuterXml so dump→replay can reinstall
+    /// the source element verbatim instead of collapsing to the nearest preset.
+    /// </summary>
+    internal static bool IsPlainReflectionPreset(Drawing.Reflection r)
+    {
+        if (r.BlurRadius?.Value is not 6350) return false;
+        if (r.StartOpacity?.Value is not 52000) return false;
+        if (r.StartPosition?.HasValue == true && r.StartPosition.Value != 0) return false;
+        if (r.EndAlpha?.Value is not 300) return false;
+        var endPos = r.EndPosition?.Value ?? 0;
+        if (endPos != 55000 && endPos != 90000 && endPos != 100000) return false;
+        if (r.Distance?.HasValue == true && r.Distance.Value != 0) return false;
+        if (r.Direction?.Value is not 5400000) return false;
+        if (r.VerticalRatio?.Value is not -100000) return false;
+        if (r.Alignment?.Value != Drawing.RectangleAlignmentValues.BottomLeft) return false;
+        if (r.RotateWithShape?.HasValue == true && r.RotateWithShape.Value) return false;
+        // Reject if any extra attribute (FadeDirection, HorizontalRatio,
+        // HorizontalSkew, VerticalSkew, EndPosition tweaks not in the preset
+        // set) is present. ApplyReflection never emits these, so their
+        // presence implies user-authored tuning.
+        if (r.FadeDirection?.HasValue == true) return false;
+        if (r.HorizontalRatio?.HasValue == true) return false;
+        if (r.HorizontalSkew?.HasValue == true) return false;
+        if (r.VerticalSkew?.HasValue == true) return false;
+        return true;
+    }
+
     private static void ApplyReflection(ShapeProperties spPr, string value)
     {
         var effectList = EnsureEffectList(spPr);

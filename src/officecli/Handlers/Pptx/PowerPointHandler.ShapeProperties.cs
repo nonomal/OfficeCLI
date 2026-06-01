@@ -1274,6 +1274,57 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "reflectionraw":
+                {
+                    // bt-B1 dump→replay path. Value is the verbatim
+                    // <a:reflection .../> element captured by NodeBuilder
+                    // when the source-authored attrs (blurRad, stA, endA,
+                    // dist, dir, …) deviate from ApplyReflection's preset
+                    // shape. Re-install verbatim so the round-trip carries
+                    // the user's tuning intact instead of collapsing to the
+                    // nearest preset bucket.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var effectList = EnsureEffectList(spPr);
+                    effectList.RemoveAllChildren<Drawing.Reflection>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        try
+                        {
+                            // OOXML SDK Reflection.OuterXml is read-only; the
+                            // public mutation is via Read-Through with
+                            // OpenXmlReader and Element-build. The captured
+                            // slice may or may not carry xmlns:a — inject
+                            // defensively so the standalone parse succeeds.
+                            var raw = value.Contains("xmlns:a=")
+                                ? value
+                                : value.Replace("<a:reflection",
+                                    "<a:reflection xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+                            using var sr = new System.IO.StringReader(raw);
+                            using var xr = System.Xml.XmlReader.Create(sr);
+                            xr.MoveToContent();
+                            var refl = new Drawing.Reflection();
+                            // Lift attributes off the parsed root.
+                            if (xr.HasAttributes)
+                            {
+                                while (xr.MoveToNextAttribute())
+                                {
+                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                                    refl.SetAttribute(new OpenXmlAttribute(
+                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                                }
+                                xr.MoveToElement();
+                            }
+                            InsertEffectInOrder(effectList, refl);
+                        }
+                        catch
+                        {
+                            unsupported.Add(key);
+                        }
+                    }
+                    break;
+                }
+
                 case "softedge":
                 {
                     var spPr = shape.ShapeProperties;

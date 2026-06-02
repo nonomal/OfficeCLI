@@ -37,6 +37,23 @@ public partial class PowerPointHandler
     private static Drawing.SolidFill BuildSolidFill(string colorValue)
         => DrawingColorBuilder.BuildSolidFill(colorValue);
 
+    /// <summary>
+    /// Build a <a:duotone> blip recolor element from a "c1,c2" spec.
+    /// Each color may be hex (#RRGGBB / RRGGBB) or a scheme color name
+    /// (accent1, dark1, …); BuildColorElement handles both. Throws on
+    /// any other shape — duotone requires exactly two stops per OOXML.
+    /// </summary>
+    internal static Drawing.Duotone BuildDuotoneFromSpec(string spec)
+    {
+        var parts = spec.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || string.IsNullOrEmpty(parts[0]) || string.IsNullOrEmpty(parts[1]))
+            throw new ArgumentException($"Invalid 'duotone' value: '{spec}'. Expected 'color1,color2' (hex or scheme color).");
+        var duo = new Drawing.Duotone();
+        duo.AppendChild(BuildColorElement(parts[0]));
+        duo.AppendChild(BuildColorElement(parts[1]));
+        return duo;
+    }
+
     private static Drawing.SchemeColorValues? TryParseSchemeColor(string value)
         => DrawingColorBuilder.TryParseSchemeColor(value);
 

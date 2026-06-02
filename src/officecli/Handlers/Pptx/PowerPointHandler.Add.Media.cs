@@ -387,6 +387,15 @@ public partial class PowerPointHandler
                     picBlipForFilters.RemoveAllChildren<Drawing.BiLevel>();
                     picBlipForFilters.AppendChild(new Drawing.BiLevel { Threshold = (int)(picBiLevelNum * 1000) });
                 }
+                // R52 bt-1: `duotone=#c1,#c2` recolor stop pair. Mirrors the
+                // readback in NodeBuilder so dump→replay preserves the 2-color
+                // tint applied via Picture Format → Color → Recolor → Duotone.
+                if (picBlipForFilters != null
+                    && properties.TryGetValue("duotone", out var picDuotoneStr))
+                {
+                    picBlipForFilters.RemoveAllChildren<Drawing.Duotone>();
+                    picBlipForFilters.AppendChild(BuildDuotoneFromSpec(picDuotoneStr));
+                }
 
                 // CONSISTENCY(shape-picture-parity): pictures are routinely
                 // click-targets — wire link= the same way shape does.

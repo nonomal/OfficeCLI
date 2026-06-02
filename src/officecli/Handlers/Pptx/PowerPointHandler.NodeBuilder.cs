@@ -2096,6 +2096,27 @@ public partial class PowerPointHandler
         if (picBiLevel?.Threshold?.HasValue == true)
             node.Format["biLevel"] = $"{picBiLevel.Threshold.Value / 1000.0:0.##}";
 
+        // R52 bt-1: surface <a:duotone> blip recolor as `duotone=#c1,#c2`.
+        // Duotone maps the image's luminance gradient between two stops,
+        // producing the printed-mono / brand-tint look. Two srgbClr children
+        // are required by the schema; scheme colors are also valid stops.
+        // Without this readback the duotone block was silently dropped on
+        // dump→replay and the image came back full-color.
+        var picDuotone = picBlip?.GetFirstChild<Drawing.Duotone>();
+        if (picDuotone != null)
+        {
+            var duoStops = new List<string>();
+            foreach (var stop in picDuotone.ChildElements)
+            {
+                if (stop is Drawing.RgbColorModelHex rgbStop && rgbStop.Val?.Value is { } rgbV)
+                    duoStops.Add(ParseHelpers.FormatHexColor(rgbV));
+                else if (stop is Drawing.SchemeColor schemeStop && schemeStop.Val?.HasValue == true)
+                    duoStops.Add(schemeStop.Val.InnerText);
+            }
+            if (duoStops.Count == 2)
+                node.Format["duotone"] = string.Join(",", duoStops);
+        }
+
         // Click-hyperlink on the picture (nvPicPr/cNvPr/a:hlinkClick).
         // CONSISTENCY(shape-picture-parity): pictures share the cNvPr
         // hyperlink slot with shapes; reuse the same reader.

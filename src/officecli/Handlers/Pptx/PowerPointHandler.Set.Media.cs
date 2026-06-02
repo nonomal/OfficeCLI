@@ -249,6 +249,22 @@ public partial class PowerPointHandler
                     }
                     break;
                 }
+                case "duotone":
+                {
+                    // R52 bt-1: <a:duotone> blip recolor with two color stops.
+                    // Mirrors AddMedia's `duotone=c1,c2` parsing — same shape
+                    // so Add/Set agree on input vocabulary. `duotone=none`
+                    // strips any existing recolor.
+                    var duoBlip = pic.BlipFill?.GetFirstChild<Drawing.Blip>();
+                    if (duoBlip == null) { unsupported.Add(key); break; }
+                    duoBlip.RemoveAllChildren<Drawing.Duotone>();
+                    if (!value.Equals("none", StringComparison.OrdinalIgnoreCase)
+                        && !value.Equals("false", StringComparison.OrdinalIgnoreCase))
+                    {
+                        duoBlip.AppendChild(BuildDuotoneFromSpec(value));
+                    }
+                    break;
+                }
                 case "opacity":
                 {
                     if (!double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var opacityVal)

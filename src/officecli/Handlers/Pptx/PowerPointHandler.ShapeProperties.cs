@@ -483,9 +483,11 @@ public partial class PowerPointHandler
                 case "baseline" or "superscript" or "subscript":
                 {
                     // Baseline offset: positive = superscript, negative = subscript
-                    // Value in percent (e.g. "30" = 30% superscript, "-25" = 25% subscript)
-                    // OOXML stores as 1/1000ths of percent (30000 = 30%)
-                    // Shortcuts: "super"/"true" = 30%, "sub" = -25%, "none"/"false" = 0
+                    // Value in percent (e.g. "30" or "30%" = 30% superscript, "-25"
+                    // or "-25%" = 25% subscript). OOXML stores as 1/1000ths of
+                    // percent (30000 = 30%). Shortcuts: "super"/"true" = 30%,
+                    // "sub" = -25%, "none"/"false" = 0. R56 bt-3: accept the
+                    // canonical `%` suffix the Get reader now emits.
                     int baselineVal;
                     if (key.ToLowerInvariant() == "superscript")
                         baselineVal = IsTruthy(value) ? 30000 : 0;
@@ -493,14 +495,15 @@ public partial class PowerPointHandler
                         baselineVal = IsTruthy(value) ? -25000 : 0;
                     else
                     {
-                        baselineVal = value.ToLowerInvariant() switch
+                        var blNorm = value.Trim().TrimEnd('%').Trim();
+                        baselineVal = blNorm.ToLowerInvariant() switch
                         {
                             "super" or "true" => 30000,
                             "sub" => -25000,
                             "none" or "false" or "0" => 0,
-                            _ => double.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal) && !double.IsNaN(blVal) && !double.IsInfinity(blVal)
+                            _ => double.TryParse(blNorm, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var blVal) && !double.IsNaN(blVal) && !double.IsInfinity(blVal)
                                 ? (int)(blVal * 1000)
-                                : throw new ArgumentException($"Invalid 'baseline' value: '{value}'. Expected 'super', 'sub', 'none', or a percentage (e.g. 30 for superscript 30%).")
+                                : throw new ArgumentException($"Invalid 'baseline' value: '{value}'. Expected 'super', 'sub', 'none', or a percentage (e.g. 30 or 30% for superscript 30%).")
                         };
                     }
                     foreach (var run in runs)
@@ -1474,6 +1477,58 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "innershadowraw":
+                {
+                    // R56 bt-2 dump→replay path. Value is the verbatim
+                    // <a:innerShdw .../> element captured by NodeBuilder
+                    // when the color child carries lumMod/lumOff/shade/tint
+                    // transforms that the compressed innerShadow= form can
+                    // only express via the undocumented `accent1+lumMod50+
+                    // lumOff50-BLUR-ANGLE-DIST-OPACITY` mixed syntax.
+                    // Mirrors shadowRaw — lift attrs + InnerXml, install
+                    // a fresh <a:innerShdw> on the effectLst.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    var effectList = EnsureEffectList(spPr);
+                    effectList.RemoveAllChildren<Drawing.InnerShadow>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        try
+                        {
+                            var raw = value.Contains("xmlns:a=")
+                                ? value
+                                : value.Replace("<a:innerShdw",
+                                    "<a:innerShdw xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+                            var shadow = new Drawing.InnerShadow();
+                            using var sr = new System.IO.StringReader(raw);
+                            using var xr = System.Xml.XmlReader.Create(sr);
+                            xr.MoveToContent();
+                            if (xr.HasAttributes)
+                            {
+                                while (xr.MoveToNextAttribute())
+                                {
+                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                                    shadow.SetAttribute(new OpenXmlAttribute(
+                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                                }
+                                xr.MoveToElement();
+                            }
+                            if (!xr.IsEmptyElement)
+                            {
+                                var subtreeXml = xr.ReadInnerXml();
+                                if (!string.IsNullOrWhiteSpace(subtreeXml))
+                                    shadow.InnerXml = subtreeXml;
+                            }
+                            InsertEffectInOrder(effectList, shadow);
+                        }
+                        catch
+                        {
+                            unsupported.Add(key);
+                        }
+                    }
+                    break;
+                }
+
                 case "reflection":
                 {
                     var spPr = shape.ShapeProperties;
@@ -2205,6 +2260,36 @@ public partial class PowerPointHandler
                         "bottom" or "b" => Drawing.TextAnchoringTypeValues.Bottom,
                         _ => throw new ArgumentException($"Invalid valign value: '{value}'. Valid values: top, middle, center, bottom.")
                     };
+                    break;
+                }
+                case "horzoverflow":
+                {
+                    // R56 bt-4: a:tcPr @horzOverflow (overflow|clip). Typed SDK
+                    // enum; vocabulary mirrors NodeBuilder readback.
+                    var tcPrHov = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrHov.HorizontalOverflow = value.ToLowerInvariant() switch
+                    {
+                        "overflow" => Drawing.TextHorizontalOverflowValues.Overflow,
+                        "clip" => Drawing.TextHorizontalOverflowValues.Clip,
+                        _ => throw new ArgumentException($"Invalid horzOverflow value: '{value}'. Valid values: overflow, clip.")
+                    };
+                    break;
+                }
+                case "locktext":
+                {
+                    // R56 bt-4: a:tcPr @lockText — non-standard MS Office
+                    // extension (not in the SDK enum). Set/clear via raw
+                    // attribute manipulation so dump→batch round-trips.
+                    var tcPrLt = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    bool lockOn = IsTruthy(value);
+                    // Remove any prior occurrence first (idempotent). OpenXmlAttribute
+                    // is a struct so FirstOrDefault returns default (empty LocalName)
+                    // when absent — check non-empty before RemoveAttribute.
+                    var existing = tcPrLt.GetAttributes().FirstOrDefault(a => a.LocalName == "lockText");
+                    if (!string.IsNullOrEmpty(existing.LocalName))
+                        tcPrLt.RemoveAttribute(existing.LocalName, existing.NamespaceUri);
+                    if (lockOn)
+                        tcPrLt.SetAttribute(new OpenXmlAttribute("lockText", "", "1"));
                     break;
                 }
                 case "gridspan" or "colspan":

@@ -544,6 +544,37 @@ public partial class PowerPointHandler
                             };
                         }
 
+                        // R56 bt-4: a:tcPr @horzOverflow (overflow|clip) — typed
+                        // SDK property. Mirror Set vocabulary verbatim.
+                        if (tcPr?.HorizontalOverflow?.HasValue == true)
+                        {
+                            var hov = tcPr.HorizontalOverflow.Value;
+                            if (hov == Drawing.TextHorizontalOverflowValues.Overflow)
+                                cellNode.Format["horzOverflow"] = "overflow";
+                            else if (hov == Drawing.TextHorizontalOverflowValues.Clip)
+                                cellNode.Format["horzOverflow"] = "clip";
+                            else
+                                cellNode.Format["horzOverflow"] = tcPr.HorizontalOverflow.InnerText;
+                        }
+
+                        // R56 bt-4: a:tcPr @lockText is a non-standard MS Office
+                        // extension (not in the SDK enum); preserve via raw
+                        // attribute iteration. Same KeyNotFoundException-safe
+                        // pattern as bodyPr/rtlCol above.
+                        if (tcPr != null)
+                        {
+                            foreach (var attr in tcPr.GetAttributes())
+                            {
+                                if (attr.LocalName == "lockText")
+                                {
+                                    var av = attr.Value ?? "";
+                                    cellNode.Format["lockText"] = av == "1"
+                                        || av.Equals("true", StringComparison.OrdinalIgnoreCase);
+                                    break;
+                                }
+                            }
+                        }
+
                         // Cell run-level formatting (font, size, bold, italic, underline, strike, color)
                         var cellFirstRun = cell.Descendants<Drawing.Run>().FirstOrDefault();
                         if (cellFirstRun?.RunProperties != null)
@@ -592,8 +623,12 @@ public partial class PowerPointHandler
 
                             if (rp.Spacing?.HasValue == true)
                                 cellNode.Format["spacing"] = $"{rp.Spacing.Value / 100.0:0.##}";
+                            // R56 bt-3: baseline is OOXML thousandths of a percent
+                            // (33000 → 33%). Emit unit-qualified `%` so the canonical
+                            // readback distinguishes percent semantics from a raw
+                            // numeric input on Set; the parser accepts either form.
                             if (rp.Baseline?.HasValue == true && rp.Baseline.Value != 0)
-                                cellNode.Format["baseline"] = $"{rp.Baseline.Value / 1000.0:0.##}";
+                                cellNode.Format["baseline"] = $"{rp.Baseline.Value / 1000.0:0.##}%";
                         }
 
                         // Cell paragraph alignment
@@ -1092,9 +1127,13 @@ public partial class PowerPointHandler
             // Character spacing on first run
             if (firstRun.RunProperties.Spacing?.HasValue == true)
                 node.Format["spacing"] = $"{firstRun.RunProperties.Spacing.Value / 100.0:0.##}";
-            // Baseline (superscript/subscript)
-            if (firstRun.RunProperties.Baseline?.HasValue == true && firstRun.RunProperties.Baseline.Value != 0)
-                node.Format["baseline"] = $"{firstRun.RunProperties.Baseline.Value / 1000.0:0.##}";
+            // Baseline (superscript/subscript) — RUN-LEVEL ONLY.
+            // R56 bt-3: baseline is a run-only rPr attribute (ECMA-376 §21.1.2.3.9);
+            // lifting it onto the shape's Format conflates a per-run vertical
+            // offset with the shape as a whole and round-trips as a bogus
+            // `add shape baseline=…` op that PowerPoint's pPr / spPr schemas
+            // don't accept. Suppress at shape level — the per-run reader below
+            // still surfaces it correctly under the run node.
 
             // Text color (from first run) — solid or gradient
             var runColor = ReadColorFromFill(firstRun.RunProperties.GetFirstChild<Drawing.SolidFill>());
@@ -1300,6 +1339,15 @@ public partial class PowerPointHandler
                 var isAlpha = innerShadow.Descendants<Drawing.Alpha>().FirstOrDefault();
                 var isOpacity = isAlpha?.Val?.HasValue == true ? $"{isAlpha.Val.Value / 1000.0:0.##}" : "100";
                 node.Format["innerShadow"] = $"{isColor}-{isBlur}-{isAngle}-{isDist}-{isOpacity}";
+                // R56 bt-2: parallel to outer shadowRaw — when the inner
+                // shadow's color child carries lumMod/lumOff/shade/tint/
+                // satMod/hueMod transforms, the compressed innerShadow=
+                // form embeds them via "+lumMod50+lumOff50" suffix syntax,
+                // then appends "-BLUR-ANGLE-DIST-OPACITY". The dash-tail
+                // after a transform chain is undocumented; surface OuterXml
+                // so Set can re-install the source <a:innerShdw> verbatim.
+                if (!IsPlainInnerShadow(innerShadow))
+                    node.Format["innerShadowRaw"] = innerShadow.OuterXml;
             }
             var glow = activeEffectList.GetFirstChild<Drawing.Glow>();
             if (glow != null)
@@ -1838,8 +1886,10 @@ public partial class PowerPointHandler
             }
             if (run.RunProperties.Spacing?.HasValue == true)
                 node.Format["spacing"] = $"{run.RunProperties.Spacing.Value / 100.0:0.##}";
+            // R56 bt-3: emit baseline as percent (33000 → "33%"); see cell-level
+            // reader above for the canonical-form rationale.
             if (run.RunProperties.Baseline?.HasValue == true && run.RunProperties.Baseline.Value != 0)
-                node.Format["baseline"] = $"{run.RunProperties.Baseline.Value / 1000.0:0.##}";
+                node.Format["baseline"] = $"{run.RunProperties.Baseline.Value / 1000.0:0.##}%";
             // Color (solid or gradient)
             var runFillColor = ReadColorFromFill(run.RunProperties.GetFirstChild<Drawing.SolidFill>());
             if (runFillColor != null) node.Format["color"] = runFillColor;

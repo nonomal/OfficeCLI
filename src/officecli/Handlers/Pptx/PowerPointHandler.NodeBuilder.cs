@@ -1384,6 +1384,20 @@ public partial class PowerPointHandler
                 node.Format["softEdge"] = $"{softEdge.Radius.Value / EmuConverter.EmuPerPointF:0.##}pt";
         }
 
+        // R52 bt-2: surface <a:effectDag> as `effectDagRaw=<OuterXml>`.
+        // EffectDag is the advanced compositing tree (cont/sib containers with
+        // blur + fillOverlay + outerShdw, used for layered Aero-style glass /
+        // depth treatments). It's a sibling to effectLst on the spPr, and
+        // PowerPoint accepts both — the spec composes them in document order.
+        // The walker above only consumes effectLst children, so any source-
+        // authored effectDag was silently dropped on dump→replay. Mirror the
+        // shadowRaw / fillOverlayRaw passthrough — there is no compressible
+        // string form that survives the cont/sib nesting + blur radius +
+        // fillOverlay blend modes a real effectDag can carry.
+        var effectDag = shape.ShapeProperties?.GetFirstChild<Drawing.EffectDag>();
+        if (effectDag != null)
+            node.Format["effectDagRaw"] = effectDag.OuterXml;
+
         // 3D rotation (scene3d)
         var scene3d = shape.ShapeProperties?.GetFirstChild<Drawing.Scene3DType>();
         if (scene3d != null)
@@ -2110,7 +2124,8 @@ public partial class PowerPointHandler
             {
                 if (stop is Drawing.RgbColorModelHex rgbStop && rgbStop.Val?.Value is { } rgbV)
                     duoStops.Add(ParseHelpers.FormatHexColor(rgbV));
-                else if (stop is Drawing.SchemeColor schemeStop && schemeStop.Val?.HasValue == true)
+                else if (stop is Drawing.SchemeColor schemeStop && schemeStop.Val?.HasValue == true
+                         && !string.IsNullOrEmpty(schemeStop.Val.InnerText))
                     duoStops.Add(schemeStop.Val.InnerText);
             }
             if (duoStops.Count == 2)

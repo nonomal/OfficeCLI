@@ -768,7 +768,7 @@ public partial class PowerPointHandler
                 // lineDash, effects, 3D, flip — delegate to SetRunOrShapeProperties
                 var effectKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                     { "linedash", "line.dash", "shadow", "shadowraw", "innershadow", "glow",
-                      "reflection", "reflectionraw", "filloverlayraw",
+                      "reflection", "reflectionraw", "filloverlayraw", "effectdagraw",
                       "softedge", "blur", "fliph", "flipv", "rot3d", "rotation3d",
                       "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
                       "depth", "extrusion", "material", "lighting", "lightrig",

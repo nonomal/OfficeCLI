@@ -1366,6 +1366,66 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "effectdagraw":
+                {
+                    // R52 bt-2: <a:effectDag> verbatim passthrough. effectDag
+                    // is a sibling to effectLst on spPr (CT_EffectProperties
+                    // choice — schema accepts at most one of effectLst /
+                    // effectDag, though real decks compose both in document
+                    // order). The cont/sib nesting + per-leaf blur radius /
+                    // fillOverlay blend modes have no compressible form, so
+                    // mirror shadowRaw/fillOverlayRaw: lift attrs + InnerXml,
+                    // install as a fresh effectDag on spPr.
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    spPr.RemoveAllChildren<Drawing.EffectDag>();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        try
+                        {
+                            var raw = value.Contains("xmlns:a=")
+                                ? value
+                                : value.Replace("<a:effectDag",
+                                    "<a:effectDag xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"");
+                            var dag = new Drawing.EffectDag();
+                            using var sr = new System.IO.StringReader(raw);
+                            using var xr = System.Xml.XmlReader.Create(sr);
+                            xr.MoveToContent();
+                            if (xr.HasAttributes)
+                            {
+                                while (xr.MoveToNextAttribute())
+                                {
+                                    if (xr.Prefix == "xmlns" || xr.Name == "xmlns") continue;
+                                    dag.SetAttribute(new OpenXmlAttribute(
+                                        xr.Prefix, xr.LocalName, xr.NamespaceURI, xr.Value));
+                                }
+                                xr.MoveToElement();
+                            }
+                            if (!xr.IsEmptyElement)
+                            {
+                                var inner = xr.ReadInnerXml();
+                                if (!string.IsNullOrWhiteSpace(inner))
+                                    dag.InnerXml = inner;
+                            }
+                            // Schema order on spPr: ...fill, ln, effectLst /
+                            // effectDag, scene3d, sp3d, extLst. Insert after
+                            // effectLst (or after any fill/ln) so PowerPoint
+                            // accepts the result.
+                            var afterEl = (OpenXmlElement?)spPr.GetFirstChild<Drawing.EffectList>()
+                                ?? (OpenXmlElement?)spPr.GetFirstChild<Drawing.Outline>()
+                                ?? spPr.GetFirstChild<Drawing.SolidFill>() as OpenXmlElement
+                                ?? spPr.GetFirstChild<Drawing.GradientFill>() as OpenXmlElement;
+                            if (afterEl != null) spPr.InsertAfter(dag, afterEl);
+                            else spPr.AppendChild(dag);
+                        }
+                        catch
+                        {
+                            unsupported.Add(key);
+                        }
+                    }
+                    break;
+                }
+
                 case "filloverlayraw":
                 {
                     // bt-1 dump→replay path. Value is the verbatim

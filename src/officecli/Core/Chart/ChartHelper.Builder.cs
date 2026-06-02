@@ -24,7 +24,13 @@ internal static partial class ChartHelper
         var chart = new C.Chart();
 
         if (!string.IsNullOrEmpty(title))
-            chart.AppendChild(BuildChartTitle(title));
+        {
+            // R53 tester-2: forward an explicit title.lang (defaults to en-US
+            // inside BuildChartTitle when absent) so dump→replay preserves the
+            // source locale on the chart-title run.
+            properties.TryGetValue("title.lang", out var titleLangBuild);
+            chart.AppendChild(BuildChartTitle(title, titleLangBuild));
+        }
 
         var originalCategories = categories;
 
@@ -1752,7 +1758,7 @@ internal static partial class ChartHelper
 
     // ==================== Title Builder ====================
 
-    internal static C.Title BuildChartTitle(string titleText)
+    internal static C.Title BuildChartTitle(string titleText, string? titleLang = null)
     {
         // CONSISTENCY(chart-cell-ref): if titleText looks like a single-cell
         // reference (e.g. "Sheet1!A1"), emit <c:tx><c:strRef> so Excel resolves
@@ -1769,6 +1775,12 @@ internal static partial class ChartHelper
             );
         }
 
+        // R53 tester-2: source charts authored in zh-CN / ja-JP / ko-KR carry
+        // <a:rPr lang="zh-CN"/> on the title run; dump→replay hard-coded
+        // "en-US" and the locale-specific text shaping (line break rules,
+        // font fallback) regressed. Accept the source lang via title.lang
+        // input and default to en-US for new charts.
+        var titleLangVal = string.IsNullOrEmpty(titleLang) ? "en-US" : titleLang!;
         return new C.Title(
             new C.ChartText(
                 new C.RichText(
@@ -1779,7 +1791,7 @@ internal static partial class ChartHelper
                             new Drawing.DefaultRunProperties { FontSize = 1400, Bold = true }
                         ),
                         new Drawing.Run(
-                            new Drawing.RunProperties { Language = "en-US", FontSize = 1400, Bold = true },
+                            new Drawing.RunProperties { Language = titleLangVal, FontSize = 1400, Bold = true },
                             new Drawing.Text(titleText)
                         )
                     )

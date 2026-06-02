@@ -173,7 +173,8 @@ internal static partial class ChartHelper
                         // removal (or autoTitleDeleted=true) left behind — otherwise
                         // the new title element is present but suppressed at render.
                         chart.RemoveAllChildren<C.AutoTitleDeleted>();
-                        chart.PrependChild(BuildChartTitle(value));
+                        properties.TryGetValue("title.lang", out var setterTitleLang);
+                        chart.PrependChild(BuildChartTitle(value, setterTitleLang));
                     }
                     break;
 
@@ -183,6 +184,7 @@ internal static partial class ChartHelper
                 case "title.bold" or "titlebold":
                 case "title.glow" or "titleglow":
                 case "title.shadow" or "titleshadow":
+                case "title.lang" or "titlelang":
                 {
                     var ctitle = chart.GetFirstChild<C.Title>();
                     if (ctitle == null) { unsupported.Add(key); break; }
@@ -192,6 +194,11 @@ internal static partial class ChartHelper
                         var normalizedKey = key.Replace("title.", "").Replace("title", "").ToLowerInvariant();
                         switch (normalizedKey)
                         {
+                            case "lang":
+                                // R53 tester-2: round-trip the title run's lang
+                                // (e.g. zh-CN) so dump→replay doesn't regress to en-US.
+                                rPr.Language = value;
+                                break;
                             case "font":
                                 rPr.RemoveAllChildren<Drawing.LatinFont>();
                                 rPr.RemoveAllChildren<Drawing.EastAsianFont>();

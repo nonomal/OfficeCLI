@@ -172,6 +172,12 @@ internal static partial class ChartHelper
                 }
                 if (titleRp.Bold?.HasValue == true)
                     node.Format["title.bold"] = titleRp.Bold.Value ? "true" : "false";
+                // R53 tester-2: round-trip the title run's lang attribute
+                // (zh-CN / ja-JP / ko-KR / en-US). Default-construction
+                // hard-coded en-US, so a source-authored locale silently
+                // regressed on dump→replay.
+                if (titleRp.Language?.HasValue == true && !string.IsNullOrEmpty(titleRp.Language.Value))
+                    node.Format["title.lang"] = titleRp.Language.Value!;
             }
         }
 

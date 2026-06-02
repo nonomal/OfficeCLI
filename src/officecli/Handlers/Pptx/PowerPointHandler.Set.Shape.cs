@@ -44,7 +44,7 @@ public partial class PowerPointHandler
     private const string RunPropsHint =
         "valid run props: text, bold, italic, underline, strike, color, fill, size, font, font.latin, font.ea, font.cs, link, tooltip, baseline, spacing, cap";
     private const string ParagraphPropsHint =
-        "valid paragraph props: align, indent, level, marginLeft, marginRight, lineSpacing, spaceBefore, spaceAfter, link, tooltip — plus any run prop (applied to all runs in the paragraph)";
+        "valid paragraph props: align, indent, level, marginLeft, marginRight, lineSpacing, spaceBefore, spaceAfter, tabs, link, tooltip — plus any run prop (applied to all runs in the paragraph)";
 
     private List<string> SetParagraphRunByPath(Match paraRunMatch, Dictionary<string, string> properties)
     {
@@ -222,6 +222,20 @@ public partial class PowerPointHandler
                     var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
                     pProps.RemoveAllChildren<Drawing.SpaceAfter>();
                     InsertPPrChild(pProps, new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(value) }));
+                    break;
+                }
+                // R65 bt-2: custom tab stops — same compact compound form
+                // emitted by NodeBuilder, parsed via ParseTabStopList. Routed
+                // through InsertPPrChild so a subsequent `set` that adds an
+                // earlier-ranked sibling (e.g. spcAft) doesn't push tabLst
+                // out of schema order (CONSISTENCY(schema-order-pptx)).
+                case "tabs" or "tablist":
+                {
+                    var pProps = para.ParagraphProperties ?? (para.ParagraphProperties = new Drawing.ParagraphProperties());
+                    pProps.RemoveAllChildren<Drawing.TabStopList>();
+                    var tabList = ParseTabStopList(value);
+                    if (tabList != null)
+                        InsertPPrChild(pProps, tabList);
                     break;
                 }
                 case "link":

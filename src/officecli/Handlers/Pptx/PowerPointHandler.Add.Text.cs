@@ -285,6 +285,21 @@ public partial class PowerPointHandler
                     pProps.RemoveAllChildren<Drawing.SpaceAfter>();
                     pProps.AppendChild(new Drawing.SpaceAfter(new Drawing.SpacingPoints { Val = SpacingConverter.ParsePptSpacing(pSaVal) }));
                 }
+                // R65 bt-2: <a:tabLst>/<a:tab pos algn/> — accept the compact
+                // compound form emitted by NodeBuilder so dump→replay restores
+                // custom tab stops. Schema-order is handled by AppendChild here
+                // because AddParagraph builds pPr top-to-bottom in declaration
+                // order (tabLst rank > spcBef/spcAft/list); SetParagraph routes
+                // through InsertPPrChild for the reverse-order case.
+                if (properties.TryGetValue("tabs", out var pTabsVal) || properties.TryGetValue("tablist", out pTabsVal))
+                {
+                    var pTabList = ParseTabStopList(pTabsVal);
+                    if (pTabList != null)
+                    {
+                        pProps.RemoveAllChildren<Drawing.TabStopList>();
+                        pProps.AppendChild(pTabList);
+                    }
+                }
 
                 // CONSISTENCY(pptx-no-empty-ppr): only attach paragraph
                 // properties when at least one was set. Empty <a:pPr/>

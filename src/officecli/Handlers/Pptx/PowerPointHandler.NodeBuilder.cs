@@ -1837,6 +1837,14 @@ public partial class PowerPointHandler
                     {
                         var paraList = ReadListStyleFromPProps(paraPProps);
                         if (paraList != null) paraNode.Format["list"] = paraList;
+                        // R65 bt-2: <a:tabLst>/<a:tab pos algn/> — custom tab
+                        // stops were silently dropped on Get / dump, collapsing
+                        // tab-aligned paragraphs after batch replay. Surface as
+                        // the canonical compound `tabs=pos:algn,pos:algn,…` so
+                        // AddParagraph / SetParagraph can re-stamp the list
+                        // (CONSISTENCY(pptx-bare-as-points) for pos units).
+                        var paraTabs = ReadTabsFromPProps(paraPProps);
+                        if (paraTabs != null) paraNode.Format["tabs"] = paraTabs;
                     }
                     if (paraPProps?.RightToLeft?.HasValue == true)
                         paraNode.Format["direction"] = paraPProps.RightToLeft.Value ? "rtl" : "ltr";

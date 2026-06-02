@@ -36,6 +36,83 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// R65 bt-2: read <c>&lt;a:pPr&gt;/&lt;a:tabLst&gt;/&lt;a:tab pos algn/&gt;…</c> as the
+    /// compact compound <c>"36pt:l,72pt:ctr,108pt:r,144pt:dec"</c> so custom tab
+    /// stops survive dump → batch replay. Returns null when the paragraph has no
+    /// <c>tabLst</c> or the list is empty (PowerPoint inherits master/layout tab
+    /// stops in that case; emitting an empty string would replace inheritance
+    /// with an explicit zero-tab list on replay). Position is rendered in
+    /// points to round-trip with bare-number Add/Set input
+    /// (CONSISTENCY(pptx-bare-as-points)). Alignment uses the OOXML literal
+    /// values (<c>l</c>/<c>ctr</c>/<c>r</c>/<c>dec</c>) — the same vocabulary
+    /// AddParagraph/SetParagraph accepts on input.
+    /// </summary>
+    private static string? ReadTabsFromPProps(Drawing.ParagraphProperties pProps)
+    {
+        var tabLst = pProps.GetFirstChild<Drawing.TabStopList>();
+        if (tabLst == null) return null;
+        var tabs = tabLst.Elements<Drawing.TabStop>().ToList();
+        if (tabs.Count == 0) return null;
+        var parts = new List<string>(tabs.Count);
+        foreach (var tab in tabs)
+        {
+            if (!tab.Position.HasValue) continue;
+            var posPt = FormatPptIndentPoints(tab.Position.Value);
+            // Default alignment in OOXML schema is `l` when @algn is absent.
+            var algn = tab.Alignment?.HasValue == true
+                ? (tab.Alignment.InnerText ?? "l")
+                : "l";
+            parts.Add($"{posPt}:{algn}");
+        }
+        return parts.Count == 0 ? null : string.Join(",", parts);
+    }
+
+    /// <summary>
+    /// R65 bt-2: parse the compact compound <c>"pos1:algn1,pos2:algn2,…"</c>
+    /// surfaced by <see cref="ReadTabsFromPProps"/> into a fresh
+    /// <c>&lt;a:tabLst&gt;</c>. Empty input yields null (caller skips the
+    /// child entirely, preserving master/layout inheritance). Whitespace
+    /// around delimiters is tolerated; alignment is optional and defaults
+    /// to <c>l</c> when omitted (matches the OOXML schema default).
+    /// </summary>
+    internal static Drawing.TabStopList? ParseTabStopList(string spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) return null;
+        var list = new Drawing.TabStopList();
+        var entries = spec.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var raw in entries)
+        {
+            var entry = raw.Trim();
+            if (entry.Length == 0) continue;
+            string posPart;
+            string algnPart;
+            var colon = entry.IndexOf(':');
+            if (colon < 0)
+            {
+                posPart = entry;
+                algnPart = "l";
+            }
+            else
+            {
+                posPart = entry.Substring(0, colon).Trim();
+                algnPart = entry.Substring(colon + 1).Trim();
+                if (algnPart.Length == 0) algnPart = "l";
+            }
+            var posEmu = (int)Math.Round(SpacingConverter.ParsePointsSigned(posPart) * EmuConverter.EmuPerPointF);
+            var algnEnum = algnPart.ToLowerInvariant() switch
+            {
+                "l" or "left" => Drawing.TextTabAlignmentValues.Left,
+                "ctr" or "center" or "centre" => Drawing.TextTabAlignmentValues.Center,
+                "r" or "right" => Drawing.TextTabAlignmentValues.Right,
+                "dec" or "decimal" => Drawing.TextTabAlignmentValues.Decimal,
+                _ => throw new ArgumentException($"Invalid tab alignment '{algnPart}' in tabs='{spec}'. Expected l|ctr|r|dec (OOXML a:tab/@algn).")
+            };
+            list.Append(new Drawing.TabStop { Position = posEmu, Alignment = algnEnum });
+        }
+        return list.HasChildren ? list : null;
+    }
+
+    /// <summary>
     /// Read the canonical `list` value from a paragraph's properties — mirrors
     /// the input alias table consumed by ApplyListStyle (Fill.cs). Returns null
     /// when the paragraph carries no <a:buChar>/<a:buAutoNum>/<a:buNone>.

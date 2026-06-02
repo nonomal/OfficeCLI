@@ -440,6 +440,10 @@ public partial class PowerPointHandler
             {
                 var qParaList = ReadListStyleFromPProps(qParaPProps);
                 if (qParaList != null) paraNode.Format["list"] = qParaList;
+                // R65 bt-2: mirror NodeBuilder.ParaToNode so direct paragraph
+                // Get (Query.cs path) surfaces custom tab stops too.
+                var qParaTabs = ReadTabsFromPProps(qParaPProps);
+                if (qParaTabs != null) paraNode.Format["tabs"] = qParaTabs;
             }
             var qLsPct = qParaPProps?.GetFirstChild<Drawing.LineSpacing>()?.GetFirstChild<Drawing.SpacingPercent>()?.Val?.Value;
             if (qLsPct.HasValue) paraNode.Format["lineSpacing"] = SpacingConverter.FormatPptLineSpacingPercent(qLsPct.Value);

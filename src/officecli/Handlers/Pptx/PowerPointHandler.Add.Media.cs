@@ -364,7 +364,29 @@ public partial class PowerPointHandler
                 }
                 else
                 {
-                    picture.BlipFill.AppendChild(new Drawing.Stretch(new Drawing.FillRectangle()));
+                    // bt-5: accept an explicit `fillRect=l,t,r,b` (perMille)
+                    // so dump→replay carries authored positive insets
+                    // (manual letterbox padding inside the picture frame) and
+                    // negative insets (manual outset crop). R47 fixed the
+                    // srcRect side; this is the stretch/fillRect counterpart.
+                    var fr = new Drawing.FillRectangle();
+                    if (properties.TryGetValue("fillRect", out var frStr)
+                        || properties.TryGetValue("fillrect", out frStr))
+                    {
+                        var parts = (frStr ?? "").Split(',', StringSplitOptions.TrimEntries);
+                        if (parts.Length == 4)
+                        {
+                            if (int.TryParse(parts[0], System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var l)) fr.Left = l;
+                            if (int.TryParse(parts[1], System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var t)) fr.Top = t;
+                            if (int.TryParse(parts[2], System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var r2)) fr.Right = r2;
+                            if (int.TryParse(parts[3], System.Globalization.NumberStyles.Integer,
+                                    System.Globalization.CultureInfo.InvariantCulture, out var b)) fr.Bottom = b;
+                        }
+                    }
+                    picture.BlipFill.AppendChild(new Drawing.Stretch(fr));
                 }
 
                 picture.ShapeProperties = new ShapeProperties();

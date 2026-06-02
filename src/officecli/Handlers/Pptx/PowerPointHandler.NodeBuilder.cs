@@ -2221,11 +2221,15 @@ public partial class PowerPointHandler
                 node.Format["crop"] = $"{cl / 1000.0:0.###},{ct / 1000.0:0.###},{cr / 1000.0:0.###},{cb / 1000.0:0.###}";
         }
 
-        // bt-2: blipFill mode <a:tile .../> — PictureToNode previously
-        // surfaced only srcRect (crop). Without this readback every
-        // <a:tile> collapsed into a default <a:stretch> on round-trip
-        // (full-bleed image instead of repeated swatch).
+        // bt-2 / bt-5: blipFill mode — <a:tile .../> vs
+        // <a:stretch><a:fillRect .../>. PictureToNode previously surfaced
+        // only srcRect (crop). Without these readbacks <a:tile> collapsed
+        // into a default <a:stretch>, and any <a:fillRect> insets (positive
+        // for letterbox padding, negative for outset cover) were zeroed.
+        // R47 944a9c7d covered the srcRect negative-crop range; this is the
+        // tile / fillRect axis.
         var picTile = pic.BlipFill?.GetFirstChild<Drawing.Tile>();
+        var picStretch = pic.BlipFill?.GetFirstChild<Drawing.Stretch>();
         if (picTile != null)
         {
             node.Format["fillMode"] = "tile";
@@ -2244,6 +2248,25 @@ public partial class PowerPointHandler
                 node.Format["tileAlgn"] = picTile.Alignment.InnerText;
             if (picTile.Flip?.HasValue == true)
                 node.Format["tileFlip"] = picTile.Flip.InnerText;
+        }
+        else if (picStretch != null)
+        {
+            // bt-5: positive insets shrink the stretched area (letterbox);
+            // negative insets oversize it (cover-style crop, already
+            // honored by the srcRect path R47 fixed). Either sign rides
+            // through fillRect verbatim — the AddPicture stretch path used
+            // to always write a child-less <a:fillRect/>, losing every
+            // authored inset on round-trip.
+            var fr = picStretch.GetFirstChild<Drawing.FillRectangle>();
+            if (fr != null)
+            {
+                var fl = fr.Left?.Value;
+                var ft = fr.Top?.Value;
+                var frVal = fr.Right?.Value;
+                var fb = fr.Bottom?.Value;
+                if (fl.HasValue || ft.HasValue || frVal.HasValue || fb.HasValue)
+                    node.Format["fillRect"] = $"{fl ?? 0},{ft ?? 0},{frVal ?? 0},{fb ?? 0}";
+            }
         }
 
         return node;

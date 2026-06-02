@@ -1655,6 +1655,14 @@ internal static partial class ChartHelper
                     var crossAtAnchor = valAx.GetFirstChild<C.CrossBetween>();
                     if (crossAtAnchor != null) valAx.InsertBefore(newCrossesAt, crossAtAnchor);
                     else valAx.AppendChild(newCrossesAt);
+                    // Suppress the default <c:crosses val="autoZero"/> seeded by
+                    // BuildValueAxis when the caller did not request `crosses`
+                    // explicitly. OOXML CT_ValAx treats crossesAt as the
+                    // overriding form; leaving the default crosses element in
+                    // place makes dump→replay surface a spurious crosses=autoZero
+                    // prop (R57 tester-1).
+                    if (!properties.ContainsKey("crosses"))
+                        valAx.RemoveAllChildren<C.Crosses>();
                     break;
                 }
 

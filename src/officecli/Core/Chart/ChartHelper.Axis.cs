@@ -290,6 +290,14 @@ internal static partial class ChartHelper
                         var cbBefore2 = crsAtAx2.GetFirstChild<C.CrossBetween>();
                         if (cbBefore2 != null) crsAtAx2.InsertBefore(newCrossesAt, cbBefore2);
                         else crsAtAx2.AppendChild(newCrossesAt);
+                        // CONSISTENCY(chart/crossesat-overrides-crosses): mirror
+                        // ChartHelper.Setter.cs case "crossesat" — suppress the
+                        // default <c:crosses val="autoZero"/> seeded by the axis
+                        // builder when the caller did not request `crosses`
+                        // explicitly, so dump→replay does not surface a
+                        // spurious crosses=autoZero (R57 tester-1).
+                        if (!properties.ContainsKey("crosses"))
+                            crsAtAx2.RemoveAllChildren<C.Crosses>();
                         directlyHandled.Add(key);
                     }
                     else

@@ -533,6 +533,7 @@ static partial class CommandBuilder
                 if (props.Count == 0)
                     throw new ArgumentException("'set' command requires 'props' field with at least one key=value. Got empty/missing props.");
                 var path = item.Path;
+                OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
                 var unsupported = handler.Set(path, props);
                 // Mirror standalone `set` (CommandBuilder.Set.cs): handler.Set
                 // may return entries with help text like "key (valid props ...)"
@@ -647,6 +648,7 @@ static partial class CommandBuilder
                 if (string.IsNullOrEmpty(item.Path))
                     throw new ArgumentException("'remove' command requires 'path' field. Example: {\"command\": \"remove\", \"path\": \"/slide[1]/shape[2]\"}");
                 var path = item.Path;
+                OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "remove");
                 var warning = handler.Remove(path, item.Props);
                 var msg = $"Removed {path}";
                 if (warning != null) msg += $"\n{warning}";

@@ -446,6 +446,7 @@ public static class McpServer
                 var file = Arg("file");
                 var path = Arg("path");
                 var props = ParseProps(ArgStringArray("props"));
+                OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
                 var unsupported = handler.Set(path, props);
                 var applied = props.Where(kv => !unsupported.Contains(kv.Key)).ToList();
@@ -477,6 +478,7 @@ public static class McpServer
             {
                 var file = Arg("file");
                 var path = Arg("path");
+                OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "remove");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
                 handler.Remove(path);
                 return $"Removed {path}";

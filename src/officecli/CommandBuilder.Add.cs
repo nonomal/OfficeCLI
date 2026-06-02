@@ -322,6 +322,12 @@ static partial class CommandBuilder
             var props = result.GetValue(removePropsOpt);
             var parsedProps = (props != null && props.Length > 0) ? ParsePropsArray(props) : null;
 
+            // Agent-safety: reject a bare unscoped selector (`run`, `shape[...]`) —
+            // a bare `remove "run"` would delete every run. Allows `/`-scoped paths
+            // and Excel `Sheet1!A1`. Runs before TryResident so the resident path
+            // is guarded too.
+            OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "remove");
+
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "remove";

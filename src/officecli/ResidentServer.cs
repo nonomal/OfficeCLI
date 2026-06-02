@@ -1535,6 +1535,8 @@ public class ResidentServer : IDisposable
         // path is a Query→Set-per-match selector (Sheet1!A1, Sheet1!row[工资>5000]),
         // the same engine batch uses — accepted so resident `set` matches get/query.
         // The handler selector branch throws on an empty match, so no silent no-op.
+        // Agent-safety: reject a bare unscoped selector (mirrors CommandBuilder).
+        OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
         var unsupported = _handler.Set(path, properties);
         // CONSISTENCY(unsupported-key-extract): mirrored in CommandBuilder.Set.cs.
         // Handler entries may be "key (reason)" or "key=value (reason)" (e.g.
@@ -1694,6 +1696,8 @@ public class ResidentServer : IDisposable
     private void ExecuteRemove(ResidentRequest req)
     {
         var path = req.GetArg("path", "/");
+        // Agent-safety: reject a bare unscoped selector (mirrors CommandBuilder).
+        OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "remove");
         var shift = req.GetArgOrNull("shift");
         if (!string.IsNullOrEmpty(shift))
         {

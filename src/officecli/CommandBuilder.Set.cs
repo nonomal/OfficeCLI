@@ -190,6 +190,12 @@ static partial class CommandBuilder
             // CONSISTENCY(selector-set): ResidentServer.ExecuteSet mirrors this.
             var isSelectorSet = !string.IsNullOrEmpty(path) && !path.StartsWith("/");
 
+            // Agent-safety: reject a bare unscoped selector (`cell[...]`, `run`) —
+            // it would mutate across the whole document. Allows `/`-scoped paths
+            // and Excel `Sheet1!A1`. query is unaffected. Runs before TryResident
+            // so the resident-forward path is guarded too.
+            OfficeCli.Core.MutationSelectorGuard.EnsureScoped(path, "set");
+
             if (TryResident(file.FullName, req =>
             {
                 req.Command = "set";

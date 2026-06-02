@@ -2207,6 +2207,36 @@ public partial class PowerPointHandler
                     };
                     break;
                 }
+                case "horzoverflow":
+                {
+                    // R56 bt-4: a:tcPr @horzOverflow (overflow|clip). Typed SDK
+                    // enum; vocabulary mirrors NodeBuilder readback.
+                    var tcPrHov = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    tcPrHov.HorizontalOverflow = value.ToLowerInvariant() switch
+                    {
+                        "overflow" => Drawing.TextHorizontalOverflowValues.Overflow,
+                        "clip" => Drawing.TextHorizontalOverflowValues.Clip,
+                        _ => throw new ArgumentException($"Invalid horzOverflow value: '{value}'. Valid values: overflow, clip.")
+                    };
+                    break;
+                }
+                case "locktext":
+                {
+                    // R56 bt-4: a:tcPr @lockText — non-standard MS Office
+                    // extension (not in the SDK enum). Set/clear via raw
+                    // attribute manipulation so dump→batch round-trips.
+                    var tcPrLt = cell.TableCellProperties ?? (cell.TableCellProperties = new Drawing.TableCellProperties());
+                    bool lockOn = IsTruthy(value);
+                    // Remove any prior occurrence first (idempotent). OpenXmlAttribute
+                    // is a struct so FirstOrDefault returns default (empty LocalName)
+                    // when absent — check non-empty before RemoveAttribute.
+                    var existing = tcPrLt.GetAttributes().FirstOrDefault(a => a.LocalName == "lockText");
+                    if (!string.IsNullOrEmpty(existing.LocalName))
+                        tcPrLt.RemoveAttribute(existing.LocalName, existing.NamespaceUri);
+                    if (lockOn)
+                        tcPrLt.SetAttribute(new OpenXmlAttribute("lockText", "", "1"));
+                    break;
+                }
                 case "gridspan" or "colspan":
                 {
                     // CONSISTENCY(merge-continuation): a CT_TableCell with

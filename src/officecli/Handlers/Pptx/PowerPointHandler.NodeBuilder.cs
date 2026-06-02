@@ -544,6 +544,37 @@ public partial class PowerPointHandler
                             };
                         }
 
+                        // R56 bt-4: a:tcPr @horzOverflow (overflow|clip) — typed
+                        // SDK property. Mirror Set vocabulary verbatim.
+                        if (tcPr?.HorizontalOverflow?.HasValue == true)
+                        {
+                            var hov = tcPr.HorizontalOverflow.Value;
+                            if (hov == Drawing.TextHorizontalOverflowValues.Overflow)
+                                cellNode.Format["horzOverflow"] = "overflow";
+                            else if (hov == Drawing.TextHorizontalOverflowValues.Clip)
+                                cellNode.Format["horzOverflow"] = "clip";
+                            else
+                                cellNode.Format["horzOverflow"] = tcPr.HorizontalOverflow.InnerText;
+                        }
+
+                        // R56 bt-4: a:tcPr @lockText is a non-standard MS Office
+                        // extension (not in the SDK enum); preserve via raw
+                        // attribute iteration. Same KeyNotFoundException-safe
+                        // pattern as bodyPr/rtlCol above.
+                        if (tcPr != null)
+                        {
+                            foreach (var attr in tcPr.GetAttributes())
+                            {
+                                if (attr.LocalName == "lockText")
+                                {
+                                    var av = attr.Value ?? "";
+                                    cellNode.Format["lockText"] = av == "1"
+                                        || av.Equals("true", StringComparison.OrdinalIgnoreCase);
+                                    break;
+                                }
+                            }
+                        }
+
                         // Cell run-level formatting (font, size, bold, italic, underline, strike, color)
                         var cellFirstRun = cell.Descendants<Drawing.Run>().FirstOrDefault();
                         if (cellFirstRun?.RunProperties != null)

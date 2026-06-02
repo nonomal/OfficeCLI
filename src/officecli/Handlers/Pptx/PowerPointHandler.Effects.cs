@@ -467,6 +467,44 @@ public partial class PowerPointHandler
         scene3d.LightRig!.Rig = ParseLightRig(value);
     }
 
+    /// <summary>
+    /// Apply lightRig @dir (t/tl/tr/l/r/b/bl/br) to scene3d's lightRig.
+    /// R55 bt-4: NodeBuilder surfaces this as Format["lightingDir"]; without
+    /// a Set hook the source direction was dropped on every dump-replay.
+    /// </summary>
+    private static void ApplyLightRigDirection(ShapeProperties spPr, string value)
+    {
+        var scene3d = EnsureScene3D(spPr);
+        scene3d.LightRig!.Direction = new Drawing.LightRigDirectionValues(value);
+    }
+
+    /// <summary>
+    /// Apply &lt;a:rot lat="..." lon="..." rev="..."/&gt; under &lt;a:lightRig&gt;.
+    /// Input form mirrors the NodeBuilder Get key: "lat:lon:rev" (60000ths of
+    /// a degree, the raw OOXML unit). R55 bt-4: this child was previously
+    /// unrepresented in the Set vocabulary, so dump captured lightingRot but
+    /// replay rebuilt the lightRig with no rot child.
+    /// </summary>
+    private static void ApplyLightRigRotation(ShapeProperties spPr, string value)
+    {
+        var scene3d = EnsureScene3D(spPr);
+        var parts = value.Split(':');
+        if (parts.Length != 3
+            || !int.TryParse(parts[0], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var lat)
+            || !int.TryParse(parts[1], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var lon)
+            || !int.TryParse(parts[2], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var rev))
+        {
+            throw new ArgumentException(
+                $"Invalid lightingRot: '{value}'. Expected 'lat:lon:rev' in 60000ths of a degree (e.g. '0:0:1200000').");
+        }
+        var rot = new Drawing.Rotation { Latitude = lat, Longitude = lon, Revolution = rev };
+        scene3d.LightRig!.RemoveAllChildren<Drawing.Rotation>();
+        scene3d.LightRig.AppendChild(rot);
+    }
+
     // --- Helper methods ---
 
     /// <summary>

@@ -785,6 +785,7 @@ public partial class PowerPointHandler
                       "softedge", "blur", "fliph", "flipv", "rot3d", "rotation3d",
                       "rotx", "roty", "rotz", "bevel", "beveltop", "bevelbottom",
                       "depth", "extrusion", "material", "lighting", "lightrig",
+                      "lightingdir", "lightrigdir", "lightingrot", "lightrigrot",
                       "camera", "camerapreset", "cameraprst",
                       "extrusioncolor", "extrusionclr",
                       "contourcolor", "contourclr",

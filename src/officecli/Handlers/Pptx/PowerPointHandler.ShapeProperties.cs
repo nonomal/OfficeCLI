@@ -1643,6 +1643,22 @@ public partial class PowerPointHandler
                     break;
                 }
 
+                case "lightingdir" or "lightrigdir":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyLightRigDirection(spPr, value);
+                    break;
+                }
+
+                case "lightingrot" or "lightrigrot":
+                {
+                    var spPr = shape.ShapeProperties;
+                    if (spPr == null) { unsupported.Add(key); break; }
+                    ApplyLightRigRotation(spPr, value);
+                    break;
+                }
+
                 case "extrusioncolor" or "extrusionclr":
                 {
                     var spPr = shape.ShapeProperties;

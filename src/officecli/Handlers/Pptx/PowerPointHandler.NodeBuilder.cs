@@ -1407,6 +1407,21 @@ public partial class PowerPointHandler
                 node.Format["camera"] = cam.Preset.InnerText ?? "";
             var lightRig = scene3d.LightRig;
             if (lightRig?.Rig?.HasValue == true) node.Format["lighting"] = lightRig.Rig.InnerText;
+            // R55 bt-4: surface lightRig @dir + <a:rot> child. Both are
+            // schema-legal extensions of <a:lightRig>, and PowerPoint writes
+            // them on the Reflection (light-rotation) Effect Options. Before
+            // this readback, ApplyLightRig wrote a fresh <a:lightRig> with
+            // only @rig, dropping any source dir / rot child on round-trip.
+            if (lightRig?.Direction?.HasValue == true)
+                node.Format["lightingDir"] = lightRig.Direction.InnerText;
+            var lightRot = lightRig?.Rotation;
+            if (lightRot != null)
+            {
+                var lat = lightRot.Latitude?.Value ?? 0;
+                var lon = lightRot.Longitude?.Value ?? 0;
+                var rev = lightRot.Revolution?.Value ?? 0;
+                node.Format["lightingRot"] = $"{lat}:{lon}:{rev}";
+            }
         }
 
         // 3D format (sp3d)

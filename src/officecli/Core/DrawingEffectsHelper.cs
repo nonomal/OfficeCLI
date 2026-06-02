@@ -47,7 +47,7 @@ internal static class DrawingEffectsHelper
         // explicit FF alpha doesn't silently downgrade to 40%.
         bool colorEncodesAlpha = ColorEncodesExplicitAlpha(parts[0]);
         if (hasExplicitOpacity || (!colorHasAlpha && !colorEncodesAlpha))
-            SetAlphaChild(clr, (int)(opacity * 1000));
+            SetAlphaChildSkippingDefault(clr, (int)(opacity * 1000));
         shadow.AppendChild(clr);
         return shadow;
     }
@@ -78,7 +78,7 @@ internal static class DrawingEffectsHelper
         bool colorHasAlpha = clr.GetFirstChild<Drawing.Alpha>() != null;
         bool colorEncodesAlpha = ColorEncodesExplicitAlpha(parts[0]);
         if (hasExplicitOpacity || (!colorHasAlpha && !colorEncodesAlpha))
-            SetAlphaChild(clr, (int)(opacity * 1000));
+            SetAlphaChildSkippingDefault(clr, (int)(opacity * 1000));
         shadow.AppendChild(clr);
         return shadow;
     }
@@ -100,7 +100,7 @@ internal static class DrawingEffectsHelper
         bool colorHasAlpha = clr.GetFirstChild<Drawing.Alpha>() != null;
         bool colorEncodesAlpha = ColorEncodesExplicitAlpha(parts[0]);
         if (hasExplicitOpacity || (!colorHasAlpha && !colorEncodesAlpha))
-            SetAlphaChild(clr, (int)(opacity * 1000));
+            SetAlphaChildSkippingDefault(clr, (int)(opacity * 1000));
         glow.AppendChild(clr);
         return glow;
     }
@@ -305,6 +305,20 @@ internal static class DrawingEffectsHelper
     {
         var existing = colorElement.GetFirstChild<Drawing.Alpha>();
         if (existing != null) existing.Remove();
+        colorElement.AppendChild(new Drawing.Alpha { Val = alphaVal });
+    }
+
+    /// <summary>
+    /// Same as SetAlphaChild, but skip emitting <a:alpha val="100000"/> — that
+    /// is OOXML's default ("fully opaque") and serializing it produces spurious
+    /// XML drift after a Set→reload roundtrip. Any existing alpha child is still
+    /// removed (an explicit 100% request must clear a prior non-default alpha).
+    /// </summary>
+    private static void SetAlphaChildSkippingDefault(OpenXmlElement colorElement, int alphaVal)
+    {
+        var existing = colorElement.GetFirstChild<Drawing.Alpha>();
+        if (existing != null) existing.Remove();
+        if (alphaVal == 100000) return;
         colorElement.AppendChild(new Drawing.Alpha { Val = alphaVal });
     }
 

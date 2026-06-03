@@ -77,5 +77,41 @@ officecli add "$DOCX" /body --type paragraph --prop "text=raised 3pt" --prop pos
 heading "Language tag"
 officecli add "$DOCX" /body --type paragraph --prop "text=Tagged en-US for spellcheck" --prop lang=en-US
 
+# --- complex-script (cs) variants ---
+heading "Complex-script variants"
+officecli add "$DOCX" /body --type paragraph --prop "text=cs bold + italic + 14pt" --prop bold.cs=true --prop italic.cs=true --prop size.cs=14pt
+officecli add "$DOCX" /body --type paragraph --prop "text=Right-to-left run" --prop rtl=true --prop direction=rtl
+
+# --- theme fonts (resolve against the document theme) ---
+heading "Theme fonts"
+officecli add "$DOCX" /body --type paragraph --prop "text=Latin/CS/EA theme fonts" --prop font.asciiTheme=minorHAnsi --prop font.hAnsiTheme=minorHAnsi --prop font.csTheme=minorBidi --prop font.eaTheme=minorEastAsia
+
+# --- explicit per-script fonts + the `font` shorthand ---
+heading "Per-script font keys"
+officecli add "$DOCX" /body --type paragraph --prop "text=font shorthand (all scripts)" --prop font=Calibri
+officecli add "$DOCX" /body --type paragraph --prop "text=cs + ea explicit fonts" --prop font.cs="Arial" --prop font.ea="SimSun"
+
+# --- per-script language tags ---
+heading "Per-script language"
+officecli add "$DOCX" /body --type paragraph --prop "text=lang per script (latin/ea/cs)" --prop lang.latin=en-US --prop lang.ea=zh-CN --prop lang.cs=ar-SA
+
+# --- run shading & hidden text ---
+heading "Run shading & hidden text"
+officecli add "$DOCX" /body --type paragraph --prop "text=Yellow run shading" --prop shading=FFFF00
+officecli add "$DOCX" /body --type paragraph --prop "text=Hidden (vanish) text" --prop vanish=true
+officecli add "$DOCX" /body --type paragraph --prop "text=No-proof (spellcheck off)" --prop noproof=true
+
+# --- vertical alignment (vertAlign enum alias) ---
+heading "vertAlign enum"
+officecli add "$DOCX" /body --type paragraph --prop "text=vertAlign=superscript" --prop vertAlign=superscript
+
+# --- WordprocessingML 2010 (w14) text effects ---
+heading "w14 text effects"
+officecli add "$DOCX" /body --type paragraph --prop "text=Text fill color" --prop textFill=FF0000 --prop size=16
+officecli add "$DOCX" /body --type paragraph --prop "text=Text outline" --prop textOutline=1pt-FF0000 --prop size=16
+officecli add "$DOCX" /body --type paragraph --prop "text=w14 glow" --prop w14glow=FF0000 --prop size=16
+officecli add "$DOCX" /body --type paragraph --prop "text=w14 reflection" --prop w14reflection=true --prop size=16
+officecli add "$DOCX" /body --type paragraph --prop "text=w14 shadow" --prop w14shadow=FF0000 --prop size=16
+
 officecli validate "$DOCX"
 echo "Created: $DOCX"

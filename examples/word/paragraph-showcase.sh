@@ -62,5 +62,58 @@ officecli add "$DOCX" /body --type paragraph --prop "text=The mark glyph is bold
 heading "Outline level"
 officecli add "$DOCX" /body --type paragraph --prop "text=Outline level 1 (shows in document map)" --prop outlineLvl=1
 
+# --- paragraph-level run formatting: strike / underline ---
+heading "Paragraph strike & underline"
+officecli add "$DOCX" /body --type paragraph --prop "text=Whole paragraph struck out" --prop strike=true
+officecli add "$DOCX" /body --type paragraph --prop "text=Underlined paragraph (red wave)" --prop underline=wave --prop underline.color=#FF0000
+
+# --- complex-script run props on the paragraph ---
+heading "Complex-script (cs)"
+officecli add "$DOCX" /body --type paragraph --prop "text=cs bold/italic/14pt + RTL" --prop bold.cs=true --prop italic.cs=true --prop size.cs=14pt --prop direction=rtl
+
+# --- spacing & pagination extras ---
+heading "Spacing & pagination extras"
+officecli add "$DOCX" /body --type paragraph --prop "text=contextualSpacing (collapse between same-style paras)" --prop contextualSpacing=true
+officecli add "$DOCX" /body --type paragraph --prop "text=lineSpacing 14pt, lineRule=atLeast" --prop lineSpacing=14pt --prop lineRule=atLeast
+officecli add "$DOCX" /body --type paragraph --prop "text=pageBreakBefore" --prop pageBreakBefore=true
+officecli add "$DOCX" /body --type paragraph --prop "text=wordWrap off (break long URLs anywhere)" --prop wordWrap=false
+
+# --- chars-based indentation (CJK 1/100-char units) ---
+heading "Chars-based indent"
+officecli add "$DOCX" /body --type paragraph --prop "text=first-line 200 chars, hanging 100 chars" --prop firstLineChars=200 --prop hangingChars=100
+
+# --- fonts: explicit per-script + theme references ---
+heading "Fonts (explicit & theme)"
+officecli add "$DOCX" /body --type paragraph --prop "text=font shorthand Times New Roman" --prop font="Times New Roman"
+officecli add "$DOCX" /body --type paragraph --prop "text=per-script latin/ea/cs" --prop font.latin=Calibri --prop font.ea=SimSun --prop font.cs=Arial
+officecli add "$DOCX" /body --type paragraph --prop "text=theme fonts" --prop font.asciiTheme=minorHAnsi --prop font.hAnsiTheme=minorHAnsi --prop font.eaTheme=minorEastAsia --prop font.csTheme=minorBidi
+
+# --- styles ---
+heading "Styles"
+officecli add "$DOCX" /body --type paragraph --prop "text=Paragraph style Heading1" --prop style=Heading1
+officecli add "$DOCX" /body --type paragraph --prop "text=Character style on the run" --prop rStyle=Emphasis
+
+# --- shading variants (shd shorthand + decomposed val/color) ---
+heading "Shading variants"
+officecli add "$DOCX" /body --type paragraph --prop "text=shd shorthand (yellow)" --prop shd=FFFF00
+officecli add "$DOCX" /body --type paragraph --prop "text=pct15 pattern, blue fill, red pattern color" --prop shading.val=pct15 --prop shading.fill=DDEBF7 --prop shading.color=C00000
+
+# --- tab stops ---
+heading "Tab stops"
+officecli add "$DOCX" /body --type paragraph --prop "text=Tabs at 720 and 1440 twips" --prop tabs=720,1440
+
+# --- paragraph-mark run props (full markRPr set) ---
+heading "Paragraph-mark formatting (full markRPr)"
+officecli add "$DOCX" /body --type paragraph --prop "text=mark: italic/strike/underline/size/highlight/fonts" \
+    --prop markRPr.italic=true --prop markRPr.strike=true --prop markRPr.underline=single \
+    --prop markRPr.size=14pt --prop markRPr.highlight=yellow \
+    --prop markRPr.font.latin=Georgia --prop markRPr.font.ea=SimSun --prop markRPr.font.cs=Arial
+
+# --- list numbering (auto-created via listStyle; numId/numLevel reference it) ---
+heading "List numbering"
+officecli add "$DOCX" /body --type paragraph --prop "text=Bulleted item" --prop listStyle=bullet
+officecli add "$DOCX" /body --type paragraph --prop "text=Ordered item starting at 5" --prop listStyle=ordered --prop start=5
+officecli add "$DOCX" /body --type paragraph --prop "text=Explicit numId=1 level 0" --prop numId=1 --prop numLevel=0
+
 officecli validate "$DOCX"
 echo "Created: $DOCX"

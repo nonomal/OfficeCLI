@@ -24,8 +24,18 @@ bash paragraph-showcase.sh
 | Pagination flags | `keepNext`, `keepLines`, `widowControl` |
 | Paragraph-level run formatting | `bold`, `italic`, `color`, `size`, `highlight` (applied to every run) |
 | Shading | `shading.fill` |
-| Paragraph-mark formatting | `markRPr.bold`, `markRPr.color` (the ¶ glyph only) |
+| Paragraph-mark formatting | full `markRPr.*` (bold/italic/strike/underline/size/color/highlight/font.latin/ea/cs) |
 | Outline level | `outlineLvl` |
+| Run formatting (paragraph-wide) | `strike`, `underline`, `underline.color`, `bold.cs`, `italic.cs`, `size.cs` |
+| Spacing/pagination extras | `contextualSpacing`, `lineRule`, `pageBreakBefore`, `wordWrap` |
+| Chars-based indent | `firstLineChars`, `hangingChars` |
+| Fonts | `font`, `font.latin/ea/cs`, theme fonts (`font.*Theme`), `direction` |
+| Styles | `style` (paragraph), `rStyle` (character) |
+| Shading variants | `shd`, `shading.val`, `shading.fill`, `shading.color` |
+| Tab stops | `tabs` |
+| List numbering | `listStyle`, `start`, `numId`, `numLevel` |
+
+This trio exercises **all 60 settable paragraph properties** (verified by a coverage check).
 
 ## Two kinds of "bold" on a paragraph
 
@@ -42,3 +52,7 @@ officecli set file.docx /body/p[1] --prop markRPr.bold=true   # ¶ mark only
 > `shading.fill` alone now produces schema-valid output — the writer defaults
 > the required `w:shd/@val` to `clear`. Pair with `shading.val` for a pattern
 > shade.
+
+> Decomposed color keys accept a leading `#` (e.g. `underline.color=#FF0000`,
+> `shading.fill=#D9D9D9`) — the dotted-attribute writer strips it, matching the
+> curated setters.

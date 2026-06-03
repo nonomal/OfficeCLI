@@ -27,7 +27,14 @@ bash run-showcase.sh
 | Per-script fonts | `font.latin`, `font.eastAsia` (Latin + CJK in one run) |
 | Text effects | `emboss`, `imprint`, `outline`, `shadow` |
 | Character spacing | `charSpacing`, `position` |
-| Language | `lang` (BCP-47 tag for spellcheck) |
+| Language | `lang`, `lang.latin`, `lang.ea`, `lang.cs` (BCP-47 per script) |
+| Complex script | `bold.cs`, `italic.cs`, `size.cs`, `rtl`, `direction` |
+| Theme fonts | `font.asciiTheme`, `font.hAnsiTheme`, `font.eaTheme`, `font.csTheme` |
+| Per-script fonts | `font` (all), `font.latin`, `font.ea`, `font.cs` |
+| Run shading / hidden | `shading`, `vanish`, `noproof` |
+| w14 text effects | `textFill`, `textOutline`, `w14glow`, `w14reflection`, `w14shadow` |
+
+This trio exercises **all 43 settable run properties** (verified by a coverage check).
 
 ## Mixed runs (super/subscript)
 
@@ -44,3 +51,7 @@ officecli add file.docx "/body/p[last()]" --type run --prop text=2 --prop supers
 
 > `kern` is **not** a docx run property (only `charSpacing` is); use
 > `charSpacing` for inter-character spacing.
+
+> w14 text effects (`textFill`, `textOutline`, `w14*`) now apply via
+> `add paragraph --prop ...` too (routed to the implicit run), matching how
+> `bold`/`color` already behaved.

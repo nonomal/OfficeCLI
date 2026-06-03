@@ -14,6 +14,7 @@ examples/
 │   ├── numbering-showcase.sh / numbering-showcase.docx
 │   └── revisions.{sh,md,docx}         # tracked-change (revision) API
 ├── excel/                             # 📊 Excel examples
+│   ├── cell-formatting.{md,py,xlsx}   # Full cell property surface (fonts/fills/borders/numFmt/data)
 │   ├── charts.sh / charts.xlsx        # Master chart showcase
 │   ├── charts/                        # Per-type chart scripts
 │   │   ├── charts-demo.{sh,md,xlsx}
@@ -70,6 +71,7 @@ bash revisions.sh            # Tracked-change (revision) API — ins/del/format/
 **Excel (.xlsx):**
 ```bash
 cd excel
+python cell-formatting.py    # Full cell property surface: fonts, fills, borders, number formats, formulas/links
 bash charts.sh               # Master chart showcase
 bash charts/charts-demo.sh   # 14+ chart types
 python charts/charts-line.py # Single-type example (any charts/charts-<type>.py)
@@ -119,6 +121,7 @@ python pictures/pictures-basic.py            # picture src/crop/rotation/links (
 - Numbering / list showcases
 
 ### 📊 [Excel Examples →](excel/)
+- Cell formatting — the full `cell` property surface across 5 sheets: fonts (name/size/bold/italic/color/underline/strike), fills (hex/named/rgb) + alignment (h/v/wrap/RTL), borders (shorthand/all/per-side/color), number formats (thousands/%/currency/date/scientific/accounting), and data (value/type/formula/link/locked/merge)
 - Master and per-type chart scripts (line, bar, pie, scatter, stock, waterfall, …)
 - Pivot tables
 - Number formatting and styling

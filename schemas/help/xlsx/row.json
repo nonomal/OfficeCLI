@@ -14,6 +14,16 @@
     "positional": ["/SheetName/row[N]"]
   },
   "note": "Row index N is 1-based. Add/Set asymmetry: all formatting props are currently Set-only. Insert/move/clone at an occupied slot shifts every row at or past the slot down by one, and every range-bearing structure on the sheet (mergeCells, CF/DV sqref, autoFilter, hyperlink/table refs, named ranges, formula cell-refs) follows the displacement. 'add --from /SheetName/row[K]' with --before/--after clones cells + single-row mergeCells; relative formula refs are delta-shifted to the new anchor (Excel 'Insert Copied Cells' parity).",
+  "examples": [
+    {
+      "title": "Filter rows by column name (resolves against a ListObject or a detected header-row table)",
+      "commands": [
+        "officecli query book.xlsx \"row[Salary>5000]\"",
+        "officecli query book.xlsx \"row[Region=West and Sales>1000]\"",
+        "officecli query book.xlsx \"row[Status=open or Priority=high]\""
+      ]
+    }
+  ],
   "properties": {
     "matchedTable": {
       "type": "string",

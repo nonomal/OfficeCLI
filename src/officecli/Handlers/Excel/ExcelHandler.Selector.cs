@@ -183,8 +183,10 @@ public partial class ExcelHandler
         {
             ["bold"] = "font.bold",
             ["italic"] = "font.italic",
-            ["underline"] = "font.underline",
-            ["strike"] = "font.strike",
+            // `strike`/`underline` are themselves the canonical cell Format keys
+            // (Get emits them unprefixed), so they map to identity — no remap.
+            ["underline"] = "underline",
+            ["strike"] = "strike",
             ["font"] = "font.name",
             ["size"] = "font.size",
             ["color"] = "font.color",

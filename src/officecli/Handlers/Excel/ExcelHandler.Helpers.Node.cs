@@ -377,9 +377,12 @@ public partial class ExcelHandler
                             {
                                 node.Format["font.italic"] = true;
                             }
-                            if (font.Strike != null) node.Format["font.strike"] = true;
+                            // Canonical cell keys are `strike`/`underline` (schema cell.json);
+                            // `font.strike`/`font.underline` are declared aliases. Get must
+                            // normalize to the canonical key so set->get round-trips.
+                            if (font.Strike != null) node.Format["strike"] = true;
                             if (font.Underline != null)
-                                node.Format["font.underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
+                                node.Format["underline"] = font.Underline.Val?.InnerText == "double" ? "double" : "single";
                             if (font.Color?.Rgb?.Value != null)
                                 node.Format["font.color"] = ParseHelpers.FormatHexColor(font.Color.Rgb.Value);
                             else if (font.Color?.Theme?.Value != null)
@@ -387,16 +390,19 @@ public partial class ExcelHandler
                                 var themeName = ParseHelpers.ExcelThemeIndexToName(font.Color.Theme.Value);
                                 if (themeName != null) node.Format["font.color"] = themeName;
                             }
-                            // vertAlign (superscript/subscript) readback — R28-A3:
-                            // use font.subscript/font.superscript to match font.bold/font.italic.
+                            // vertAlign (superscript/subscript) readback. Canonical cell
+                            // keys are `superscript`/`subscript` (schema cell.json + the
+                            // Set cases); `font.superscript`/`font.subscript` are legacy
+                            // aliases. Emit the canonical so set->get round-trips, and so
+                            // this matches the rich-text run readback below.
                             var vertAlign = font.GetFirstChild<VerticalTextAlignment>();
                             if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Superscript)
                             {
-                                node.Format["font.superscript"] = true;
+                                node.Format["superscript"] = true;
                             }
                             else if (vertAlign?.Val?.Value == VerticalAlignmentRunValues.Subscript)
                             {
-                                node.Format["font.subscript"] = true;
+                                node.Format["subscript"] = true;
                             }
                             if (font.FontSize?.Val?.Value != null)
                                 node.Format["font.size"] = $"{font.FontSize.Val.Value:0.##}pt";

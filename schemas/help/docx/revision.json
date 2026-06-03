@@ -104,6 +104,36 @@
       "readback": "paragraph-mark insertion date (read-only)",
       "enforcement": "report"
     },
+    "paraMarkIns.id": {
+      "type": "int",
+      "description": "w:id of the paragraph-mark insertion. Get-only companion to paraMarkIns.author/.date.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "paraMarkDel.author": {
+      "type": "string",
+      "description": "Author of a paragraph-mark deletion (w:rPr/w:del in pPr/rPr — the ¶ join is tracked as a deletion). Deletion counterpart of paraMarkIns.author. Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "paraMarkDel.date": {
+      "type": "string",
+      "description": "ISO-8601 timestamp companion to paraMarkDel.author.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "paraMarkDel.id": {
+      "type": "int",
+      "description": "w:id of the paragraph-mark deletion. Get-only.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
+    "revision.beforeLost": {
+      "type": "bool",
+      "description": "Get-only signal: true when a *PrChange 'before' property snapshot cannot round-trip through dump→batch (the prior-formatting baseline is lost on replay). Lets the batch emitter warn rather than silently drop it.",
+      "add": false, "set": false, "get": true,
+      "enforcement": "report"
+    },
     "sectPrChange.author": {
       "type": "string",
       "description": "Author of a w:sectPrChange on a section (revision.type=format equivalent at section scope; surfaced as a distinct key because the snapshot lives in a different OOXML wrapper than rPrChange/pPrChange).",

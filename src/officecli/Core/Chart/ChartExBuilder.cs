@@ -55,6 +55,30 @@ internal static partial class ChartExBuilder
             (categories, seriesData) = PreparePareto(categories, seriesData);
 
         var chartSpace = new CX.ChartSpace();
+        // Declare the DrawingML ("a") namespace on the chartex root. Title /
+        // data-label / axis text bodies emit <a:bodyPr>/<a:p>/<a:r>/<a:t>
+        // elements; some are added as raw elements the SDK does not auto-declare
+        // a namespace for, so without this the root carries only xmlns:cx and the
+        // a: prefix is undefined — malformed XML that real Excel refuses to open
+        // (0x800A03EC), even though the OpenXmlValidator does not flag it. Real
+        // Excel always declares xmlns:a on cx:chartSpace; match that.
+        chartSpace.AddNamespaceDeclaration("a", "http://schemas.openxmlformats.org/drawingml/2006/main");
+
+        // cx:axisId binds a series to a value axis. The MS chartex schema (and
+        // every file real Excel writes) carries the id in a `val` ATTRIBUTE:
+        // <cx:axisId val="1"/>. The Open XML SDK's CX.AxisId type models it as
+        // text content (<cx:axisId>1</cx:axisId>) instead, and that form makes
+        // real Excel refuse to open the entire workbook (0x800A03EC). Emit the
+        // raw val-attribute element; OpenXmlValidator false-flags it ("text
+        // value cannot be empty"), the same accepted tradeoff as cx:binCount /
+        // cx:binSize below.
+        static OpenXmlElement MakeCxAxisId(string val)
+        {
+            var el = new OpenXmlUnknownElement("cx", "axisId",
+                "http://schemas.microsoft.com/office/drawing/2014/chartex");
+            el.SetAttribute(new OpenXmlAttribute("val", "", val));
+            return el;
+        }
 
         // 1. Build ChartData
         var chartData = new CX.ChartData();
@@ -207,14 +231,9 @@ internal static partial class ChartExBuilder
                 // the primary value axis (id=1), matching MSO's structure.
                 if (normalized == "pareto")
                 {
-                    // CT_Series/cx:axisId is xs:unsignedInt simple content (text body),
-                    // NOT an attribute. The SDK exposes a typed CX.AxisId whose
-                    // string ctor sets the inner text. Previously this was emitted
-                    // via OpenXmlUnknownElement + SetAttribute("val", ...) which
-                    // serialized as `<cx:axisId val="1"/>` — OpenXmlValidator
-                    // rejected it (undeclared attribute + empty text); real
-                    // PowerPoint auto-repaired but the file was non-portable.
-                    series.AppendChild(new CX.AxisId("1"));
+                    // Bind to the primary value axis (id=1). See MakeCxAxisId:
+                    // the val-attribute form is what real Excel requires.
+                    series.AppendChild(MakeCxAxisId("1"));
                 }
 
                 plotAreaRegion.AppendChild(series);
@@ -230,7 +249,7 @@ internal static partial class ChartExBuilder
                 LayoutId = new EnumValue<CX.SeriesLayout>(CX.SeriesLayout.ParetoLine),
                 OwnerIdx = 0,
             };
-            paretoLine.AppendChild(new CX.AxisId("2"));
+            paretoLine.AppendChild(MakeCxAxisId("2"));
             plotAreaRegion.AppendChild(paretoLine);
         }
 

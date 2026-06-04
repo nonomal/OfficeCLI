@@ -676,7 +676,12 @@ public partial class ExcelHandler
             {
                 if (!mergeInfo.IsAnchor) continue;
                 var cell = ctx.CellMap.TryGetValue((r, c), out var mc) ? mc : null;
-                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap);
+                // Merged-region perimeter borders come from the perimeter member cells:
+                // right edge from the right-column member, bottom edge from the bottom-row
+                // member. The anchor's own right/bottom edges are interior to the merge.
+                var rightMember = ctx.CellMap.TryGetValue((r, c + mergeInfo.ColSpan - 1), out var rmc) ? rmc : null;
+                var bottomMember = ctx.CellMap.TryGetValue((r + mergeInfo.RowSpan - 1, c), out var bmc) ? bmc : null;
+                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap, mergePerimeter: true, rightBorderCell: rightMember, bottomBorderCell: bottomMember);
                 var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
                 var richHtml = cell != null ? TryBuildRichTextHtml(cell) : null;
                 var adjColSpan = mergeInfo.ColSpan;
@@ -1499,10 +1504,16 @@ public partial class ExcelHandler
 
     // ==================== Cell Style to CSS ====================
 
+    // CONSISTENCY(excel-merge-border): for a merged anchor td, the right/bottom CSS
+    // edges of the td are the merged region PERIMETER, which Excel sources from the
+    // perimeter member cells — not the anchor (whose right/bottom are interior to the
+    // merge). Callers pass rightBorderCell (right-column member) and bottomBorderCell
+    // (bottom-row member); default null = same as the anchor (non-merge path unchanged).
     private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col,
         Dictionary<int, double>? frozenLeftOffsets = null, Dictionary<int, double>? frozenTopOffsets = null,
         Dictionary<string, string>? cfMap = null, Dictionary<string, string>? dataBarMap = null,
-        Dictionary<string, string>? iconSetMap = null)
+        Dictionary<string, string>? iconSetMap = null,
+        bool mergePerimeter = false, Cell? rightBorderCell = null, Cell? bottomBorderCell = null)
     {
         var styles = new List<string>();
 
@@ -1556,7 +1567,7 @@ public partial class ExcelHandler
                 var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
                 BuildFontCss(xf, stylesheet, styles);
                 BuildFillCss(xf, stylesheet, styles);
-                BuildBorderCss(xf, stylesheet, styles);
+                BuildBorderCss(xf, stylesheet, styles, mergePerimeter, rightBorderCell, bottomBorderCell);
                 BuildAlignmentCss(xf, styles, cell);
 
                 // Number-format [Color] section (e.g. "$#,##0.00;[Red](...)" colors
@@ -1703,7 +1714,7 @@ public partial class ExcelHandler
                 if (colors.Count >= 2)
                 {
                     var deg = (int)(gf.Degree?.Value ?? 0);
-                    styles.Add($"background:linear-gradient({deg}deg,{string.Join(",", colors)})");
+                    styles.Add($"background:linear-gradient({(deg + 90) % 360}deg,{string.Join(",", colors)})");
                     return;
                 }
             }
@@ -1718,20 +1729,40 @@ public partial class ExcelHandler
         }
     }
 
-    private void BuildBorderCss(CellFormat xf, Stylesheet stylesheet, List<string> styles)
+    private void BuildBorderCss(CellFormat xf, Stylesheet stylesheet, List<string> styles,
+        bool mergePerimeter = false, Cell? rightBorderCell = null, Cell? bottomBorderCell = null)
     {
         var borderId = xf.BorderId?.Value ?? 0;
-        if (borderId == 0) return;
-
         var borders = stylesheet.Borders;
-        if (borders == null || borderId >= (uint)borders.Elements<Border>().Count()) return;
+        Border? border = (borderId != 0 && borders != null && borderId < (uint)borders.Elements<Border>().Count())
+            ? borders.Elements<Border>().ElementAt((int)borderId)
+            : null;
 
-        var border = borders.Elements<Border>().ElementAt((int)borderId);
+        // top/left always come from the anchor cell (top-left member of the merge).
+        AddBorderSideCss(border?.TopBorder, "top", styles);
+        AddBorderSideCss(border?.LeftBorder, "left", styles);
 
-        AddBorderSideCss(border.TopBorder, "top", styles);
-        AddBorderSideCss(border.RightBorder, "right", styles);
-        AddBorderSideCss(border.BottomBorder, "bottom", styles);
-        AddBorderSideCss(border.LeftBorder, "left", styles);
+        // right/bottom: for a merged anchor the td edge is the region PERIMETER, which
+        // Excel sources from the perimeter member cell — not the (interior) anchor edge.
+        // If the member cell is absent (or carries no border) the region has NO border on
+        // that edge. Non-merge path (mergePerimeter=false) keeps the anchor's own edges.
+        var rightBorder = mergePerimeter ? (rightBorderCell != null ? GetCellBorder(rightBorderCell, stylesheet) : null) : border;
+        var bottomBorder = mergePerimeter ? (bottomBorderCell != null ? GetCellBorder(bottomBorderCell, stylesheet) : null) : border;
+        AddBorderSideCss(rightBorder?.RightBorder, "right", styles);
+        AddBorderSideCss(bottomBorder?.BottomBorder, "bottom", styles);
+    }
+
+    // Resolve a cell's <border> element via its style index, or null if none.
+    private Border? GetCellBorder(Cell cell, Stylesheet stylesheet)
+    {
+        var styleIndex = cell.StyleIndex?.Value ?? 0;
+        var cellFormats = stylesheet.CellFormats;
+        if (cellFormats == null || styleIndex >= (uint)cellFormats.Elements<CellFormat>().Count()) return null;
+        var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
+        var borderId = xf.BorderId?.Value ?? 0;
+        var borders = stylesheet.Borders;
+        if (borderId == 0 || borders == null || borderId >= (uint)borders.Elements<Border>().Count()) return null;
+        return borders.Elements<Border>().ElementAt((int)borderId);
     }
 
     /// <summary>
@@ -1984,7 +2015,22 @@ public partial class ExcelHandler
 
         if (!double.TryParse(rawValue, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var numVal))
+        {
+            // GetCellDisplayValue pre-formats date serials to ISO (e.g. "2023-03-15"),
+            // which fails double.TryParse. For numeric cells with a date format code,
+            // recover the raw serial and let ApplyNumberFormat honour the date code
+            // (HTML preview only — get/query keeps the canonical ISO form).
+            var serialText = cell.CellValue?.Text;
+            if (cell.CellFormula?.Text == null && serialText != null &&
+                double.TryParse(serialText, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var serial))
+            {
+                var dateFmt = ResolveCellFormatCode(cell, stylesheet);
+                if (dateFmt != null && ContainsDateTokenOutsideQuotes(dateFmt))
+                    return ApplyNumberFormat(serial, dateFmt);
+            }
             return rawValue;
+        }
 
         // Clean up floating point artifacts for display (e.g. 25300000.000000004 → 25300000)
         var cleanVal = numVal;
@@ -1995,29 +2041,34 @@ public partial class ExcelHandler
             : cleanVal.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         // Look up number format
-        var styleIndex = cell.StyleIndex?.Value ?? 0;
-        if (styleIndex == 0 || stylesheet == null) return rawValue;
-
-        var cellFormats = stylesheet.CellFormats;
-        if (cellFormats == null || styleIndex >= (uint)cellFormats.Elements<CellFormat>().Count())
-            return rawValue;
-
-        var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
-        var numFmtId = xf.NumberFormatId?.Value ?? 0;
-        if (numFmtId == 0) return rawValue;
-
-        // Resolve format code
-        string? fmtCode = null;
-        var customFmt = stylesheet.NumberingFormats?.Elements<NumberingFormat>()
-            .FirstOrDefault(nf => nf.NumberFormatId?.Value == numFmtId);
-        if (customFmt?.FormatCode?.Value != null)
-            fmtCode = customFmt.FormatCode.Value;
-        else
-            fmtCode = ResolveBuiltInFormat(numFmtId);
-
+        var fmtCode = ResolveCellFormatCode(cell, stylesheet);
         if (fmtCode == null) return rawValue;
 
         return ApplyNumberFormat(numVal, fmtCode);
+    }
+
+    /// <summary>
+    /// Resolve a cell's number format code (custom &lt;numFmt&gt; first, then built-in).
+    /// Returns null when the cell has no explicit (non-General) format.
+    /// </summary>
+    private static string? ResolveCellFormatCode(Cell cell, Stylesheet? stylesheet)
+    {
+        var styleIndex = cell.StyleIndex?.Value ?? 0;
+        if (styleIndex == 0 || stylesheet == null) return null;
+
+        var cellFormats = stylesheet.CellFormats;
+        if (cellFormats == null || styleIndex >= (uint)cellFormats.Elements<CellFormat>().Count())
+            return null;
+
+        var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
+        var numFmtId = xf.NumberFormatId?.Value ?? 0;
+        if (numFmtId == 0) return null;
+
+        var customFmt = stylesheet.NumberingFormats?.Elements<NumberingFormat>()
+            .FirstOrDefault(nf => nf.NumberFormatId?.Value == numFmtId);
+        if (customFmt?.FormatCode?.Value != null)
+            return customFmt.FormatCode.Value;
+        return ResolveBuiltInFormat(numFmtId);
     }
 
     /// <summary>
@@ -2263,6 +2314,21 @@ public partial class ExcelHandler
         var quoteSuffix = System.Text.RegularExpressions.Regex.Match(cleanFmt, "\"([^\"]+)\"$");
         if (quoteSuffix.Success) { suffix = quoteSuffix.Groups[1].Value + suffix; cleanFmt = cleanFmt[..^quoteSuffix.Length]; }
 
+        // Re-check for a paren-wrapped numeric pattern after the _X/*X/\X strips and
+        // currency-symbol extraction. Accounting negative sections such as
+        // "_($* (#,##0.00_)" lose their "_(" wrappers to the strip passes, leaving a
+        // bare leading "(" (and possibly trailing ")") that the early line-2225 check
+        // (which ran on the pre-strip fmtCode) never saw. Native Excel keeps the paren.
+        cleanFmt = cleanFmt.Trim();
+        var parenOpen = false;
+        var parenClose = false;
+        if (cleanFmt.StartsWith('('))
+        {
+            parenOpen = true;
+            cleanFmt = cleanFmt[1..];
+            if (cleanFmt.EndsWith(')')) { parenClose = true; cleanFmt = cleanFmt[..^1]; }
+        }
+
         // Handle +/- prefix in format (e.g. "+0.0%", "-#,##0")
         cleanFmt = cleanFmt.Trim();
         if (cleanFmt.StartsWith('+'))
@@ -2275,10 +2341,21 @@ public partial class ExcelHandler
             return prefix + suffix;
 
         var formatted = ApplyNumberFormatCore(value, cleanFmt.Trim());
+        // Accounting paren wraps the numeric core (and trailing currency), keeping
+        // "(1,234.56" contiguous even when a left-aligned "$" prefix is present.
+        if (parenOpen) formatted = "(" + formatted + suffix + (parenClose ? ")" : "");
+        else formatted += suffix;
         // For single-section formats with currency prefix, negative sign goes before the prefix
         if (value < 0 && prefix.Length > 0 && formatted.StartsWith('-'))
-            return "-" + prefix + formatted[1..] + suffix;
-        return prefix + formatted + suffix;
+            return "-" + prefix + formatted[1..];
+        return prefix + formatted;
+    }
+
+    private static int Gcd(int a, int b)
+    {
+        a = Math.Abs(a); b = Math.Abs(b);
+        while (b != 0) { var t = b; b = a % b; a = t; }
+        return a == 0 ? 1 : a;
     }
 
     private static string ApplyNumberFormatCore(double value, string fmtCode)
@@ -2291,6 +2368,55 @@ public partial class ExcelHandler
             var pctVal = value * 100;
             var decimals = CountDecimalPlaces(fmtCode);
             return pctVal.ToString($"F{decimals}") + "%";
+        }
+
+        // Fraction formats: "# ?/?", "# ??/??", "?/?" etc.
+        // Denominator-digit count = number of '?' after the slash → max denominator
+        // (1→9, 2→99, 3→999). Find the best rational approximation within that limit.
+        var fracMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\?+\s*/\s*(\?+)");
+        if (fracMatch.Success)
+        {
+            int denomDigits = fracMatch.Groups[1].Value.Count(c => c == '?');
+            int maxDenom = (int)Math.Pow(10, denomDigits) - 1;
+            if (maxDenom < 1) maxDenom = 9;
+            bool neg = value < 0;
+            double abs = Math.Abs(value);
+            long whole = (long)Math.Floor(abs);
+            double frac = abs - whole;
+
+            // Continued-fraction convergents give the simplest fraction within the
+            // denominator limit (matches Excel, e.g. 0.14159 → 1/7 not 14/99).
+            long h0 = 0, h1 = 1, k0 = 1, k1 = 0;
+            double b = frac;
+            for (int guard = 0; guard < 64; guard++)
+            {
+                long a = (long)Math.Floor(b);
+                long h2 = a * h1 + h0, k2 = a * k1 + k0;
+                if (k2 > maxDenom || k2 == 0) break;
+                h0 = h1; h1 = h2; k0 = k1; k1 = k2;
+                double rem = b - a;
+                if (rem < 1e-12) break;
+                b = 1 / rem;
+            }
+            int bestNum = (int)h1, bestDen = (int)Math.Max(k1, 1);
+            // Reduce the chosen fraction
+            if (bestNum != 0)
+            {
+                int g = Gcd(bestNum, bestDen);
+                bestNum /= g; bestDen /= g;
+            }
+            // Numerator rounded up to a whole unit (e.g. 0.999 → 1/1) folds into whole part
+            if (bestNum == bestDen && bestNum != 0) { whole += 1; bestNum = 0; }
+
+            var sb = new StringBuilder();
+            if (neg) sb.Append('-');
+            if (bestNum == 0)
+                sb.Append(whole.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            else if (whole == 0)
+                sb.Append($"{bestNum}/{bestDen}");
+            else
+                sb.Append($"{whole} {bestNum}/{bestDen}");
+            return sb.ToString();
         }
 
         // Elapsed time format: [h]:mm:ss or [mm]:ss (total hours/minutes, can exceed 24/60)

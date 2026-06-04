@@ -154,6 +154,8 @@ public partial class ExcelHandler
             // Check if sheet is RTL
             var sheetView = GetSheet(renderPart).GetFirstChild<SheetViews>()?.GetFirstChild<SheetView>();
             var isRtl = sheetView?.RightToLeft?.Value == true;
+            // ShowGridLines defaults to true; only false when explicitly set false.
+            var showGridLines = sheetView?.ShowGridLines?.Value != false;
             var dirAttr = isRtl ? " dir=\"rtl\"" : "";
             sb.AppendLine($"<div class=\"sheet-content{activeClass}\" data-sheet=\"{sheetIdx}\"{dirAttr}>");
             var charts = CollectSheetCharts(worksheetPart, sheetName);
@@ -164,7 +166,7 @@ public partial class ExcelHandler
             var shapes = CollectSheetShapes(worksheetPart);
             if (shapes.Count > 0)
                 charts.AddRange(shapes);
-            RenderSheetTable(sb, sheetName, renderPart, stylesheet, charts, sheetIdx);
+            RenderSheetTable(sb, sheetName, renderPart, stylesheet, charts, sheetIdx, showGridLines);
             sb.AppendLine("</div>");
         }
         sb.AppendLine("</div>");
@@ -232,7 +234,8 @@ public partial class ExcelHandler
     // ==================== Sheet Rendering ====================
 
     private void RenderSheetTable(StringBuilder sb, string sheetName, WorksheetPart worksheetPart, Stylesheet? stylesheet,
-        List<(int fromRow, int toRow, int fromCol, int toCol, string html)>? charts = null, int sheetIdx = 0)
+        List<(int fromRow, int toRow, int fromCol, int toCol, string html)>? charts = null, int sheetIdx = 0,
+        bool showGridLines = true)
     {
         var ws = GetSheet(worksheetPart);
         var sheetData = ws.GetFirstChild<SheetData>();
@@ -464,7 +467,8 @@ public partial class ExcelHandler
 
         // Start table (position:relative for chart overlays)
         sb.AppendLine("<div class=\"table-wrapper\" style=\"position:relative\">");
-        sb.AppendLine($"<table style=\"width:{totalTableWidthPt:0.##}pt\">");
+        var noGridClass = showGridLines ? "" : " class=\"no-grid\"";
+        sb.AppendLine($"<table{noGridClass} style=\"width:{totalTableWidthPt:0.##}pt\">");
         sb.AppendLine($"<caption class=\"sr-only\">{HtmlEncode(sheetName)}</caption>");
 
         // Colgroup for column widths + header column (skip hidden columns to match td count)
@@ -2772,8 +2776,9 @@ public partial class ExcelHandler
                / style-0 cells no longer erase neighbours' black borders via the
                CSS position-based tie-break. Right+bottom gridlines are owned by
                each cell; first-row top and first-col left gridlines are added
-               via the :first-child rules below. */
-            box-shadow: inset -1px -1px 0 #e0e0e0;
+               via the :first-child rules below. Scoped to table:not(.no-grid) so
+               sheets with showGridLines=false suppress the default gridlines while
+               still honouring explicit OOXML cell borders (inline styles). */
             padding: 2px 4px;
             white-space: nowrap;
             overflow: hidden;
@@ -2782,6 +2787,7 @@ public partial class ExcelHandler
             max-width: 500px;
             word-break: break-all; /* CJK text wrapping support */
         }
+        table:not(.no-grid) td { box-shadow: inset -1px -1px 0 #e0e0e0; }
         /* Text spill: a left/general text cell with empty right-neighbours paints
            its overflow across them (Excel fidelity). The td stays 1 column wide so
            borders/gridlines/merges are unaffected; overflow:visible lets the inner
@@ -2796,9 +2802,9 @@ public partial class ExcelHandler
             text-overflow: clip;
             vertical-align: bottom;
         }
-        tbody tr:first-child td { box-shadow: inset -1px -1px 0 #e0e0e0, inset 0 1px 0 #e0e0e0; }
-        tr td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 0 0 #e0e0e0; }
-        tbody tr:first-child td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 1px 0 #e0e0e0; }
+        table:not(.no-grid) tbody tr:first-child td { box-shadow: inset -1px -1px 0 #e0e0e0, inset 0 1px 0 #e0e0e0; }
+        table:not(.no-grid) tr td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 0 0 #e0e0e0; }
+        table:not(.no-grid) tbody tr:first-child td:first-of-type { box-shadow: inset -1px -1px 0 #e0e0e0, inset 1px 1px 0 #e0e0e0; }
         .empty-sheet {
             padding: 40px;
             text-align: center;

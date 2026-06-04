@@ -2802,17 +2802,11 @@ public partial class ExcelHandler
         if (sheetData == null)
             throw new ArgumentException("Sheet has no data");
 
-        var row = sheetData.Elements<Row>().FirstOrDefault(r => r.RowIndex?.Value == rowIdx);
-        if (row == null)
-        {
-            // Create the row
-            row = new Row { RowIndex = rowIdx };
-            var afterRow = sheetData.Elements<Row>().LastOrDefault(r => (r.RowIndex?.Value ?? 0) < rowIdx);
-            if (afterRow != null)
-                afterRow.InsertAfterSelf(row);
-            else
-                sheetData.InsertAt(row, 0);
-        }
+        // Use the shared find-or-create helper (same one FindOrCreateCell uses)
+        // so the _rowIndex cache stays consistent and both paths share one <Row>
+        // element — avoids duplicate <row r="N"> when set row[N] is followed by
+        // set cell-in-row-N.
+        var row = FindOrCreateRow(sheetData, rowIdx);
 
         foreach (var (key, value) in properties)
         {

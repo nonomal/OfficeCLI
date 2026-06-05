@@ -972,7 +972,8 @@ public partial class WordHandler
         marker.className='line-number';
         marker.textContent=n;
         marker.style.cssText='position:absolute;left:'+leftPt+'pt;'
-          +'font-size:8pt;color:#888;user-select:none;pointer-events:none;';
+          +'font-size:inherit;color:#000;vertical-align:baseline;'
+          +'user-select:none;pointer-events:none;';
         marker.style.top=lineTops[li]+'px';
         body.appendChild(marker);
       }

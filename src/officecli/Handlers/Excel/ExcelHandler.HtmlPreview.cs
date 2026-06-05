@@ -2138,13 +2138,21 @@ public partial class ExcelHandler
         if (bp?.Style?.Value == null || bp.Style.Value == BorderStyleValues.None) return;
 
         var bsv = bp.Style.Value;
+        // Medium-weight families render 2px; thick 3px; everything else 1px.
         var width = "1px";
-        if (bsv == BorderStyleValues.Medium) width = "2px";
+        if (bsv == BorderStyleValues.Medium || bsv == BorderStyleValues.MediumDashed ||
+            bsv == BorderStyleValues.MediumDashDot || bsv == BorderStyleValues.MediumDashDotDot)
+            width = "2px";
         else if (bsv == BorderStyleValues.Thick) width = "3px";
         else if (bsv == BorderStyleValues.Double) width = "3px";
 
+        // CSS border-style can't draw exact dash-dot patterns, so map the whole
+        // dash/dash-dot family to the closest representable "dashed".
         var cssStyle = "solid";
-        if (bsv == BorderStyleValues.Dashed || bsv == BorderStyleValues.MediumDashed) cssStyle = "dashed";
+        if (bsv == BorderStyleValues.Dashed || bsv == BorderStyleValues.MediumDashed ||
+            bsv == BorderStyleValues.DashDot || bsv == BorderStyleValues.DashDotDot ||
+            bsv == BorderStyleValues.SlantDashDot || bsv == BorderStyleValues.MediumDashDot ||
+            bsv == BorderStyleValues.MediumDashDotDot) cssStyle = "dashed";
         else if (bsv == BorderStyleValues.Dotted) cssStyle = "dotted";
         else if (bsv == BorderStyleValues.Double) cssStyle = "double";
 

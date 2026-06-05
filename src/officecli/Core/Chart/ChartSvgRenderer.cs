@@ -76,13 +76,22 @@ internal partial class ChartSvgRenderer
         int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9,
         bool showDataLabels = false, string? valNumFmt = null, string? plotFillColor = null,
         List<(string Name, double Value, string Color, double WidthPt, string Dash)>? referenceLines = null,
-        bool isWaterfall = false, List<ErrorBarInfo?>? errorBars = null)
+        bool isWaterfall = false, List<ErrorBarInfo?>? errorBars = null,
+        bool labelAsPercent = false)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
         var catCount = Math.Max(categories.Length, series.Max(s => s.values.Length));
         var serCount = series.Count;
         if (percentStacked) stacked = true;
+
+        // Data-label text. When the chart shows percentages (showPercent, e.g.
+        // 100%-stacked), label each point with its percentage of the category
+        // stack total — `pctVal` is the already-scaled 0..100 value the plot
+        // geometry uses. Otherwise label the raw value. Mirrors the pie path.
+        string LabelText(double rawVal, double pctVal)
+            => labelAsPercent ? $"{pctVal:0}%"
+               : (rawVal % 1 == 0 ? $"{(int)rawVal}" : FormatAxisValue(rawVal, valNumFmt));
 
         double maxVal;
         // Stacked mixed-sign support: positive segments stack from 0 upward and
@@ -216,7 +225,7 @@ internal partial class ChartSvgRenderer
                         // Label at segment center — skip if segment narrower than ~2 chars to avoid overflow
                         if (showDataLabels && segW > DataLabelFontPx * 1.6)
                         {
-                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            var vlabel = LabelText(rawVal, val);
                             sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + segW / 2:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                         }
                     }
@@ -234,7 +243,7 @@ internal partial class ChartSvgRenderer
                         // which previously left non-stacked horizontal bars unlabeled.
                         if (showDataLabels && barH > DataLabelFontPx)
                         {
-                            var vlabel = rawVal % 1 == 0 ? $"{(int)rawVal}" : $"{rawVal:0.#}";
+                            var vlabel = LabelText(rawVal, val);
                             var lx = val >= 0 ? bx + barW + 3 : bx - 3;
                             var anchor = val >= 0 ? "start" : "end";
                             sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{by + barH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"{anchor}\" dominant-baseline=\"middle\">{vlabel}</text>");
@@ -406,7 +415,7 @@ internal partial class ChartSvgRenderer
                                 sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{segH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
                             if (showDataLabels && segH > DataLabelFontPx + 2)
                             {
-                                var vlabel = FormatAxisValue(rawVal, valNumFmt);
+                                var vlabel = LabelText(rawVal, val);
                                 sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{by + segH / 2:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\">{vlabel}</text>");
                             }
                         }
@@ -422,7 +431,7 @@ internal partial class ChartSvgRenderer
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
                         if (showDataLabels)
                         {
-                            var vlabel = FormatAxisValue(rawVal, valNumFmt);
+                            var vlabel = LabelText(rawVal, val);
                             var ly = val >= 0 ? by - 3 : by + bh + DataLabelFontPx;
                             sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{ly:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
@@ -2354,7 +2363,8 @@ internal partial class ChartSvgRenderer
                     isHorizontal, info.IsStacked, info.IsPercent, info.AxisMax, info.AxisMin, info.MajorUnit,
                     info.GapWidth, ValFontPx, CatFontPx, info.ShowDataLabels, info.ValNumFmt,
                     isHorizontal ? info.PlotFillColor : null, info.ReferenceLines,
-                    info.IsWaterfall, info.ErrorBars);
+                    info.IsWaterfall, info.ErrorBars,
+                    info.IsPercent && info.ShowDataLabelPercent && !info.ShowDataLabelVal);
         }
 
         // Axis titles inside SVG — for horizontal bar charts, value axis is on bottom and category axis is on left

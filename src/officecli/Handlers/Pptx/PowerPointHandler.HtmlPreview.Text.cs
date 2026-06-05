@@ -91,14 +91,23 @@ public partial class PowerPointHandler
             // CONSISTENCY(pptx-hanging-indent): bullet pulled left via its own margin.
             bool hasBullet0 = pProps?.GetFirstChild<Drawing.CharacterBullet>() != null
                               || pProps?.GetFirstChild<Drawing.AutoNumberedBullet>() != null;
-            // Negative indent without a bullet has no semantic in PowerPoint —
-            // the hanging-indent idiom requires a bullet to anchor the pulled glyph.
-            // CSS `text-indent:-Npt` would push the first line left of the shape's
-            // content edge (visible bleed); real PowerPoint clamps to 0 in this case.
+            // Bulletless hanging indent: marL>0 paired with indent<0 hangs the
+            // first line |indent| left of the marL margin (real PowerPoint renders
+            // this even without a bullet — officeshot-confirmed). Emit the negative
+            // text-indent with padding-left=marL so the first line hangs while
+            // wrapped lines align to the margin. Guard the bleed the prior code
+            // worried about: only emit the negative shift when marL >= |indent|,
+            // so the first line stays inside the shape content box (the hanging-
+            // indent idiom always satisfies this). Otherwise clamp to 0.
             if (pProps?.Indent?.HasValue == true && !hasBullet0)
             {
                 var indentPt = Units.EmuToPt(pProps.Indent.Value);
-                if (indentPt < 0) indentPt = 0;
+                if (indentPt < 0)
+                {
+                    var marLPt = pProps?.LeftMargin?.HasValue == true
+                        ? Units.EmuToPt(pProps.LeftMargin.Value) : 0;
+                    if (marLPt < -indentPt) indentPt = 0; // would bleed past content edge
+                }
                 paraStyles.Add($"text-indent:{indentPt}pt");
             }
             if (pProps?.LeftMargin?.HasValue == true)

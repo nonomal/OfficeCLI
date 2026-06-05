@@ -297,6 +297,11 @@ public partial class WordHandler
         if (srcCharScale != null)
             target.CharacterScale = srcCharScale.CloneNode(true) as CharacterScale;
 
+        // Vertical run position (w:position, half-points; raised/lowered text)
+        var srcPosition = source.GetFirstChild<Position>();
+        if (srcPosition != null)
+            target.Position = srcPosition.CloneNode(true) as Position;
+
         // East Asian emphasis mark (w:em)
         var srcEm = source.GetFirstChild<Emphasis>();
         if (srcEm != null)

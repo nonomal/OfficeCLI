@@ -1552,6 +1552,20 @@ public partial class WordHandler
             }
         }
 
+        // w:position (OOXML §17.3.2.24) — "raised/lowered text by N points"
+        // character property, distinct from super/subscript: the glyph is
+        // shifted vertically WITHOUT changing the font size. Val is in
+        // HALF-POINTS, positive = raised, negative = lowered. Mirror the
+        // super/subscript approach (position:relative shifts the visual glyph
+        // without expanding the line box) but keep the original font-size.
+        // bottom: positive raises, negative lowers — so val/2 maps directly.
+        var posVal = rProps.Position?.Val?.Value;
+        if (!string.IsNullOrEmpty(posVal) && int.TryParse(posVal, out var posHalfPt) && posHalfPt != 0)
+        {
+            var offsetPt = posHalfPt / 2.0;
+            parts.Add($"position:relative;bottom:{offsetPt:0.###}pt");
+        }
+
         // SmallCaps / AllCaps
         if (rProps.SmallCaps != null && (rProps.SmallCaps.Val == null || rProps.SmallCaps.Val.Value))
             parts.Add("font-variant:small-caps");

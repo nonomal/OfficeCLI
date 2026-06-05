@@ -40,6 +40,7 @@ public partial class PowerPointHandler
         var nafScale = textBody.GetFirstChild<Drawing.BodyProperties>()?
             .GetFirstChild<Drawing.NormalAutoFit>()?.FontScale?.Value;
         double fontScale = (nafScale.HasValue && nafScale.Value > 0) ? nafScale.Value / 100000.0 : 1.0;
+        bool isFirstPara = true;
         foreach (var para in textBody.Elements<Drawing.Paragraph>())
         {
             // Resolve per-paragraph font size based on paragraph level
@@ -65,9 +66,12 @@ public partial class PowerPointHandler
                 paraStyles.Add($"text-align:{align}");
             }
 
-            // Paragraph spacing
+            // Paragraph spacing. PowerPoint ignores spcBef on the FIRST paragraph
+            // of a text body (the line sits flush at the body's top inset), so we
+            // suppress the margin-top contribution for that paragraph only;
+            // subsequent paragraphs keep their spaceBefore.
             var sbPts = pProps?.GetFirstChild<Drawing.SpaceBefore>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
-            if (sbPts.HasValue) paraStyles.Add($"margin-top:{sbPts.Value / 100.0:0.##}pt");
+            if (sbPts.HasValue && !isFirstPara) paraStyles.Add($"margin-top:{sbPts.Value / 100.0:0.##}pt");
             var saPts = pProps?.GetFirstChild<Drawing.SpaceAfter>()?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (saPts.HasValue) paraStyles.Add($"margin-bottom:{saPts.Value / 100.0:0.##}pt");
 
@@ -248,6 +252,7 @@ public partial class PowerPointHandler
                 sb.Append("<br>");
 
             sb.AppendLine("</div>");
+            isFirstPara = false;
         }
     }
 

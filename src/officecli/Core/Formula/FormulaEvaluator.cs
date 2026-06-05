@@ -202,6 +202,13 @@ internal partial class FormulaEvaluator
     // the arithmetic chain), never a silent 0 nor a crash.
     private const int MaxSameSheetDepth = 1000;
     private int _sameSheetDepth;
+
+    // Number-format engine hook. TEXT(value, format) must apply Excel format
+    // codes (incl. date/time/percent/currency) identically to the cell renderer.
+    // That engine (ApplyNumberFormat) lives in the Handlers layer, which Core
+    // must not reference; ExcelHandler wires this delegate up on init so TEXT
+    // routes through the same formatter. Null fallback = numeric-only path.
+    internal static Func<double, string, string>? NumberFormatProvider;
     private Dictionary<string, Cell>? _cellIndex;
     private Dictionary<string, string>? _definedNames;
 

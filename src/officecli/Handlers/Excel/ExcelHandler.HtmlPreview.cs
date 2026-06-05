@@ -11,6 +11,15 @@ namespace OfficeCli.Handlers;
 
 public partial class ExcelHandler
 {
+    // Wire the formula evaluator's TEXT() up to the cell number-format engine so
+    // TEXT(value, format) applies date/time/percent/currency codes identically to
+    // a cell carrying that numFmt. Core cannot reference Handlers, so the hook is
+    // a static delegate it invokes only when registered (here, on first use).
+    static ExcelHandler()
+    {
+        Core.FormulaEvaluator.NumberFormatProvider = ApplyNumberFormat;
+    }
+
     // Theme color map (lazy-initialized from theme1.xml)
     private Dictionary<string, string>? _excelThemeColors;
     // Indexed color palette (default 64 + custom overrides from styles.xml)
@@ -2400,8 +2409,14 @@ public partial class ExcelHandler
         // shortest form gives Excel's "5E-324" instead of the exact-bits
         // "4.94066E-324", and for normal magnitudes still rounds to ~6 sig figs.
         var (m, e) = NormalizeScientific(value);
-        var mantStr = m.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
         exp = e;
+        // Round the mantissa to the displayed precision (5 fractional digits)
+        // BEFORE emitting. Rounding can push the mantissa to >= 10 (e.g.
+        // 9.99999999999999e14 -> 10), which is non-canonical: carry the extra
+        // power of ten into the exponent so 10E+14 renders as Excel's 1E+15.
+        var roundedM = Math.Round(m, 5, MidpointRounding.AwayFromZero);
+        if (Math.Abs(roundedM) >= 10.0) { roundedM /= 10.0; exp++; }
+        var mantStr = roundedM.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture);
         var expStr = exp >= 0
             ? $"+{exp.ToString("00", System.Globalization.CultureInfo.InvariantCulture)}"
             : $"-{Math.Abs(exp).ToString("00", System.Globalization.CultureInfo.InvariantCulture)}";

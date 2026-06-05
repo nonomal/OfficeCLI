@@ -314,6 +314,15 @@ internal partial class FormulaEvaluator
     {
         var val = args.Count > 0 && args[0] is FormulaResult r ? r.AsNumber() : 0;
         var fmt = args.Count > 1 && args[1] is FormulaResult r2 ? r2.AsString() : "0";
+        // Route through the cell renderer's number-format engine when wired up so
+        // date/time/percent/currency format codes apply identically to a cell with
+        // that numFmt (e.g. TEXT(45580,"yyyy-mm-dd") -> "2024-10-15"). Falls back
+        // to the numeric-only .NET ToString path when no provider is registered.
+        if (NumberFormatProvider != null)
+        {
+            try { return FR_S(NumberFormatProvider(val, fmt)); }
+            catch { /* fall through to numeric ToString below */ }
+        }
         try { return FR_S(val.ToString(fmt.Replace("#", "0"), CultureInfo.InvariantCulture)); }
         catch { return FR_S(val.ToString(CultureInfo.InvariantCulture)); }
     }

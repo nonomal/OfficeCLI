@@ -1026,12 +1026,25 @@ internal partial class ChartSvgRenderer
                 sb.AppendLine($"        <circle cx=\"{cx:0.#}\" cy=\"{cy:0.#}\" r=\"{r:0.#}\" fill=\"{color}\" opacity=\"0.85\"/>");
             else if (holeRatio > 0)
             {
-                var ox1 = cx + r * Math.Cos(startAngle); var oy1 = cy + r * Math.Sin(startAngle);
-                var ox2 = cx + r * Math.Cos(endAngle); var oy2 = cy + r * Math.Sin(endAngle);
-                var ix1 = cx + innerR * Math.Cos(endAngle); var iy1 = cy + innerR * Math.Sin(endAngle);
-                var ix2 = cx + innerR * Math.Cos(startAngle); var iy2 = cy + innerR * Math.Sin(startAngle);
-                var largeArc = sliceAngle > Math.PI ? 1 : 0;
-                sb.AppendLine($"        <path d=\"M {ox1:0.#},{oy1:0.#} A {r:0.#},{r:0.#} 0 {largeArc},1 {ox2:0.#},{oy2:0.#} L {ix1:0.#},{iy1:0.#} A {innerR:0.#},{innerR:0.#} 0 {largeArc},0 {ix2:0.#},{iy2:0.#} Z\" fill=\"{color}\" opacity=\"0.85\"/>");
+                // A single ring segment spanning ~full circle (one data point,
+                // or one value ≈ total) has start≈end, so a single SVG arc is
+                // zero-length and browsers draw nothing. Split into two full-ring
+                // halves drawn with the even-odd fill rule (outer circle minus
+                // inner circle) so the annulus renders. Threshold a hair under 2π
+                // to catch float rounding.
+                if (sliceAngle >= 2 * Math.PI - 1e-6)
+                {
+                    sb.AppendLine($"        <path d=\"M {cx - r:0.#},{cy:0.#} A {r:0.#},{r:0.#} 0 1,1 {cx + r:0.#},{cy:0.#} A {r:0.#},{r:0.#} 0 1,1 {cx - r:0.#},{cy:0.#} Z M {cx - innerR:0.#},{cy:0.#} A {innerR:0.#},{innerR:0.#} 0 1,1 {cx + innerR:0.#},{cy:0.#} A {innerR:0.#},{innerR:0.#} 0 1,1 {cx - innerR:0.#},{cy:0.#} Z\" fill=\"{color}\" fill-rule=\"evenodd\" opacity=\"0.85\"/>");
+                }
+                else
+                {
+                    var ox1 = cx + r * Math.Cos(startAngle); var oy1 = cy + r * Math.Sin(startAngle);
+                    var ox2 = cx + r * Math.Cos(endAngle); var oy2 = cy + r * Math.Sin(endAngle);
+                    var ix1 = cx + innerR * Math.Cos(endAngle); var iy1 = cy + innerR * Math.Sin(endAngle);
+                    var ix2 = cx + innerR * Math.Cos(startAngle); var iy2 = cy + innerR * Math.Sin(startAngle);
+                    var largeArc = sliceAngle > Math.PI ? 1 : 0;
+                    sb.AppendLine($"        <path d=\"M {ox1:0.#},{oy1:0.#} A {r:0.#},{r:0.#} 0 {largeArc},1 {ox2:0.#},{oy2:0.#} L {ix1:0.#},{iy1:0.#} A {innerR:0.#},{innerR:0.#} 0 {largeArc},0 {ix2:0.#},{iy2:0.#} Z\" fill=\"{color}\" opacity=\"0.85\"/>");
+                }
             }
             else
             {

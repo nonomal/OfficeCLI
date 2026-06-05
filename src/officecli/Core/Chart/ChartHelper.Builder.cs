@@ -42,11 +42,22 @@ internal static partial class ChartHelper
         // Mirrors the waterfall flattener at line ~214 in this file.
         if ((kind is "pie" or "doughnut" or "pieofpie" or "barofpie")
             && seriesData.Count > 1
-            && seriesData.All(s => s.values.Length == 1)
-            && originalCategories == null)
+            && seriesData.All(s => s.values.Length == 1))
         {
-            categories = seriesData.Select(s => s.name).ToArray();
-            originalCategories = categories;
+            // Coalesce N single-value series into one N-point series. Mirrors
+            // the waterfall flattener below: the data points are always merged;
+            // user-supplied categories (e.g. `categories="A,B,C,D,E"`) label the
+            // points and are kept as-is. Only when no categories were given do we
+            // derive them from the per-series names. Previously this whole block
+            // was gated on `originalCategories == null`, so passing categories
+            // alongside `series1=..series5=` left 5 single-value series and the
+            // doughnut/pie renderer consumed only seriesData[0] — a single
+            // full-circle slice that draws as a degenerate (start==end) arc.
+            if (originalCategories == null)
+            {
+                categories = seriesData.Select(s => s.name).ToArray();
+                originalCategories = categories;
+            }
             var coalesced = seriesData.SelectMany(s => s.values).ToArray();
             seriesData = new List<(string name, double[] values)>
             {

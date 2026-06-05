@@ -734,7 +734,10 @@ public partial class ExcelHandler
                 if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
                 // Rich-text runs render as pre-built spans (already encoded); the
                 // bar/icon overlay path is mutually exclusive with rich text here.
-                var content = richHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
+                var hlinkHtml = TryBuildHyperlinkFormulaHtml(cell, value);
+                var content = hlinkHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
+                    ? hlinkHtml
+                    : richHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
                     ? richHtml
                     : BuildCellContent(cellRef, value, ctx.DataBarMap, ctx.IconSetMap);
                 content = WrapVerticalAlign(content, GetCellVerticalAlign(cell, ctx.Stylesheet), richHtml);
@@ -749,7 +752,10 @@ public partial class ExcelHandler
                 var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap);
                 var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
                 var richHtml = cell != null ? TryBuildRichTextHtml(cell) : null;
-                var content = richHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
+                var hlinkHtml = TryBuildHyperlinkFormulaHtml(cell, value);
+                var content = hlinkHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
+                    ? hlinkHtml
+                    : richHtml != null && !ctx.DataBarMap.ContainsKey(cellRef) && !ctx.IconSetMap.ContainsKey(cellRef)
                     ? richHtml
                     : BuildCellContent(cellRef, value, ctx.DataBarMap, ctx.IconSetMap);
                 content = WrapVerticalAlign(content, GetCellVerticalAlign(cell, ctx.Stylesheet), richHtml);
@@ -2775,16 +2781,36 @@ public partial class ExcelHandler
         if (phTrim.Length > 0 && phTrim.All(c => c == '?' || c == ' '))
             return new string(' ', phTrim.Length);
 
-        // Elapsed time format: [h]:mm:ss or [mm]:ss (total hours/minutes, can exceed 24/60)
-        var elapsedMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\[(h+)\]:?(mm)?:?(ss)?");
+        // Elapsed-time formats with a bracketed lead token: [h]/[hh] (total hours),
+        // [m]/[mm] (total minutes), [s]/[ss] (total seconds) — none clock-wrapped.
+        // The leading bracket token carries the TOTAL elapsed unit; any following
+        // non-bracketed :mm / :ss tokens are the remainder within the next-smaller
+        // unit. Must run before the generic date path, which would mangle "[mm]".
+        var elapsedMatch = System.Text.RegularExpressions.Regex.Match(
+            fmtCode, @"^\[(h+|m+|s+)\](.*)$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (elapsedMatch.Success)
         {
-            var totalHours = (int)(value * 24);
-            var totalMinutes = (int)(value * 24 * 60) % 60;
-            var totalSeconds = (int)(value * 24 * 3600) % 60;
-            var parts = new List<string> { totalHours.ToString() };
-            if (elapsedMatch.Groups[2].Success) parts.Add(totalMinutes.ToString("D2"));
-            if (elapsedMatch.Groups[3].Success) parts.Add(totalSeconds.ToString("D2"));
+            long totalSeconds = (long)Math.Round(value * 86400);
+            var unit = char.ToLowerInvariant(elapsedMatch.Groups[1].Value[0]);
+            var rest = elapsedMatch.Groups[2].Value;
+            long lead = unit switch
+            {
+                'h' => totalSeconds / 3600,
+                'm' => totalSeconds / 60,
+                _ => totalSeconds,
+            };
+            var parts = new List<string> { lead.ToString(System.Globalization.CultureInfo.InvariantCulture) };
+            // Remainder tokens: each subsequent m/mm or s/ss after the bracket.
+            // [h] → following mm is minutes-of-hour, ss is seconds-of-minute.
+            // [mm] → following ss is seconds-of-minute.
+            foreach (System.Text.RegularExpressions.Match tok in
+                     System.Text.RegularExpressions.Regex.Matches(rest, "(mm?|ss?)",
+                         System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                var t = char.ToLowerInvariant(tok.Value[0]);
+                if (t == 'm' && unit == 'h') parts.Add(((totalSeconds / 60) % 60).ToString("D2"));
+                else if (t == 's') parts.Add((totalSeconds % 60).ToString("D2"));
+            }
             return string.Join(":", parts);
         }
 
@@ -2906,7 +2932,9 @@ public partial class ExcelHandler
         int count = 0;
         for (int i = dotIdx + 1; i < fmtCode.Length; i++)
         {
-            if (fmtCode[i] == '0' || fmtCode[i] == '#') count++;
+            // '?' is a digit placeholder like '0'/'#' (it pads with a space rather
+            // than a zero, but still counts toward the decimal-place count).
+            if (fmtCode[i] == '0' || fmtCode[i] == '#' || fmtCode[i] == '?') count++;
             else break;
         }
         return count;
@@ -3209,6 +3237,38 @@ public partial class ExcelHandler
     {
         var encoded = HtmlEncode(text);
         return encoded.Contains('\n') ? encoded.Replace("\n", "<br>") : encoded;
+    }
+
+    /// <summary>
+    /// When a cell's formula is a HYPERLINK(url, [friendly]) call, build a blue,
+    /// underlined &lt;a href&gt; matching how real Excel renders it (the friendly
+    /// text, or the url when no friendly arg). <paramref name="display"/> is the
+    /// already-formatted cell value (Excel evaluates HYPERLINK to its friendly
+    /// text, so it usually equals the friendly arg). Returns null when the cell
+    /// carries no HYPERLINK formula. Pre-encoded HTML.
+    /// </summary>
+    private static string? TryBuildHyperlinkFormulaHtml(Cell? cell, string display)
+    {
+        var formula = cell?.CellFormula?.Text;
+        if (string.IsNullOrEmpty(formula)) return null;
+        // Match HYPERLINK( "url" [, "friendly"] ) — case-insensitive, optional
+        // leading '='. Args are double-quoted string literals here (the common
+        // authored form); non-literal arg expressions are out of scope.
+        var m = System.Text.RegularExpressions.Regex.Match(
+            formula,
+            "^=?\\s*HYPERLINK\\s*\\(\\s*\"([^\"]*)\"\\s*(?:,\\s*\"([^\"]*)\"\\s*)?\\)\\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+
+        var url = m.Groups[1].Value;
+        // Reject anything but a safe scheme so the url never becomes an href XSS sink.
+        if (!Core.HyperlinkUriValidator.IsSafeScheme(url)) return null;
+
+        // Friendly text: explicit 2nd arg, else the evaluated display, else the url.
+        var friendly = m.Groups[2].Success && m.Groups[2].Value.Length > 0
+            ? m.Groups[2].Value
+            : (!string.IsNullOrEmpty(display) ? display : url);
+        return $"<a href=\"{HtmlEncode(url)}\" style=\"color:#0563C1;text-decoration:underline\">{HtmlEncode(friendly)}</a>";
     }
 
     /// <summary>Get data-formula attribute for cells with formulas (for inline editing).</summary>

@@ -47,6 +47,19 @@ public static class HyperlinkUriValidator
     /// in the allowlist. Empty / null input is a no-op so the caller's own
     /// "missing URL" diagnostic remains the surfaced error.
     /// </summary>
+    /// <summary>
+    /// Non-throwing predicate: true when <paramref name="url"/> is an absolute
+    /// URI whose scheme is in the allowlist. Used by the HTML preview, which
+    /// must not throw on an authored-in HYPERLINK() formula but also must not
+    /// emit a javascript:/data:/file: href as an XSS sink.
+    /// </summary>
+    public static bool IsSafeScheme(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return false;
+        return !string.IsNullOrEmpty(uri.Scheme) && AllowedSchemes.Contains(uri.Scheme);
+    }
+
     public static void RequireSafeScheme(string url, string contextKey = "link")
     {
         if (string.IsNullOrEmpty(url)) return;

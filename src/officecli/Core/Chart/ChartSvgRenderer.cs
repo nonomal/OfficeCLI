@@ -964,7 +964,7 @@ internal partial class ChartSvgRenderer
 
     public void RenderPieChartSvg(StringBuilder sb, List<(string name, double[] values)> series,
         string[] categories, List<string> colors, int svgW, int svgH, double holeRatio = 0.0, bool showDataLabels = false,
-        bool showVal = false, bool showPercent = false)
+        bool showVal = false, bool showPercent = false, bool showCatName = false)
     {
         var values = series.FirstOrDefault().values ?? [];
         if (values.Length == 0) return;
@@ -1021,8 +1021,14 @@ internal partial class ChartSvgRenderer
                     label = pct >= 5 ? $"{pct:0}%" : "";
                 else if (showVal && showPercent)
                     label = pct >= 5 ? $"{values[i]:0.##} ({pct:0}%)" : "";
+                else if (showCatName && !showVal && !showPercent)
+                    label = ""; // category-name only — value text intentionally empty (prepended below)
                 else
                     label = pct >= 5 ? $"{pct:0}%" : ""; // default to percent for pie
+                // showCatName: prepend the category name (PowerPoint style:
+                // "Category, value, pct"). Honored independently of val/percent.
+                if (showCatName && pct >= 5 && i < categories.Length && !string.IsNullOrEmpty(categories[i]))
+                    label = string.IsNullOrEmpty(label) ? categories[i] : $"{categories[i]}, {label}";
                 if (!string.IsNullOrEmpty(label))
                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{lx:0.#}\" y=\"{ly:0.#}\" fill=\"#fff\" font-size=\"{DataLabelFontPx}\" font-weight=\"bold\" text-anchor=\"middle\" dominant-baseline=\"central\">{label}</text>");
                 labelAngle += sliceAngle;
@@ -1582,6 +1588,7 @@ internal partial class ChartSvgRenderer
         public bool ShowDataLabels { get; set; }
         public bool ShowDataLabelVal { get; set; }
         public bool ShowDataLabelPercent { get; set; }
+        public bool ShowDataLabelCatName { get; set; }
         public double HoleRatio { get; set; }
         public bool IsStacked { get; set; }
         public bool IsPercent { get; set; }
@@ -1787,7 +1794,8 @@ internal partial class ChartSvgRenderer
                 e.LocalName == name && e.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "1");
             info.ShowDataLabelVal = IsOn("showVal");
             info.ShowDataLabelPercent = IsOn("showPercent");
-            info.ShowDataLabels = info.ShowDataLabelVal || info.ShowDataLabelPercent || IsOn("showCatName");
+            info.ShowDataLabelCatName = IsOn("showCatName");
+            info.ShowDataLabels = info.ShowDataLabelVal || info.ShowDataLabelPercent || info.ShowDataLabelCatName;
         }
 
         // Doughnut hole size
@@ -2267,7 +2275,7 @@ internal partial class ChartSvgRenderer
                     info.RotateX > 0 ? info.RotateX : 30);
             else
                 RenderPieChartSvg(sb, info.Series, info.Categories, info.Colors, svgW, svgH, info.HoleRatio, info.ShowDataLabels,
-                    info.ShowDataLabelVal, info.ShowDataLabelPercent);
+                    info.ShowDataLabelVal, info.ShowDataLabelPercent, info.ShowDataLabelCatName);
         }
         else if (chartType.Contains("area"))
         {

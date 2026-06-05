@@ -316,20 +316,22 @@ public partial class PowerPointHandler
         var solidFill = borderProps.GetFirstChild<Drawing.SolidFill>();
         var color = ResolveFillColor(solidFill, themeColors) ?? "#000000";
 
-        // Width attribute is on the element itself (w attr in EMU)
+        // Width attribute is on the element itself (w attr in EMU).
+        // An EXPLICIT w="0" means "no border" (PowerPoint renders no line on
+        // that edge); only an ABSENT w falls back to the default thin line.
         double widthPt = 1.0;
-        if (borderProps is Drawing.LeftBorderLineProperties lb && lb.Width?.HasValue == true)
-            widthPt = lb.Width.Value / EmuConverter.EmuPerPointF;
-        else if (borderProps is Drawing.RightBorderLineProperties rb && rb.Width?.HasValue == true)
-            widthPt = rb.Width.Value / EmuConverter.EmuPerPointF;
-        else if (borderProps is Drawing.TopBorderLineProperties tb && tb.Width?.HasValue == true)
-            widthPt = tb.Width.Value / EmuConverter.EmuPerPointF;
-        else if (borderProps is Drawing.BottomBorderLineProperties bb && bb.Width?.HasValue == true)
-            widthPt = bb.Width.Value / EmuConverter.EmuPerPointF;
-        else if (borderProps is Drawing.TopLeftToBottomRightBorderLineProperties tlbr && tlbr.Width?.HasValue == true)
-            widthPt = tlbr.Width.Value / EmuConverter.EmuPerPointF;
-        else if (borderProps is Drawing.BottomLeftToTopRightBorderLineProperties bltr && bltr.Width?.HasValue == true)
-            widthPt = bltr.Width.Value / EmuConverter.EmuPerPointF;
+        long? widthEmu = borderProps switch
+        {
+            Drawing.LeftBorderLineProperties lb when lb.Width?.HasValue == true => lb.Width.Value,
+            Drawing.RightBorderLineProperties rb when rb.Width?.HasValue == true => rb.Width.Value,
+            Drawing.TopBorderLineProperties tb when tb.Width?.HasValue == true => tb.Width.Value,
+            Drawing.BottomBorderLineProperties bb when bb.Width?.HasValue == true => bb.Width.Value,
+            Drawing.TopLeftToBottomRightBorderLineProperties tlbr when tlbr.Width?.HasValue == true => tlbr.Width.Value,
+            Drawing.BottomLeftToTopRightBorderLineProperties bltr when bltr.Width?.HasValue == true => bltr.Width.Value,
+            _ => null
+        };
+        if (widthEmu == 0) return "none";
+        if (widthEmu.HasValue) widthPt = widthEmu.Value / EmuConverter.EmuPerPointF;
 
         if (widthPt < 0.5) widthPt = 0.5;
 

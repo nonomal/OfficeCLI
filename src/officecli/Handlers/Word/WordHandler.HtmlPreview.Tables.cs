@@ -642,15 +642,13 @@ public partial class WordHandler
             cellListTag = tag;
         }
 
-        sb.Append("<li");
-        sb.Append($" class=\"marker-{numId}-{ilvl}\"");
-        var paraStyle = GetParagraphInlineCss(para, isListItem: true);
-        if (!string.IsNullOrEmpty(paraStyle))
-            sb.Append($" style=\"{paraStyle}\"");
-        sb.Append(">");
-
         // Ordered lists render the marker via an inline span (same as body),
-        // since list-style-type:none suppresses the native ::marker.
+        // since list-style-type:none suppresses the native ::marker. Build it
+        // first so the <li> can carry the hanging text-indent (mirrors the
+        // body-level path) — without it the marker box would push the cell
+        // list text right of the bullet text.
+        string? olMarkerSpan = null;
+        var paraStyle = GetParagraphInlineCss(para, isListItem: true);
         if (tag == "ol")
         {
             var template = string.IsNullOrEmpty(lvlText) ? $"%{ilvl + 1}" : lvlText!;
@@ -664,13 +662,25 @@ public partial class WordHandler
             var jc = GetLevelJustification(numId, ilvl);
             var markerWidth = hangingPt > 0 ? $"{hangingPt:0.#}pt" : "3em";
             var markerPadding = suff switch { "nothing" => "0", "space" => "0.25em", _ => "0.5em" };
-            var align = jc switch { "right" => "right", "center" => "center", _ => "left" };
+            // Default/left → right-align so the number hugs the text like the
+            // bullet ::marker (ul ignores lvlJc); explicit center kept distinct.
+            var align = jc switch { "center" => "center", _ => "right" };
             var inlineMarkerCss = GetMarkerInlineCss(numId, ilvl, para);
             var markerStyle = $"display:inline-block;min-width:{markerWidth};padding-right:{markerPadding};text-align:{align}";
             if (!string.IsNullOrEmpty(inlineMarkerCss))
                 markerStyle = inlineMarkerCss + ";" + markerStyle;
-            sb.Append($"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>");
+            olMarkerSpan = $"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>";
+            var hangCss = $"text-indent:calc(-{markerWidth} - {markerPadding})";
+            paraStyle = string.IsNullOrEmpty(paraStyle) ? hangCss : paraStyle + ";" + hangCss;
         }
+
+        sb.Append("<li");
+        sb.Append($" class=\"marker-{numId}-{ilvl}\"");
+        if (!string.IsNullOrEmpty(paraStyle))
+            sb.Append($" style=\"{paraStyle}\"");
+        sb.Append(">");
+        if (olMarkerSpan != null)
+            sb.Append(olMarkerSpan);
 
         RenderParagraphContentHtml(sb, para);
         sb.Append("</li>");

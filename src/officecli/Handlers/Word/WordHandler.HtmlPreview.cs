@@ -2109,10 +2109,20 @@ public partial class WordHandler
                                 : (string.IsNullOrEmpty(paraStyle) ? replacement : paraStyle + ";" + replacement);
                         }
                     }
-                    if (!string.IsNullOrEmpty(paraStyle))
-                        sb.Append($" style=\"{paraStyle}\"");
-                    sb.Append(">");
-                    // Computed marker for every ordered-list item (single or multi-level).
+                    // Compute the ordered-list marker (single or multi-level)
+                    // and its box width up front so the <li> can host a
+                    // HANGING-INDENT layout: the marker span sits to the LEFT
+                    // of the text (negative text-indent of the marker width)
+                    // rather than pushing the text right. This makes numbered
+                    // text land at the same padding-left boundary as bullet
+                    // text — bullet markers render via ::marker (outside the
+                    // content box), so their text starts at padding-left; the
+                    // ol marker is an inline-block <span> INSIDE the box, which
+                    // without the hanging indent shoved the text right by the
+                    // marker width (~18pt). Real Word aligns the two. The
+                    // padding-right is pt-based (not em) so the negative
+                    // text-indent cancels the marker width exactly.
+                    string? olMarkerSpan = null;
                     if (tag == "ol")
                     {
                         var template = string.IsNullOrEmpty(lvlText) ? $"%{ilvl + 1}" : lvlText!;
@@ -2132,7 +2142,22 @@ public partial class WordHandler
                             "space" => "0.25em",
                             _ => "0.5em" // tab
                         };
-                        var align = jc switch { "right" => "right", "center" => "center", _ => "left" };
+                        // The marker span is a HANGING box pulled fully left of the
+                        // text (text-indent below). Its RIGHT edge sits at the text
+                        // start (padding-left), so the number must be RIGHT-aligned
+                        // inside the box to HUG the text — landing where the bullet
+                        // ::marker disc sits (just left of the content box). A
+                        // left-aligned number would float to the far-left of the
+                        // hanging box, opening a wide gap to the text and landing the
+                        // marker well left of the bullet glyph.
+                        //
+                        // The bullet (ul) reference ignores lvlJc entirely — the CSS
+                        // ::marker hugs the content box regardless. To keep ol markers
+                        // visually parallel with bullets, the default lvlJc=left (the
+                        // value Word's template writes for ordinary lists) ALSO hugs
+                        // via right-align. Only an explicit lvlJc=center keeps a
+                        // distinct centered layout. (Explicit right is right too.)
+                        var align = jc switch { "center" => "center", _ => "right" };
                         // Pull in marker-level rPr (color/font/size/bold/italic) so
                         // the ol marker span matches the styling emitted globally
                         // for ul ::marker. Word lets per-level rPr restyle markers
@@ -2142,8 +2167,19 @@ public partial class WordHandler
                         var markerStyle = $"display:inline-block;min-width:{markerWidth};padding-right:{markerPadding};text-align:{align}";
                         if (!string.IsNullOrEmpty(inlineMarkerCss))
                             markerStyle = inlineMarkerCss + ";" + markerStyle;
-                        sb.Append($"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>");
+                        olMarkerSpan = $"<span style=\"{markerStyle}\">{HtmlEncode(marker)}</span>";
+                        // Hanging indent: pull the marker (min-width + padding-right)
+                        // into the padding so the text resumes at padding-left
+                        // (aligned with the bullet text). calc() lets us cancel the
+                        // mixed pt + em marker box exactly regardless of font size.
+                        var hangCss = $"text-indent:calc(-{markerWidth} - {markerPadding})";
+                        paraStyle = string.IsNullOrEmpty(paraStyle) ? hangCss : paraStyle + ";" + hangCss;
                     }
+                    if (!string.IsNullOrEmpty(paraStyle))
+                        sb.Append($" style=\"{paraStyle}\"");
+                    sb.Append(">");
+                    if (olMarkerSpan != null)
+                        sb.Append(olMarkerSpan);
                     RenderParagraphContentHtml(sb, para);
                     pendingLiClose = true; // defer </li> in case next item nests
                     continue;

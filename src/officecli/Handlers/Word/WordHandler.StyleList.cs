@@ -958,12 +958,17 @@ public partial class WordHandler
     }
 
     /// <summary>Get the LevelJustification (left/center/right) for a numbering level. Defaults to "left".</summary>
-    private string GetLevelJustification(int numId, int ilvl)
+    // Returns the level's explicit lvlJc value, or null when the level
+    // does not specify one. Callers that need a default substitute their
+    // own (the HTML marker uses "right" so a hanging-indent number hugs the
+    // text like the bullet ::marker, rather than floating to the far-left of
+    // its hanging box).
+    private string? GetLevelJustification(int numId, int ilvl)
     {
         var level = GetLevel(numId, ilvl);
         var jc = level?.LevelJustification?.Val;
-        if (jc?.HasValue != true) return "left";
-        return jc.InnerText ?? "left";
+        if (jc?.HasValue != true) return null;
+        return jc.InnerText;
     }
 
     private Level? GetLevel(int numId, int ilvl)

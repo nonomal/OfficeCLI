@@ -121,13 +121,36 @@ public partial class PowerPointHandler
         if (!string.IsNullOrEmpty(info.Title))
             sb.AppendLine($"      <div style=\"text-align:center;font-size:{info.TitleFontSize};font-weight:bold;padding:4px;flex-shrink:0;color:{chartTextColor}\">{ChartSvgRenderer.HtmlEncode(info.Title)}</div>");
 
+        // Legend position drives the plot+legend layout, mirroring the Word/Excel
+        // paths. right="r" → row, legend after plot; left="l" → row, legend before;
+        // top="t"/"tr" → column, legend before; bottom (default) → below the plot.
+        var legendSide = info.HasLegend && info.LegendPos is "r" or "l";
+        var legendTop  = info.HasLegend && info.LegendPos is "t" or "tr";
+
+        if (legendTop)
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+
+        if (legendSide)
+        {
+            var flexDir = info.LegendPos == "l" ? "row-reverse" : "row";
+            sb.AppendLine($"      <div style=\"display:flex;flex-direction:{flexDir};align-items:center;gap:8px;flex:1;min-height:0\">");
+        }
+
         sb.AppendLine($"      <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;flex:1;min-height:0\" preserveAspectRatio=\"xMidYMin meet\">");
 
         renderer.RenderChartSvgContent(sb, info, svgW, chartSvgH, marginLeft, marginTop, marginRight, marginBottom);
 
         sb.AppendLine("      </svg>");
 
-        renderer.RenderLegendHtml(sb, info, chartTextColor);
+        if (legendSide)
+        {
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+            sb.AppendLine("      </div>");
+        }
+        else if (!legendTop)
+        {
+            renderer.RenderLegendHtml(sb, info, chartTextColor);
+        }
 
         // R16a: render the data table grid when dataTable=true, mirroring the
         // Excel chart path (ExcelHandler.HtmlPreview.Charts.cs). The PPTX path

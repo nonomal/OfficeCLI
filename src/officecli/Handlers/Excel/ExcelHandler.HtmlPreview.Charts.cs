@@ -193,14 +193,37 @@ public partial class ExcelHandler
         if (!string.IsNullOrEmpty(info.Title))
             sb.AppendLine($"  <div style=\"text-align:center;font-size:{info.TitleFontSize};font-weight:bold;padding:6px 0;color:{titleColor}\">{HtmlEncode(info.Title)}</div>");
 
+        var legendColor = info.LegendFontColor ?? "#555";
+        // Legend position drives the plot+legend container layout, mirroring the
+        // Word path. right="r" → row, legend after plot; left="l" → row, legend
+        // before; top="t"/"tr" → column, legend before; bottom (default) → below.
+        var legendSide = info.HasLegend && info.LegendPos is "r" or "l";
+        var legendTop  = info.HasLegend && info.LegendPos is "t" or "tr";
+
+        if (legendTop)
+            renderer.RenderLegendHtml(sb, info, legendColor);
+
+        if (legendSide)
+        {
+            var flexDir = info.LegendPos == "l" ? "row-reverse" : "row";
+            sb.AppendLine($"  <div style=\"display:flex;flex-direction:{flexDir};align-items:center;gap:8px\">");
+        }
+
         sb.AppendLine($"  <svg viewBox=\"0 0 {svgW} {chartSvgH}\" style=\"width:100%;height:auto\" preserveAspectRatio=\"xMidYMin meet\">");
 
         renderer.RenderChartSvgContent(sb, info, svgW, chartSvgH);
 
         sb.AppendLine("  </svg>");
 
-        var legendColor = info.LegendFontColor ?? "#555";
-        renderer.RenderLegendHtml(sb, info, legendColor);
+        if (legendSide)
+        {
+            renderer.RenderLegendHtml(sb, info, legendColor);
+            sb.AppendLine("  </div>");
+        }
+        else if (!legendTop)
+        {
+            renderer.RenderLegendHtml(sb, info, legendColor);
+        }
 
         renderer.RenderDataTableHtml(sb, info);
 

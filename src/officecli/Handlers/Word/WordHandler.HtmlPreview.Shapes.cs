@@ -262,8 +262,8 @@ public partial class WordHandler
                 {
                     floatCss = "display:block;margin:8px auto";
                 }
-                // wrapSquare / wrapTight → float left or right
-                else if (anchor.Elements().Any(e => e.LocalName == "wrapSquare" || e.LocalName == "wrapTight"))
+                // wrapSquare / wrapTight / wrapThrough → float left or right
+                else if (anchor.Elements().Any(e => e.LocalName == "wrapSquare" || e.LocalName == "wrapTight" || e.LocalName == "wrapThrough"))
                 {
                     var isRight = hAlign == "right"
                         || hPosFrom == DW.HorizontalRelativePositionValues.RightMargin;
@@ -652,9 +652,9 @@ public partial class WordHandler
         var anchor = drawing.Descendants<DW.Anchor>().FirstOrDefault();
         if (anchor == null) return null;
 
-        // Only square/tight wrap floats text beside the shape. wrapNone /
-        // wrapThrough(behind)/in-front-of-text legitimately overlap.
-        if (!anchor.Elements().Any(e => e.LocalName == "wrapSquare" || e.LocalName == "wrapTight"))
+        // Only square/tight/through wrap floats text beside the shape. wrapNone /
+        // in-front-of-text legitimately overlap.
+        if (!anchor.Elements().Any(e => e.LocalName == "wrapSquare" || e.LocalName == "wrapTight" || e.LocalName == "wrapThrough"))
             return null;
 
         var hPos = anchor.GetFirstChild<DW.HorizontalPosition>();

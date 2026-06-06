@@ -481,7 +481,29 @@ internal static class RawXmlHelper
     /// </summary>
     public static List<ValidationError> ValidateDocument(OpenXmlPackage package)
     {
-        var errors = PreflightXmlParts(package);
+        // Validate against a throwaway clone, never the live package.
+        // PreflightXmlParts opens each part's stream (GetStream); on the LIVE
+        // package that desyncs the SDK's DOM tracking for parts whose root
+        // element is dirty-but-unflushed (e.g. a StylesPart just created by a
+        // style-setting edit). The part then serializes EMPTY on the next Save
+        // ("Root element is missing"). Clone(stream) snapshots the current
+        // in-memory state into an independent package, so reading its streams
+        // cannot harm the document the caller will go on to save. (Parameterless
+        // Clone() needs an in-memory package-factory feature that isn't
+        // registered here; the stream overload is the one used elsewhere.)
+        // Call the TYPED Clone overload: cloning through the base OpenXmlPackage
+        // reference needs an IPackageFactoryFeature that isn't registered for
+        // packages opened via SpreadsheetDocument/Word.../Presentation.Open, but
+        // the typed Clone(Stream, bool) works (same call HtmlPreview uses).
+        using var cloneStream = new MemoryStream();
+        using OpenXmlPackage clone = package switch
+        {
+            DocumentFormat.OpenXml.Packaging.SpreadsheetDocument s => s.Clone(cloneStream, false),
+            DocumentFormat.OpenXml.Packaging.WordprocessingDocument w => w.Clone(cloneStream, false),
+            DocumentFormat.OpenXml.Packaging.PresentationDocument p => p.Clone(cloneStream, false),
+            _ => package.Clone(cloneStream, false),
+        };
+        var errors = PreflightXmlParts(clone);
         var validator = new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Microsoft365);
         // BUG-R6-08: documents containing w:numPicBullet can trip an NRE
         // inside SDK validation when one of its child accessors hits a
@@ -492,7 +514,7 @@ internal static class RawXmlHelper
         IEnumerable<DocumentFormat.OpenXml.Validation.ValidationErrorInfo> raw;
         try
         {
-            raw = validator.Validate(package);
+            raw = validator.Validate(clone);
         }
         catch (Exception ex)
         {

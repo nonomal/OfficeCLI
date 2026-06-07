@@ -197,6 +197,16 @@ static partial class CommandBuilder
             var force = forceFlag;
             if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
             {
+                // Document protection is a file-level property, so read it ONCE
+                // for the whole batch — not once per item. CheckDocxProtection
+                // reopens the entire .docx to read settings.xml, so the old
+                // per-item loop turned an N-item batch into N full document
+                // opens (≈10s of pure I/O for a 16k-item batch). The `path`
+                // argument only drives the formfield/sdt exemption, so pass a
+                // representative non-exempt gated path when one exists;
+                // otherwise any gated path (all exempt → CheckDocxProtection
+                // returns 0 just as the per-item loop did).
+                string? exemptPath = null; bool hasNonExemptGated = false;
                 foreach (var batchItem in items)
                 {
                     // Only mutation commands need the protection gate. Read
@@ -211,7 +221,20 @@ static partial class CommandBuilder
                         k.Equals("protection", StringComparison.OrdinalIgnoreCase)))
                         continue;
                     var path = batchItem.Path ?? "";
+                    bool pathExempt = path.StartsWith("/formfield[", StringComparison.OrdinalIgnoreCase)
+                        || path.Contains("/sdt[", StringComparison.OrdinalIgnoreCase);
+                    if (pathExempt) { exemptPath ??= path; continue; }
+                    hasNonExemptGated = true;
                     var rc = CheckDocxProtection(file.FullName, path, json);
+                    if (rc != 0) return rc;
+                    break; // protection state is document-wide; one check suffices
+                }
+                // No non-exempt gated mutation, but exempt ones exist: preserve
+                // the old behavior of still consulting protection (returns 0 for
+                // formfield/sdt paths) so the contract is byte-identical.
+                if (!hasNonExemptGated && exemptPath != null)
+                {
+                    var rc = CheckDocxProtection(file.FullName, exemptPath, json);
                     if (rc != 0) return rc;
                 }
             }

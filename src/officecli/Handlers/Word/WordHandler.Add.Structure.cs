@@ -874,19 +874,16 @@ public partial class WordHandler
             {
                 var nid = ParseHelpers.SafeParseInt(sNumIdStr, "numId");
                 if (nid < 0) throw new ArgumentException($"numId must be >= 0 (got {nid}).");
-                // CONSISTENCY(numId-ref-check): mirror paragraph-level validation
-                // in WordHandler.Add.Text.cs. Positive numIds must reference an
-                // existing w:num so styles don't silently introduce dangling refs.
-                if (nid > 0)
-                {
-                    var numberingPart = _doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-                    var numExists = numberingPart?.Elements<NumberingInstance>()
-                        .Any(n => n.NumberID?.Value == nid) ?? false;
-                    if (!numExists)
-                        throw new ArgumentException(
-                            $"numId={nid} not found in /numbering. " +
-                            "Create the num first (add /numbering --type num), or use numId=0 to remove numbering.");
-                }
+                // A STYLE's numPr→numId pointing at a num that doesn't exist in
+                // /numbering is tolerated by Word (it falls back to a default
+                // decimal list) and validates clean — real templates ship a
+                // heading style with numId=N and an empty numbering part. Unlike
+                // the paragraph-level check (Add.Text.cs), do NOT hard-fail here:
+                // rejecting it broke dump→batch of such styles (the style add
+                // failed → the style was never created → styles basedOn it
+                // dangled → corrupt file), and dropping the numId lost the
+                // heading's number on round-trip. Keep the ref; let Word
+                // resolve or fall back exactly as it does for the source.
                 numPr.NumberingId = new NumberingId { Val = nid };
             }
             string? ilvlRaw = null;

@@ -1039,20 +1039,29 @@ public partial class WordHandler
                 {
                     var pPrLi = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
                     var indLi = pPrLi.Indentation ?? (pPrLi.Indentation = new Indentation());
-                    indLi.Left = SpacingConverter.ParseWordSpacing(value).ToString();
+                    // w:ind/@w:left is ST_SignedTwipsMeasure — negative indents
+                    // (text extending into the margin) are valid OOXML. Use the
+                    // signed parser, matching AddParagraph (BUG-DUMP-NEGIND);
+                    // ParseWordSpacing's non-negative guard wrongly rejected real
+                    // styles (gov/table fixtures carry negative left/right ind),
+                    // failing the style add → dangling basedOn → corrupt file.
+                    indLi.Left = SpacingConverter.ParseWordSpacingSigned(value).ToString();
                     continue;
                 }
                 case "rightindent":
                 {
                     var pPrRi = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
                     var indRi = pPrRi.Indentation ?? (pPrRi.Indentation = new Indentation());
-                    indRi.Right = SpacingConverter.ParseWordSpacing(value).ToString();
+                    indRi.Right = SpacingConverter.ParseWordSpacingSigned(value).ToString();
                     continue;
                 }
                 case "firstlineindent":
                 {
                     var pPrFli = newStyle.StyleParagraphProperties ?? EnsureStyleParagraphProperties(newStyle);
                     var indFli = pPrFli.Indentation ?? (pPrFli.Indentation = new Indentation());
+                    // w:ind/@w:firstLine is ST_TwipsMeasure (UNSIGNED) — unlike
+                    // left/right (signed), it must be non-negative. Keep the
+                    // non-negative parser.
                     indFli.FirstLine = SpacingConverter.ParseWordSpacing(value).ToString();
                     continue;
                 }

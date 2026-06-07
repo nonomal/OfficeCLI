@@ -58,26 +58,57 @@ public static class ResidentClient
     public static ResidentResponse? TrySend(string filePath, ResidentRequest request, int maxRetries = 0, int connectTimeoutMs = 100)
     {
         var pipeName = ResidentServer.GetPipeName(filePath);
+        var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
+            var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
             try
             {
-                using var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
-                client.Connect(connectTimeoutMs);
+                // --- Connect phase: the ONLY safe place to retry. ---
+                // A failed connect means the command was never delivered, so
+                // re-attempting cannot double-apply a mutation the resident never
+                // received. This is the busy / "wait for my turn in the serialized
+                // command queue" path the retry policy exists for.
+                try
+                {
+                    client.Connect(connectTimeoutMs);
+                }
+                catch
+                {
+                    if (attempt == maxRetries) return null;
+                    Thread.Sleep(50 * (attempt + 1)); // backoff, then re-attempt the CONNECT only
+                    continue;
+                }
 
-                var json = System.Text.Json.JsonSerializer.Serialize(request, ResidentJsonContext.Default.ResidentRequest);
-                PipeWriteLine(client, json);
+                // --- Post-connect: single attempt, NEVER loop back to re-send. ---
+                // Once connected we write the command, after which the resident may
+                // have APPLIED it. Any failure now — an empty reply (it closed /
+                // crashed before answering), a broken read, or bad JSON — must NOT
+                // trigger a re-send: that would double-apply non-idempotent ops
+                // (add/remove/move/swap/batch) and silently corrupt the document.
+                // We surface "not delivered" (null); the caller (CommandBuilder)
+                // turns that into a busy error so the user can retry or close+reopen.
+                // At-most-once over at-least-once: a not-applied command surfaces as
+                // a visible error the caller can re-issue; a double-apply does not.
+                // (Mirrors sdk/python/officecli.py `_rpc`, whose retry likewise
+                // covers only the connect phase.)
+                try
+                {
+                    PipeWriteLine(client, json);
 
-                var responseLine = PipeReadLine(client);
-                if (responseLine == null) continue;
+                    var responseLine = PipeReadLine(client);
+                    if (responseLine == null) return null;
 
-                var response = System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
-                if (response != null) return response;
+                    return System.Text.Json.JsonSerializer.Deserialize<ResidentResponse>(responseLine, ResidentJsonContext.Default.ResidentResponse);
+                }
+                catch
+                {
+                    return null;
+                }
             }
-            catch
+            finally
             {
-                if (attempt == maxRetries) return null;
-                Thread.Sleep(50 * (attempt + 1)); // brief backoff before retry
+                client.Dispose();
             }
         }
         return null;

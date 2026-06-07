@@ -176,15 +176,15 @@ def _rpc(sock_path, req, connect_timeout=_BUSY_CONNECT_TIMEOUT, max_retries=_BUS
     text = raw.decode("utf-8-sig")
     if not text.strip():
         # Empty/closed reply: the resident accepted the connection but closed
-        # without a complete response (e.g. crashed mid-serve). We DELIBERATELY
-        # DIVERGE from officecli's TrySend here: TrySend re-sends on an empty reply
-        # (ResidentClient.cs `if (responseLine == null) continue;`) and returns null
-        # only after exhausting its retries — i.e. it would re-execute a command the
-        # resident may have already applied before dying. We refuse that
-        # double-apply risk and raise instead. _cmd's recovery then restarts a dead
-        # resident and retries once (a fresh connect, before re-send), and
-        # _serves()/alive() (which swallow OfficeCliError) read an empty reply as
-        # "not alive".
+        # without a complete response (e.g. crashed mid-serve). We refuse to
+        # re-send — the command may already have been APPLIED before the resident
+        # died, so re-sending would double-apply a non-idempotent op — and raise
+        # instead. officecli's TrySend now matches: its retry covers only the
+        # connect phase (before the command is written); on an empty reply after a
+        # successful write it returns null without re-sending, the C# equivalent of
+        # this raise. _cmd's recovery then restarts a dead resident and retries once
+        # (a fresh connect, before re-send), and _serves()/alive() (which swallow
+        # OfficeCliError) read an empty reply as "not alive".
         raise OfficeCliError(-1,
             "resident closed the connection without a response "
             "(it may have crashed mid-command); retry, or close and reopen")

@@ -1156,16 +1156,13 @@ public partial class WordHandler
         var borders = spPr.GetFirstChild<ParagraphBorders>();
         if (borders == null)
         {
-            borders = new ParagraphBorders();
-            // StyleParagraphProperties is also OneSequence — use SetElement pattern
-            // ParagraphBorders element order index is after Indentation and before Shading
-            var afterRef = (OpenXmlElement?)spPr.GetFirstChild<Indentation>()
-                ?? (OpenXmlElement?)spPr.GetFirstChild<SpacingBetweenLines>()
-                ?? (OpenXmlElement?)spPr.GetFirstChild<Justification>();
-            if (afterRef != null)
-                spPr.InsertAfter(borders, afterRef);
-            else
-                spPr.PrependChild(borders);
+            // CT_PPr places <w:pBdr> EARLY (after numPr/suppressLineNumbers,
+            // before tabs/spacing/ind/jc) — the prior hand-rolled "after
+            // Indentation, before Shading" anchor was wrong and landed pBdr
+            // after jc, which strict validators reject. Append, then let
+            // SchemaOrder hoist it to the SDK-authoritative slot.
+            borders = spPr.AppendChild(new ParagraphBorders());
+            Core.SchemaOrder.Place(spPr, borders);
         }
         var (style, size, color, space) = ParseBorderValue(value);
 

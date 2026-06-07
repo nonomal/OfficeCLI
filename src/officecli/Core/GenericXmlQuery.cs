@@ -373,6 +373,10 @@ internal static class GenericXmlQuery
             var existing = parent.ChildElements.FirstOrDefault(e =>
                 e.LocalName == key && !ReferenceEquals(e, newChild));
             existing?.Remove();
+            // AddChild/AppendChild append; hoist the new child to its
+            // schema-correct slot so strict consumers don't reject e.g.
+            // <w:kern> after <w:sz> in rPr. Existing children are untouched.
+            SchemaOrder.Place(parent, newChild);
             return true;
         }
         catch

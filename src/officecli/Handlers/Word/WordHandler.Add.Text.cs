@@ -2287,16 +2287,22 @@ public partial class WordHandler
             };
         }
 
-        // pPr children have schema order; Tabs sits early. PrependChild
-        // is conservative — Word accepts Tabs at the start of pPr and
-        // we don't want to interleave with later siblings (numPr, ind, ...)
-        // that have stricter ordering constraints.
+        // pPr children have a strict CT_PPr order; <w:tabs> sits early but
+        // NOT first — pStyle (and keepNext/numPr/pBdr/…) precede it. Prepending
+        // landed tabs before pStyle and produced schema-invalid pPr. Append,
+        // then let SchemaOrder hoist it to the SDK-authoritative slot.
         Tabs tabs;
         if (parent is Paragraph para)
         {
             // pPr must come first inside <w:p> per CT_P schema
             var pProps = para.ParagraphProperties ?? para.PrependChild(new ParagraphProperties());
-            tabs = pProps.GetFirstChild<Tabs>() ?? pProps.PrependChild(new Tabs());
+            var tabsEl = pProps.GetFirstChild<Tabs>();
+            if (tabsEl == null)
+            {
+                tabsEl = pProps.AppendChild(new Tabs());
+                Core.SchemaOrder.Place(pProps, tabsEl);
+            }
+            tabs = tabsEl;
         }
         else if (parent is Style style)
         {
@@ -2304,7 +2310,13 @@ public partial class WordHandler
             // EnsureStyleParagraphProperties handles schema-correct insertion
             // before StyleRunProperties.
             var spProps = style.StyleParagraphProperties ?? EnsureStyleParagraphProperties(style);
-            tabs = spProps.GetFirstChild<Tabs>() ?? spProps.PrependChild(new Tabs());
+            var tabsEl = spProps.GetFirstChild<Tabs>();
+            if (tabsEl == null)
+            {
+                tabsEl = spProps.AppendChild(new Tabs());
+                Core.SchemaOrder.Place(spProps, tabsEl);
+            }
+            tabs = tabsEl;
         }
         else
         {

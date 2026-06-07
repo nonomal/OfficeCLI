@@ -178,6 +178,10 @@ internal static class TypedAttributeFallback
         else
         {
             parent.AppendChild(sample);
+            // Hoist the freshly appended child to its schema-correct slot
+            // (e.g. <w:pBdr> before <w:spacing> in pPr). Existing children —
+            // including foreign/unknown elements — are never reordered.
+            SchemaOrder.Place(parent, sample);
             target = sample;
         }
 

@@ -382,6 +382,15 @@ public partial class WordHandler : IDocumentHandler
         // across the same _usedParaIds set. Re-run EnsureAllParaIds after
         // every successful raw mutation so the global pool stays accurate.
         EnsureAllParaIds();
+        // CONSISTENCY(docpr-global-uniqueness): same hazard for <wp:docPr> ids.
+        // RawSet may inject a drawing whose docPr id collides with one a typed
+        // add already allocated via NextDocPropId (e.g. dump preserving a
+        // non-textbox shape replays its source id verbatim while the textbox
+        // alongside it was renumbered onto the same value). EnsureDocPropIds
+        // otherwise only runs at open, so an in-session raw mutation would
+        // leave the duplicate on disk; re-run it here to dedupe to the lowest
+        // free id — the same correction paraId gets above.
+        EnsureDocPropIds();
         // BUG-R5-01: do not emit chatter from inside the handler — the CLI
         // wrappers (CommandBuilder.Raw raw-set + batch run raw-set) print
         // their own structured message. Writing here pollutes batch --json

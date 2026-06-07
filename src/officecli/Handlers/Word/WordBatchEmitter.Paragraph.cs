@@ -970,7 +970,7 @@ public static partial class WordBatchEmitter
                     Part = "/document",
                     Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
                     Action = "append",
-                    Xml = RewriteDrawingDocPrIds(probeXml, ctx)
+                    Xml = probeXml
                 });
                 return true;
             }
@@ -1044,7 +1044,7 @@ public static partial class WordBatchEmitter
                 Part = "/document",
                 Xpath = $"/w:document/w:body/w:p[{targetIndex}]",
                 Action = "append",
-                Xml = RewriteDrawingDocPrIds(rawXml, ctx)
+                Xml = rawXml
             });
         }
         return true;
@@ -1074,39 +1074,6 @@ public static partial class WordBatchEmitter
             || rawXml.Contains("<w:pict")
             || rawXml.Contains("<mc:AlternateContent")
             || rawXml.Contains("<wps:");
-    }
-
-    // docPr ids for raw-set-preserved drawings live in a high band with large
-    // gaps. Typed `add textbox/picture/chart` allocate their docPr id via
-    // NextDocPropId (max-existing+1) on replay; a raw-set injects its source id
-    // verbatim and would otherwise collide with a renumbered textbox (both
-    // landing on, say, id=2). A doc would need ~1e6 typed shapes inserted
-    // between two preserved shapes for an add-side max+1 to bridge one gap, so
-    // collisions are unreachable in practice while ids stay valid xsd:unsignedInt.
-    private const uint RawDrawingDocPrBase = 1_000_000_000;
-    private const uint RawDrawingDocPrGap = 1_000_000;
-
-    /// <summary>
-    /// Reassign every <c>&lt;wp:docPr id="…"&gt;</c> in a raw-set drawing
-    /// payload to a unique high-band id so it never collides with the
-    /// NextDocPropId-allocated ids of typed-add drawings on replay. Each
-    /// occurrence (top-level anchor, and any nested anchors in a group) takes
-    /// the next slot from the shared cursor.
-    /// </summary>
-    private static string RewriteDrawingDocPrIds(string xml, BodyEmitContext? ctx)
-    {
-        if (ctx == null) return xml;
-        return System.Text.RegularExpressions.Regex.Replace(
-            xml,
-            "(<wp:docPr\\b[^>]*\\bid=\")\\d+(\")",
-            m =>
-            {
-                uint id = RawDrawingDocPrBase
-                    + (uint)(ctx.RawDrawingDocPrCursor.Index++) * RawDrawingDocPrGap;
-                return m.Groups[1].Value
-                    + id.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    + m.Groups[2].Value;
-            });
     }
 
     /// <summary>

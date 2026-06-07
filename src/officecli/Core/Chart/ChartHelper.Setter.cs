@@ -1089,7 +1089,15 @@ internal static partial class ChartHelper
                             InsertSeriesChildInOrder(ser, marker);
                         }
                         marker.RemoveAllChildren<C.Size>();
-                        marker.AppendChild(new C.Size { Val = mSize });
+                        // CT_Marker order: symbol, size, spPr, extLst — Size must
+                        // follow Symbol and precede spPr. AppendChild landed it
+                        // after spPr (when markercolor ran first), which strict
+                        // validators reject ('unexpected child element size').
+                        // Mirrors ApplyDataPointMarkerSize.
+                        var sym = marker.GetFirstChild<C.Symbol>();
+                        var szEl = new C.Size { Val = mSize };
+                        if (sym != null) sym.InsertAfterSelf(szEl);
+                        else marker.PrependChild(szEl);
                     }
                     break;
                 }

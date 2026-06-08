@@ -148,6 +148,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            TableOrdinalBox: new int[1],
             Warnings: warnings);
 
         if (node.Type == "table")
@@ -419,6 +420,15 @@ public static partial class WordBatchEmitter
         // Matches the CountTextboxesInHost selector on the Add side so dump
         // and Add-side indexing stay in lockstep.
         Dictionary<string, int> TextboxCounters,
+        // BUG-R11A(BUG1): document-order ordinal of the table currently being
+        // emitted, used to build a `(//w:tbl)[N]` raw-set xpath when injecting a
+        // block <w:sdt> that is a direct child of a table cell. Single-element
+        // mutable box (records are immutable) bumped at the top of every
+        // EmitTable call; because EmitTable recurses in DFS document order and
+        // every `add table` row is appended to `items` ahead of that table's
+        // cell content, N is the stable 1-based `//w:tbl` document-order index
+        // the cell-SDT raw-set resolves against at replay time.
+        int[] TableOrdinalBox,
         // R10-bug1: collected during the body walk whenever an emit helper
         // identifies content it cannot round-trip through the existing
         // handler vocabulary (OLE runs without a carrier for the embedded
@@ -486,6 +496,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: paraIdToTargetIdx,
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            TableOrdinalBox: new int[1],
             Warnings: warnings);
 
         // Cross-paragraph fields (a real cached TOC, an IF/REF whose result

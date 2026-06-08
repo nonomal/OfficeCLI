@@ -685,6 +685,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: null,
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            TableOrdinalBox: new int[1],
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;
         bool sawFirstPara = false;
@@ -701,7 +702,12 @@ public static partial class WordBatchEmitter
             if (child.Type == "table" || child.Type == "tbl")
             {
                 tblIdx++;
-                EmitTable(word, child.Path, tblIdx, items, ctx: null,
+                // BUG-R11A(BUG1): pass the part-scoped hfCtx (was ctx: null) so a
+                // block <w:sdt> nested in a header/footer table cell is emitted
+                // via EmitTable's cell-SDT branch. hfCtx's note/chart cursors are
+                // fresh and part-local, so threading it here consumes nothing the
+                // body walk relies on.
+                EmitTable(word, child.Path, tblIdx, items, ctx: hfCtx,
                           parentTablePath: null, containerPath: partTargetPath);
             }
             else
@@ -968,6 +974,62 @@ public static partial class WordBatchEmitter
             }
         }
 
+        EmitSdtTyped(word, sourcePath, "/body", items);
+    }
+
+    // BUG-R11A(BUG1): block <w:sdt> that is a DIRECT CHILD of a table cell.
+    // Mirrors body-level EmitSdt: rich block content (multi-paragraph / field /
+    // table / drawing / line-break) round-trips verbatim via raw-set appended
+    // into the just-emitted cell; everything text-shaped goes through the typed
+    // `add sdt` path targeting the cell. Without this, the cell child walk in
+    // EmitTable enumerated only paragraphs and nested tables, so a cell-nested
+    // SDT (and its content) was silently dropped on dump → round-trip data loss.
+    //
+    // <paramref name="cellXPath"/> is the `(//w:tbl)[N]/w:tr[r]/w:tc[c]` selector
+    // that resolves to the target cell at replay time (built from the document-
+    // order table ordinal so it is stable regardless of later tables / nesting).
+    // <paramref name="rawPart"/> is the host part ("/document" for body tables,
+    // "/header[N]" / "/footer[N]" otherwise). <paramref name="cellHasContent"/>
+    // decides prepend vs append so the SDT keeps document order relative to the
+    // cell's auto-seeded leading paragraph.
+    private static void EmitCellSdt(WordHandler word, string sourcePath, string cellTargetPath,
+                                    string cellXPath, string rawPart, bool cellHasContent,
+                                    List<BatchItem> items, BodyEmitContext ctx)
+    {
+        var rawXml = word.RawElementXml(sourcePath);
+        if (!string.IsNullOrEmpty(rawXml) && IsRichBlockSdt(rawXml!))
+        {
+            if (HasExternalRelRef(rawXml!))
+            {
+                ctx.Warnings.Add(new DocxUnsupportedWarning(
+                    Element: "sdt.richContent",
+                    Path: sourcePath,
+                    Reason: "content control in a table cell with rich block content AND external relationship references (hyperlinks/images) flattened to text on dump"));
+            }
+            else
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = rawPart,
+                    Xpath = cellXPath,
+                    Action = cellHasContent ? "append" : "prepend",
+                    Xml = rawXml
+                });
+                return;
+            }
+        }
+
+        EmitSdtTyped(word, sourcePath, cellTargetPath, items);
+    }
+
+    // Shared typed `add sdt` emit. Whitelists the Get-canonical keys AddSdt
+    // consumes plus the visible text; targets <paramref name="parentPath"/>
+    // (/body for body-level SDTs, a cell path for cell-nested ones). AddSdt
+    // accepts both Body and TableCell parents, so the same emit serves both.
+    private static void EmitSdtTyped(WordHandler word, string sourcePath, string parentPath,
+                                     List<BatchItem> items)
+    {
         DocumentNode sdt;
         try { sdt = word.Get(sourcePath); }
         catch { return; }
@@ -990,7 +1052,7 @@ public static partial class WordBatchEmitter
         items.Add(new BatchItem
         {
             Command = "add",
-            Parent = "/body",
+            Parent = parentPath,
             Type = "sdt",
             Props = props
         });

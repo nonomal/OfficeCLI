@@ -13,6 +13,13 @@ public static partial class WordBatchEmitter
                                   string? parentTablePath = null,
                                   string containerPath = "/body")
     {
+        // BUG-R11A(BUG1): bump the document-order table ordinal BEFORE the
+        // empty-table early-return so the count never desyncs from the
+        // `(//w:tbl)[N]` selectors used by cell-SDT raw-sets. EmitTable recurses
+        // in DFS document order, so this matches the target's //w:tbl indexing.
+        int tableOrdinal = 0;
+        if (ctx != null) tableOrdinal = ++ctx.TableOrdinalBox[0];
+
         var tableNode = word.Get(sourcePath);
         var rows = (tableNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "row")
@@ -386,6 +393,21 @@ public static partial class WordBatchEmitter
                         nestedTblIdx++;
                         EmitTable(word, cc.Path, nestedTblIdx, items, ctx,
                                   parentTablePath: cellTargetPath);
+                    }
+                    else if (cc.Type == "sdt" && ctx != null)
+                    {
+                        // BUG-R11A(BUG1): a block-level <w:sdt> that is a direct
+                        // child of this cell. Previously the cell walk recognised
+                        // only paragraphs and nested tables, so the SDT (and its
+                        // inner content) was dropped on dump. Emit it via the
+                        // shared cell-SDT helper (typed `add sdt` for text-shaped
+                        // controls, raw-set verbatim for rich block content).
+                        // The raw-set xpath resolves to THIS cell by the table's
+                        // document-order ordinal plus the current row/cell index.
+                        var rawPart = containerPath == "/body" ? "/document" : containerPath;
+                        var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
+                        EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
+                                    cellHasContent: firstParaSeen, items, ctx);
                     }
                 }
 

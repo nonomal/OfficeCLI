@@ -2589,13 +2589,14 @@ public partial class WordHandler
                             Path = $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]",
                             Type = "cell",
                             Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                            // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-                            ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
+                            // CONSISTENCY(cell-children): include nested Table and
+                            // block-SDT children alongside Paragraphs. BUG-R11A(BUG1).
+                            ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table || e is SdtBlock)
                         };
                         ReadCellProps(cell, cellNode);
                         if (depth > 2)
                         {
-                            int cellPIdx = 0, cellTblIdx = 0;
+                            int cellPIdx = 0, cellTblIdx = 0, cellSdtIdx = 0;
                             foreach (var cellChild in cell.Elements<OpenXmlElement>())
                             {
                                 if (cellChild is Paragraph cellPara)
@@ -2608,6 +2609,11 @@ public partial class WordHandler
                                 {
                                     cellTblIdx++;
                                     cellNode.Children.Add(ElementToNode(cellTbl, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/tbl[{cellTblIdx}]", depth - 3));
+                                }
+                                else if (cellChild is SdtBlock cellSdt)
+                                {
+                                    cellSdtIdx++;
+                                    cellNode.Children.Add(ElementToNode(cellSdt, $"{path}/tr[{rowIdx + 1}]/tc[{cellIdx + 1}]/{BuildSdtPathSegment(cellSdt, cellSdtIdx)}", depth - 3));
                                 }
                             }
                         }
@@ -2626,12 +2632,15 @@ public partial class WordHandler
     {
         node.Type = "cell";
         node.Text = string.Join("", directCell.Descendants<Text>().Select(t => t.Text));
-        // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-        node.ChildCount = directCell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table);
+        // CONSISTENCY(cell-children): include nested Table and block-SDT children
+        // alongside Paragraphs. BUG-R11A(BUG1): without SdtBlock here a block
+        // content control that is a direct cell child was invisible to Get (and
+        // therefore dropped by the dump cell walk that reads cellNode.Children).
+        node.ChildCount = directCell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table || e is SdtBlock);
         ReadCellProps(directCell, node);
         if (depth > 0)
         {
-            int dcPIdx = 0, dcTblIdx = 0;
+            int dcPIdx = 0, dcTblIdx = 0, dcSdtIdx = 0;
             foreach (var dcChild in directCell.Elements<OpenXmlElement>())
             {
                 if (dcChild is Paragraph cellPara)
@@ -2644,6 +2653,11 @@ public partial class WordHandler
                 {
                     dcTblIdx++;
                     node.Children.Add(ElementToNode(dcTbl, $"{path}/tbl[{dcTblIdx}]", depth - 1));
+                }
+                else if (dcChild is SdtBlock dcSdt)
+                {
+                    dcSdtIdx++;
+                    node.Children.Add(ElementToNode(dcSdt, $"{path}/{BuildSdtPathSegment(dcSdt, dcSdtIdx)}", depth - 1));
                 }
             }
         }
@@ -2665,13 +2679,14 @@ public partial class WordHandler
                     Path = $"{path}/tc[{cellIdx + 1}]",
                     Type = "cell",
                     Text = string.Join("", cell.Descendants<Text>().Select(t => t.Text)),
-                    // CONSISTENCY(cell-children): include nested Table children alongside Paragraphs.
-                    ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table)
+                    // CONSISTENCY(cell-children): include nested Table and block-SDT
+                    // children alongside Paragraphs. BUG-R11A(BUG1).
+                    ChildCount = cell.Elements<OpenXmlElement>().Count(e => e is Paragraph || e is Table || e is SdtBlock)
                 };
                 ReadCellProps(cell, cellNode);
                 if (depth > 1)
                 {
-                    int drPIdx = 0, drTblIdx = 0;
+                    int drPIdx = 0, drTblIdx = 0, drSdtIdx = 0;
                     foreach (var drChild in cell.Elements<OpenXmlElement>())
                     {
                         if (drChild is Paragraph cellPara)
@@ -2684,6 +2699,11 @@ public partial class WordHandler
                         {
                             drTblIdx++;
                             cellNode.Children.Add(ElementToNode(drTbl, $"{path}/tc[{cellIdx + 1}]/tbl[{drTblIdx}]", depth - 2));
+                        }
+                        else if (drChild is SdtBlock drSdt)
+                        {
+                            drSdtIdx++;
+                            cellNode.Children.Add(ElementToNode(drSdt, $"{path}/tc[{cellIdx + 1}]/{BuildSdtPathSegment(drSdt, drSdtIdx)}", depth - 2));
                         }
                     }
                 }

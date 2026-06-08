@@ -1666,7 +1666,17 @@ internal static class FormulaParser
             var mr = new M.MatrixRow();
             foreach (var cell in row)
             {
-                var baseEl = new M.Base(cell.Select(e => e.CloneNode(true)).ToArray());
+                // BUG-R10A(BUG4): the tokenizer keeps the spaces that surround
+                // the `&` column / `\\` row separators inside the cell's text
+                // token (`\begin{matrix} 1 & 2 \\ …` → cell tokens " 1 ", " 2 "),
+                // so each cell's <m:t> round-tripped as " 1 "/" 2 " — injecting
+                // leading/trailing spaces the source never had. Trim only the
+                // cell's outer boundary whitespace (first run's leading, last
+                // run's trailing); internal spaces in a multi-token cell like
+                // "x + 1" live in the SAME run and are preserved.
+                var cleaned = cell.Select(e => e.CloneNode(true)).ToList();
+                TrimMatrixCellBoundaryWhitespace(cleaned);
+                var baseEl = new M.Base(cleaned.ToArray());
                 mr.AppendChild(baseEl);
             }
             matrix.AppendChild(mr);
@@ -1749,6 +1759,29 @@ internal static class FormulaParser
     private static M.Run MakeMathRun(string text)
     {
         return new M.Run(new M.Text(text) { Space = SpaceProcessingModeValues.Preserve });
+    }
+
+    // BUG-R10A(BUG4): strip only the matrix cell's OUTER boundary whitespace —
+    // the leading spaces on the cell's first text run and the trailing spaces
+    // on its last text run. Scoped to plain <m:r><m:t> boundary runs so a cell
+    // beginning/ending with a fraction, n-ary, script, or nested group is left
+    // untouched, and internal spaces (e.g. "x + 1", which the tokenizer keeps in
+    // a single text run) survive because only the run-edge whitespace is cut.
+    private static void TrimMatrixCellBoundaryWhitespace(List<OpenXmlElement> cell)
+    {
+        if (cell.Count == 0) return;
+        if (cell[0] is M.Run firstRun)
+        {
+            var t = firstRun.GetFirstChild<M.Text>();
+            if (t != null && t.Text != null)
+                t.Text = t.Text.TrimStart();
+        }
+        if (cell[^1] is M.Run lastRun)
+        {
+            var t = lastRun.GetFirstChild<M.Text>();
+            if (t != null && t.Text != null)
+                t.Text = t.Text.TrimEnd();
+        }
     }
 
     private static OpenXmlElement WrapInOfficeMath(List<OpenXmlElement> elements)

@@ -211,18 +211,23 @@ internal static class FormulaParser
                         else
                             result = $"\\text{{{EscapeLatex(text)}}}";
                     }
+                    // BUG-R8A(BUG4): m:sty (weight/posture: p/b/i/bi) and m:scr
+                    // (script alphabet: double-struck/script) are orthogonal OMML
+                    // axes. The script-alphabet command (\mathbb/\mathcal) forces
+                    // m:sty=p on the write side, so a run carrying BOTH (e.g.
+                    // scr=double-struck + sty=bi) must emit the composed form
+                    // \mathbb{\boldsymbol{R}} — the writer's mathbb/mathcal arm
+                    // reads the inner style command's m:sty back. Inner style
+                    // wrapper per m:sty value (the math default is italic, so a
+                    // bare run already round-trips to "i"; emit \mathit only when
+                    // it must compose with a script wrapper):
+                    //   b → \mathbf, i → \mathit, bi → \boldsymbol, p → \mathrm.
                     else if (scrVal == "double-struck")
-                        result = $"\\mathbb{{{EscapeLatex(text)}}}";
+                        result = $"\\mathbb{{{WrapMathStyle(styVal, text)}}}";
                     else if (scrVal == "script")
-                        result = $"\\mathcal{{{EscapeLatex(text)}}}";
-                    else if (styVal == "b")
-                        result = $"\\mathbf{{{EscapeLatex(text)}}}";
-                    else if (styVal == "bi")
-                        result = $"\\boldsymbol{{{EscapeLatex(text)}}}";
-                    else if (styVal == "p")
-                        result = $"\\mathrm{{{EscapeLatex(text)}}}";
+                        result = $"\\mathcal{{{WrapMathStyle(styVal, text)}}}";
                     else
-                        result = EscapeLatex(text);
+                        result = WrapMathStyle(styVal, text);
                 }
                 else
                     result = EscapeLatex(text);
@@ -1303,9 +1308,20 @@ internal static class FormulaParser
                     var scriptVal = cmd == "mathbb"
                         ? M.ScriptValues.DoubleStruck
                         : M.ScriptValues.Script;
+                    // BUG-R8A(BUG4): m:scr (script alphabet) and m:sty
+                    // (weight/posture) are orthogonal OMML axes. A source run may
+                    // carry both (e.g. <m:scr m:val="double-struck"/><m:sty
+                    // m:val="bi"/>), which dumps to a composed \mathbb{\boldsymbol{R}}.
+                    // Read the inner style command's m:sty off the parsed arg and
+                    // carry it, instead of hardcoding Plain, so the bold/italic/
+                    // bold-italic weight survives the round-trip alongside the
+                    // script alphabet.
+                    var innerSty = (arg as M.Run)?.GetFirstChild<M.RunProperties>()
+                        ?.GetFirstChild<M.Style>()?.Val?.Value
+                        ?? M.StyleValues.Plain;
                     var rPr = new M.RunProperties(
                         new M.Script { Val = scriptVal },
-                        new M.Style { Val = M.StyleValues.Plain }
+                        new M.Style { Val = innerSty }
                     );
                     return new M.Run(
                         rPr,
@@ -1704,6 +1720,31 @@ internal static class FormulaParser
     }
 
     // ==================== Helpers ====================
+
+    /// <summary>
+    /// BUG-R8A(BUG4): render an m:sty (math weight/posture) value as the
+    /// matching LaTeX style command wrapping <paramref name="text"/>.
+    /// m:sty: "b" → \mathbf, "i" → \mathit, "bi" → \boldsymbol, "p" → \mathrm.
+    /// m:sty and m:scr (script alphabet) are orthogonal OMML axes; when a run
+    /// carries both, the caller wraps this style command inside the script
+    /// command (\mathbb/\mathcal) so both survive the round-trip.
+    /// </summary>
+    private static string WrapMathStyle(string? styVal, string text)
+    {
+        var escaped = EscapeLatex(text);
+        return styVal switch
+        {
+            "b" => $"\\mathbf{{{escaped}}}",
+            "bi" => $"\\boldsymbol{{{escaped}}}",
+            "p" => $"\\mathrm{{{escaped}}}",
+            // An explicit m:sty="i" round-trips to \mathit so the literal value
+            // survives; a run with NO m:sty (styVal == null) falls through to
+            // bare text — italic is the OMML math default, so the common
+            // default-italic letter stays unwrapped as before.
+            "i" => $"\\mathit{{{escaped}}}",
+            _ => escaped
+        };
+    }
 
     private static M.Run MakeMathRun(string text)
     {

@@ -571,6 +571,14 @@ public static partial class WordBatchEmitter
         var partTargetPath = $"/{kind}[{targetIndex}]";
         int pIdx = 0, tblIdx = 0;
         bool sawFirstPara = false;
+        // BUG-DUMP-R2-NESTED-LEAD (header/footer site): a header/footer body
+        // may begin with a table (CT_HdrFtr allows it). `add header`/`add footer`
+        // auto-seeds an empty leading paragraph; when the first source child is a
+        // table that seed has no source counterpart. Suppress the seed-reuse so
+        // any later paragraph adds AFTER the table instead of overwriting the
+        // leading seed, then drop the phantom seed below.
+        bool firstChildIsTable = blockChildren.Count > 0
+            && (blockChildren[0].Type == "table" || blockChildren[0].Type == "tbl");
         foreach (var child in blockChildren)
         {
             if (child.Type == "table" || child.Type == "tbl")
@@ -583,9 +591,18 @@ public static partial class WordBatchEmitter
             {
                 pIdx++;
                 EmitParagraph(word, child.Path, partTargetPath, pIdx, items,
-                              autoPresent: !sawFirstPara);
+                              autoPresent: !sawFirstPara && !firstChildIsTable);
                 sawFirstPara = true;
             }
+        }
+        // Remove the unconsumed auto-seeded leading paragraph (see above).
+        if (firstChildIsTable)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "remove",
+                Path = $"{partTargetPath}/p[1]",
+            });
         }
     }
 

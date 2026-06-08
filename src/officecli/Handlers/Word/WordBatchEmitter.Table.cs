@@ -352,6 +352,23 @@ public static partial class WordBatchEmitter
                                   parentTablePath: cellTargetPath);
                     }
                 }
+
+                // BUG-DUMP-R2-NESTED-LEAD: a cell whose FIRST source child is a
+                // table has no leading source paragraph to reuse the empty
+                // paragraph `add table` auto-seeds, so that seed survives as a
+                // phantom blank line above the nested table (source [table, p] →
+                // replay [p, table, p]). The trailing paragraph already landed
+                // on the SDK's auto-trailing paragraph via trailingAutoP, so the
+                // leading seed (cell's p[1]) is unconsumed — remove it. Validates
+                // clean either way; this restores source structure.
+                if (cellChildren.Count > 0 && cellChildren[0].Type == "table")
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "remove",
+                        Path = $"{cellTargetPath}/p[1]",
+                    });
+                }
             }
             // Trim trailing cells when source row is underfilled (sum of
             // source spans < gridCols). AddTable seeds `cols` cells per row;

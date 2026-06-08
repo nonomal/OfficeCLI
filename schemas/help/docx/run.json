@@ -699,9 +699,9 @@
       "type": "string",
       "add": false,
       "set": false,
-      "get": true,
-      "description": "individual rFonts @eastAsia slot readback. On Add/Set use the `font.ea` key.",
-      "readback": "font family name",
+      "get": false,
+      "description": "legacy alias for the rFonts @eastAsia slot. Get emits only the canonical `font.ea` key (for runs, paragraphs, and styles alike); use `font.ea` on Add/Set/Get.",
+      "readback": "see font.ea",
       "enforcement": "report"
     },
     "font.hAnsi": {

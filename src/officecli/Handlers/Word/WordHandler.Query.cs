@@ -672,7 +672,10 @@ public partial class WordHandler
                 {
                     var rf = rPr.RunFonts;
                     if (rf.Ascii?.Value != null) styleNode.Format["font.ascii"] = rf.Ascii.Value;
-                    if (rf.EastAsia?.Value != null) styleNode.Format["font.eastAsia"] = rf.EastAsia.Value;
+                    // BUG-R5A(BUG2): emit canonical font.ea (matches run/paragraph
+                    // emit and the schema primary) instead of font.eastAsia, which
+                    // diverged for the same rFonts/@eastAsia slot.
+                    if (rf.EastAsia?.Value != null) styleNode.Format["font.ea"] = rf.EastAsia.Value;
                     if (rf.HighAnsi?.Value != null) styleNode.Format["font.hAnsi"] = rf.HighAnsi.Value;
                     if (rf.ComplexScript?.Value != null) styleNode.Format["font.cs"] = rf.ComplexScript.Value;
                     // CONSISTENCY(canonical-keys): font.ascii is canonical; do not also emit flat "font" alias.

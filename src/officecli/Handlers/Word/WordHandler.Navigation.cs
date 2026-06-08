@@ -3208,6 +3208,15 @@ public partial class WordHandler
                         node.Format["sectionBreak.marginLeft"] = FormatTwipsToCm(pgMar.Left.Value);
                     if (pgMar.Right?.Value != null)
                         node.Format["sectionBreak.marginRight"] = FormatTwipsToCm(pgMar.Right.Value);
+                    // header/footer-from-edge + binding gutter (mirror the root
+                    // and /section[N] readbacks) so a mid-document section
+                    // break round-trips its full pgMar, not just the 4 edges.
+                    if (pgMar.Header?.Value != null)
+                        node.Format["sectionBreak.marginHeader"] = FormatTwipsToCm(pgMar.Header.Value);
+                    if (pgMar.Footer?.Value != null)
+                        node.Format["sectionBreak.marginFooter"] = FormatTwipsToCm(pgMar.Footer.Value);
+                    if (pgMar.Gutter?.Value != null)
+                        node.Format["sectionBreak.marginGutter"] = FormatTwipsToCm(pgMar.Gutter.Value);
                 }
 
                 var pgNum = inlineSectPr.GetFirstChild<PageNumberType>();
@@ -3252,6 +3261,23 @@ public partial class WordHandler
                     };
                     if (lnNum.CountBy?.Value is short cb && cb > 1)
                         node.Format["sectionBreak.lineNumberCountBy"] = cb;
+                }
+
+                // BUG-DUMP-SECGRID: the document grid (<w:docGrid>) on a
+                // mid-document section break governs CJK line pitch / lines-
+                // per-page; dropping it on dump→batch reflowed every page of
+                // that section (a major pagination-drift source). Mirror the
+                // root / section readback (docGrid.type / .linePitch / .charSpace);
+                // AddSection replays them via its docGrid.* typed fallback.
+                var sbGrid = inlineSectPr.GetFirstChild<DocGrid>();
+                if (sbGrid != null)
+                {
+                    if (sbGrid.Type?.HasValue == true)
+                        node.Format["sectionBreak.docGrid.type"] = sbGrid.Type.InnerText;
+                    if (sbGrid.LinePitch?.Value != null)
+                        node.Format["sectionBreak.docGrid.linePitch"] = sbGrid.LinePitch.Value;
+                    if (sbGrid.CharacterSpace?.Value != null)
+                        node.Format["sectionBreak.docGrid.charSpace"] = sbGrid.CharacterSpace.Value;
                 }
             }
         }

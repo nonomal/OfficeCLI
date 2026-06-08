@@ -696,9 +696,17 @@ public partial class WordHandler
         "wave" or "wavy" => BorderValues.Wave,
         "doublewave" or "wavydouble" or "wavyheavy" => BorderValues.DoubleWave,
         "dashsmallgap" => BorderValues.DashSmallGap,
+        // BUG-R4B(BUG3): outset / inset are valid ST_Border tokens (real-world
+        // tables emit them) and dump→replay rejected them, cascading to a
+        // whole-table add failure. dashDotStroked was likewise a valid
+        // ST_Border value missing from the parser. Add the remaining
+        // line-style ST_Border members so they round-trip.
+        "outset" => BorderValues.Outset,
+        "inset" => BorderValues.Inset,
+        "dashdotstroked" => BorderValues.DashDotStroked,
         "threedembed" or "3demboss" => BorderValues.ThreeDEmboss,
         "threedengrave" or "3dengrave" => BorderValues.ThreeDEngrave,
-        _ => throw new ArgumentException($"Invalid border style: '{style}'. Valid values: single, thick, double, dotted, dashed, none, triple, wave, etc.")
+        _ => throw new ArgumentException($"Invalid border style: '{style}'. Valid values: single, thick, double, dotted, dashed, none, triple, wave, outset, inset, etc.")
     };
 
     // CONSISTENCY(border-empty-segment): space is uint? rather than uint so the

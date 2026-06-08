@@ -750,7 +750,15 @@ public static partial class WordBatchEmitter
             || sdtXml.Contains("w:instrText", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldSimple", StringComparison.Ordinal)
             || sdtXml.Contains("<w:tbl", StringComparison.Ordinal)
-            || sdtXml.Contains("<w:drawing", StringComparison.Ordinal);
+            || sdtXml.Contains("<w:drawing", StringComparison.Ordinal)
+            // BUG-DUMPR2: a single-paragraph SDT can still carry intra-run
+            // structure the text-only typed emit can't reproduce — a line break
+            // or tab. sdt.Text concatenates run text and drops <w:br/>/<w:tab/>,
+            // so "a<w:br/>b" flattened to "ab". Treat their presence as rich so
+            // the SDT round-trips verbatim via raw-set (no rels involved).
+            || sdtXml.Contains("<w:br", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:tab", StringComparison.Ordinal)
+            || sdtXml.Contains("<w:cr", StringComparison.Ordinal);
     }
 
     // Raw injection of an <w:sdt> into the blank target preserves the element

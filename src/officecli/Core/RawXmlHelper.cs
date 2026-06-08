@@ -504,6 +504,18 @@ internal static class RawXmlHelper
             _ => package.Clone(cloneStream, false),
         };
         var errors = PreflightXmlParts(clone);
+        // BUG-R5B(BUG2): an orphaned header/footer reference (a
+        // w:headerReference / w:footerReference whose r:id has no matching
+        // relationship in its part) makes the SDK validator NRE before it can
+        // produce any results — the user gets a bare "NullReferenceException"
+        // instead of an actionable diagnostic. Detect these ourselves and emit a
+        // clean schema-style error naming the dangling r:id, mirroring the
+        // numPicBullet guard below. The document is genuinely broken, so this
+        // still surfaces as a validation error (success:false) — just an
+        // actionable one. Tracked so the NRE catch can suppress the bare message
+        // when we've already explained the real cause.
+        var orphanRefErrors = DetectOrphanedHeaderFooterReferences(clone);
+        errors.AddRange(orphanRefErrors);
         var validator = new OpenXmlValidator(DocumentFormat.OpenXml.FileFormatVersions.Microsoft365);
         // BUG-R6-08: documents containing w:numPicBullet can trip an NRE
         // inside SDK validation when one of its child accessors hits a
@@ -518,10 +530,17 @@ internal static class RawXmlHelper
         }
         catch (Exception ex)
         {
-            errors.Add(new ValidationError(
-                "ValidatorException",
-                $"Validator threw before producing results: {ex.GetType().Name}: {ex.Message}",
-                null, null));
+            // BUG-R5B(BUG2): when the pre-results NRE is the orphaned-reference
+            // one we already diagnosed, suppress the bare exception text — the
+            // actionable error(s) are already in the list. Otherwise surface the
+            // exception so unknown failures stay visible.
+            if (!(ex is NullReferenceException && orphanRefErrors.Count > 0))
+            {
+                errors.Add(new ValidationError(
+                    "ValidatorException",
+                    $"Validator threw before producing results: {ex.GetType().Name}: {ex.Message}",
+                    null, null));
+            }
             return errors;
         }
         // The IEnumerable is lazy — iterate with try/catch so one bad
@@ -569,6 +588,68 @@ internal static class RawXmlHelper
             }
         }
         return errors;
+    }
+
+    /// <summary>
+    /// BUG-R5B(BUG2): detect header/footer references whose relationship id does
+    /// not resolve to a part. Such a dangling <c>w:headerReference</c> /
+    /// <c>w:footerReference</c> makes the OpenXML SDK validator throw a bare
+    /// <see cref="NullReferenceException"/> before producing any results, so the
+    /// caller would otherwise see "Validator threw … NullReferenceException"
+    /// with no clue about the real problem. Return one actionable schema-style
+    /// error per orphaned reference instead. Word-only; other formats have no
+    /// equivalent reference shape (returns an empty list).
+    /// </summary>
+    private static List<ValidationError> DetectOrphanedHeaderFooterReferences(OpenXmlPackage package)
+    {
+        var result = new List<ValidationError>();
+        if (package is not DocumentFormat.OpenXml.Packaging.WordprocessingDocument word)
+            return result;
+        var mainPart = word.MainDocumentPart;
+        var body = mainPart?.Document?.Body;
+        if (mainPart == null || body == null) return result;
+
+        // r:id values the MainDocumentPart actually knows about.
+        var knownIds = new HashSet<string>(
+            mainPart.Parts.Select(p => p.RelationshipId),
+            StringComparer.Ordinal);
+        // ExternalRelationships (rare for hdr/ftr, but be exhaustive).
+        foreach (var rel in mainPart.ExternalRelationships)
+            knownIds.Add(rel.Id);
+
+        void Check(string id, string kind, string? typeName)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                result.Add(new ValidationError(
+                    "OrphanedReference",
+                    $"{kind} reference (type '{typeName ?? "default"}') has no relationship id (r:id); "
+                    + "the referenced part cannot be resolved.",
+                    "/w:document/w:body", mainPart.Uri.ToString()));
+                return;
+            }
+            if (!knownIds.Contains(id))
+            {
+                result.Add(new ValidationError(
+                    "OrphanedReference",
+                    $"{kind} reference '{id}' (type '{typeName ?? "default"}') has no matching relationship "
+                    + "in the document part; the referenced part is missing. "
+                    + $"Remove the dangling {kind.ToLowerInvariant()}Reference or add the {kind.ToLowerInvariant()} part it points at.",
+                    "/w:document/w:body", mainPart.Uri.ToString()));
+            }
+        }
+
+        // SectionProperties live both at body level (final section) and inside
+        // each section-break paragraph's pPr (inline sectPr). Descendants covers
+        // both without double-counting.
+        foreach (var sectPr in body.Descendants<DocumentFormat.OpenXml.Wordprocessing.SectionProperties>())
+        {
+            foreach (var hr in sectPr.Elements<DocumentFormat.OpenXml.Wordprocessing.HeaderReference>())
+                Check(hr.Id?.Value ?? "", "Header", hr.Type?.InnerText);
+            foreach (var fr in sectPr.Elements<DocumentFormat.OpenXml.Wordprocessing.FooterReference>())
+                Check(fr.Id?.Value ?? "", "Footer", fr.Type?.InnerText);
+        }
+        return result;
     }
 
     /// <summary>

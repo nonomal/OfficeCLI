@@ -321,11 +321,20 @@ public partial class WordHandler
                 $"Form field name '{name}' contains whitespace or quote/@ chars " +
                 "that prevent later addressing via bare attribute selectors. " +
                 "Use only letters, digits, '.', '_', '-' in form field names.");
+        // Word permits multiple form fields to share a name (a form with five
+        // "Check1" checkboxes is legal and common), so a hard reject broke
+        // dump→batch round-trip of any such document — the replay re-adds each
+        // field by its source name and the second one threw. The bookmark Id
+        // stays unique (allocated below), which is what Word actually requires;
+        // only the display name repeats. Warn instead of failing: selector
+        // addressing by name will resolve to the first match, but the field is
+        // preserved. (Mirrors the lenient duplicate-style-name handling.)
         if (body.Descendants<BookmarkStart>()
                 .Any(b => string.Equals(b.Name?.Value, name, StringComparison.Ordinal)))
         {
-            throw new ArgumentException(
-                $"form field name '{name}' already exists as a bookmark; pick a unique name.");
+            LastAddWarnings.Add(
+                $"form field name '{name}' duplicates an existing bookmark/field name — " +
+                "kept (Word allows it), but addressing by this name resolves to the first match.");
         }
         var text = ciProps.GetValueOrDefault("text", ciProps.GetValueOrDefault("value", ""));
 

@@ -3266,6 +3266,25 @@ public partial class WordHandler
             var fs = pmrpForDump.GetFirstChild<FontSize>();
             if (fs?.Val?.Value != null)
                 node.Format["markRPr.size"] = $"{int.Parse(fs.Val.Value) / 2.0:0.##}pt";
+            // BUG-DUMP-MARKRPR-CS: the ¶-mark's complex-script + kern slots
+            // (szCs / bCs / iCs / kern) were never emitted under markRPr.*, so
+            // dump→batch silently dropped them on every paragraph that has text
+            // runs (the empty-paragraph fallback path already reads them via
+            // ReadComplexScriptRunFormatting). Mirror that readback here so the
+            // ¶ glyph's CJK metrics survive the round-trip. ApplyRunFormatting
+            // consumes size.cs / bold.cs / italic.cs / kern on replay.
+            var fsCs = pmrpForDump.GetFirstChild<FontSizeComplexScript>();
+            if (fsCs?.Val?.Value is string fsCsVal && int.TryParse(fsCsVal, out var fsCsHp))
+                node.Format["markRPr.size.cs"] = $"{fsCsHp / 2.0:0.##}pt";
+            var bCsMark = pmrpForDump.GetFirstChild<BoldComplexScript>();
+            if (bCsMark != null && (bCsMark.Val == null || bCsMark.Val.Value))
+                node.Format["markRPr.bold.cs"] = true;
+            var iCsMark = pmrpForDump.GetFirstChild<ItalicComplexScript>();
+            if (iCsMark != null && (iCsMark.Val == null || iCsMark.Val.Value))
+                node.Format["markRPr.italic.cs"] = true;
+            var kernMark = pmrpForDump.GetFirstChild<Kern>();
+            if (kernMark?.Val?.HasValue == true)
+                node.Format["markRPr.kern"] = kernMark.Val.Value.ToString();
             var clr = pmrpForDump.GetFirstChild<Color>();
             if (clr != null)
             {
@@ -3275,8 +3294,23 @@ public partial class WordHandler
                     node.Format["markRPr.color"] = ParseHelpers.FormatHexColor(clr.Val.Value);
             }
             var rf = pmrpForDump.GetFirstChild<RunFonts>();
-            if (rf?.Ascii?.Value != null)
-                node.Format["markRPr.font.latin"] = rf.Ascii.Value;
+            // BUG-DUMP-MARKRPR-HANSI: mirror the run/empty-paragraph font
+            // readback — collapse to font.latin only when ascii == hAnsi;
+            // when they diverge (ascii=方正小标宋简体 hAnsi=宋体, common in CJK
+            // covers) emit both slots. Emitting only ascii made replay's
+            // font.latin set BOTH ascii and hAnsi to the ascii value, silently
+            // rewriting the ¶ mark's hAnsi font on every round-trip.
+            var markAscii = rf?.Ascii?.Value;
+            var markHAnsi = rf?.HighAnsi?.Value;
+            if (markAscii != null && markHAnsi != null && markAscii != markHAnsi)
+            {
+                node.Format["markRPr.font.ascii"] = markAscii;
+                node.Format["markRPr.font.hAnsi"] = markHAnsi;
+            }
+            else if (markAscii != null)
+                node.Format["markRPr.font.latin"] = markAscii;
+            else if (markHAnsi != null)
+                node.Format["markRPr.font.latin"] = markHAnsi;
             if (rf?.EastAsia?.Value != null)
                 node.Format["markRPr.font.ea"] = rf.EastAsia.Value;
             if (rf?.ComplexScript?.Value != null)
@@ -3401,6 +3435,19 @@ public partial class WordHandler
             var hlEl = rp?.Highlight ?? markRp?.GetFirstChild<Highlight>();
             if (hlEl?.Val != null && !node.Format.ContainsKey("highlight"))
                 node.Format["highlight"] = hlEl.Val.InnerText;
+
+            // BUG-DUMP-MARKRPR-CS: empty-paragraph ¶-mark kern. Text
+            // paragraphs route the mark's kern through markRPr.kern above;
+            // here we only cover the empty-paragraph case (markRp != null
+            // ⇒ no text run) so we don't hoist a first run's kern onto the
+            // paragraph node. AddParagraph's bare-key path applies it back
+            // to the ¶ mark rPr on replay.
+            if (markRp != null && !node.Format.ContainsKey("kern"))
+            {
+                var kEmpty = markRp.GetFirstChild<Kern>();
+                if (kEmpty?.Val?.HasValue == true)
+                    node.Format["kern"] = kEmpty.Val.Value.ToString();
+            }
         }
 
         // Populate effective.* properties from style inheritance

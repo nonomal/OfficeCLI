@@ -1211,6 +1211,69 @@
       "get": true,
       "readback": "unit-qualified pt (e.g. 1pt)",
       "enforcement": "report"
+    },
+    "markRPr.size.cs": {
+      "type": "length",
+      "description": "paragraph-mark run complex-script font size (w:pPr/w:rPr/w:szCs, half-points internally). The CJK/RTL counterpart of markRPr.size; emitted separately so the ¶ glyph's complex-script metrics survive dump→batch.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "unit-qualified pt (e.g. 11pt)",
+      "enforcement": "report"
+    },
+    "markRPr.bold.cs": {
+      "type": "bool",
+      "description": "paragraph-mark run complex-script bold (w:pPr/w:rPr/w:bCs). The CJK/RTL counterpart of markRPr.bold.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "markRPr.italic.cs": {
+      "type": "bool",
+      "description": "paragraph-mark run complex-script italic (w:pPr/w:rPr/w:iCs). The CJK/RTL counterpart of markRPr.italic.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "true|false",
+      "enforcement": "report"
+    },
+    "markRPr.kern": {
+      "type": "integer",
+      "description": "paragraph-mark run kerning threshold (w:pPr/w:rPr/w:kern @val, half-points). Below this font size Word disables kerning on the ¶ glyph.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "integer half-points",
+      "enforcement": "report"
+    },
+    "markRPr.font.ascii": {
+      "type": "string",
+      "description": "paragraph-mark run Ascii font (w:pPr/w:rPr/w:rFonts @ascii). Emitted alongside markRPr.font.hAnsi only when the two slots diverge; the symmetric case collapses to markRPr.font.latin.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "markRPr.font.hAnsi": {
+      "type": "string",
+      "description": "paragraph-mark run HighAnsi font (w:pPr/w:rPr/w:rFonts @hAnsi). Emitted alongside markRPr.font.ascii only when the two slots diverge; the symmetric case collapses to markRPr.font.latin.",
+      "add": false,
+      "set": true,
+      "get": true,
+      "readback": "font name",
+      "enforcement": "report"
+    },
+    "kern": {
+      "type": "integer",
+      "description": "kerning threshold on an empty paragraph's ¶-mark run (w:pPr/w:rPr/w:kern @val, half-points). Below this font size Word disables kerning. Get-side readback only — the value is applied via the generic run-formatting path (ApplyRunFormatting), not a dedicated paragraph Set case; text-bearing paragraphs surface the ¶-mark kern under markRPr.kern instead.",
+      "add": false,
+      "set": false,
+      "get": true,
+      "readback": "integer half-points",
+      "enforcement": "report"
     }
   }
 }

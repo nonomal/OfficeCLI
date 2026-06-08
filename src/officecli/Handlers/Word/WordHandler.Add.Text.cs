@@ -1203,10 +1203,18 @@ public partial class WordHandler
                 var author = string.IsNullOrEmpty(hTcAuthor) ? "OfficeCLI" : hTcAuthor!;
                 DateTime date = !string.IsNullOrEmpty(hTcDate) && DateTime.TryParse(hTcDate, out var hd)
                     ? hd : DateTime.UtcNow;
-                // ¶ mark: <w:pPr><w:rPr><w:ins/></w:rPr></w:pPr>
+                // ¶ mark: <w:pPr>…<w:rPr><w:ins/>…</w:rPr></w:pPr>
+                // Append (not prepend) the mark rPr: in CT_PPr the paragraph-mark
+                // rPr sits near the END of the sequence (after pStyle / numPr /
+                // spacing / …). Prepending forced it to position 0, which both
+                // mis-placed the rPr AND made the following numPr/spacing parse
+                // as unexpected children. PREPEND the <w:ins> inside the rPr: in
+                // CT_ParaRPr the ins/del/move group leads the sequence, so when
+                // markRPr.* props (rFonts/sz/…) were already added the ins must
+                // precede them rather than be appended last.
                 var pMarkRPr = pProps.ParagraphMarkRunProperties
-                              ?? pProps.PrependChild(new ParagraphMarkRunProperties());
-                pMarkRPr.AppendChild(new Inserted
+                              ?? pProps.AppendChild(new ParagraphMarkRunProperties());
+                pMarkRPr.PrependChild(new Inserted
                 {
                     Author = author,
                     Date = date,

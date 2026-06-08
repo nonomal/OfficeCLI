@@ -3568,6 +3568,22 @@ public partial class WordHandler
                 if (kEmpty?.Val?.HasValue == true)
                     node.Format["kern"] = kEmpty.Val.Value.ToString();
             }
+            // BUG-R10A(BUG3): empty-paragraph ¶-mark character spacing
+            // (<w:spacing> inside ParagraphMarkRunProperties). The
+            // text-bearing-paragraph path surfaces this as
+            // `markRPr.charSpacing` (see pmrpForDump block above), but the
+            // empty-paragraph fallback handled neither bare `charSpacing` nor
+            // `markRPr.charSpacing` — so `set --prop markRPr.charSpacing=2pt`
+            // on an empty paragraph wrote the <w:spacing> correctly yet `get`
+            // never surfaced it and dump→batch dropped it. Use the same
+            // canonical key as the text-para path so replay rebuilds the
+            // <w:spacing> via AddParagraph's markRPr.charSpacing handling.
+            if (markRp != null && !node.Format.ContainsKey("markRPr.charSpacing"))
+            {
+                var spEmpty = markRp.GetFirstChild<Spacing>();
+                if (spEmpty?.Val?.HasValue == true)
+                    node.Format["markRPr.charSpacing"] = $"{spEmpty.Val.Value / 20.0:0.##}pt";
+            }
         }
 
         // Populate effective.* properties from style inheritance

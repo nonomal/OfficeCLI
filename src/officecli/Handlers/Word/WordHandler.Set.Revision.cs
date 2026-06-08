@@ -487,8 +487,20 @@ public partial class WordHandler
 
             Action wrap = () =>
             {
-                var trPr = tr.GetFirstChild<TableRowProperties>()
-                           ?? tr.PrependChild(new TableRowProperties());
+                // CT_Row order is tblPrEx?, trPr?, cells — so a new trPr must go
+                // AFTER any existing tblPrEx, not at the front. PrependChild put
+                // trPr before a tblPrEx the table-level format-revision cascade
+                // had already added, producing schema-invalid OOXML ("unexpected
+                // child element tblPrEx") that Word rejects. Insert after tblPrEx
+                // when present; otherwise prepend (trPr leads, before the cells).
+                var trPr = tr.GetFirstChild<TableRowProperties>();
+                if (trPr == null)
+                {
+                    trPr = new TableRowProperties();
+                    var existingEx = tr.GetFirstChild<TablePropertyExceptions>();
+                    if (existingEx != null) tr.InsertAfter(trPr, existingEx);
+                    else tr.PrependChild(trPr);
+                }
                 var change = new TableRowPropertiesChange
                 {
                     Author = author,

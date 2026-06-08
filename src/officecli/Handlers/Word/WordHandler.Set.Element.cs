@@ -1957,7 +1957,18 @@ public partial class WordHandler
     private List<string> SetElementTableRow(TableRow row, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
-        var trPr = row.TableRowProperties ?? row.PrependChild(new TableRowProperties());
+        // CT_Row order is tblPrEx?, trPr?, cells — a new trPr must go AFTER any
+        // existing tblPrEx (added by a table-level format-revision cascade), not
+        // at the front. PrependChild put trPr before tblPrEx, producing
+        // schema-invalid OOXML ("unexpected child element tblPrEx") Word rejects.
+        var trPr = row.TableRowProperties;
+        if (trPr == null)
+        {
+            trPr = new TableRowProperties();
+            var existingEx = row.GetFirstChild<TablePropertyExceptions>();
+            if (existingEx != null) row.InsertAfter(trPr, existingEx);
+            else row.PrependChild(trPr);
+        }
         foreach (var (key, value) in properties)
         {
             switch (key.ToLowerInvariant())

@@ -348,6 +348,34 @@ public static partial class WordBatchEmitter
                     if (cc.Type == "paragraph" || cc.Type == "p")
                     {
                         cellParaIdx++;
+                        // BUG-R4 (DBF-R4-02): a display equation (<m:oMathPara>)
+                        // inside a cell surfaces here as a plain paragraph child
+                        // whose Get returns an empty paragraph — EmitParagraph
+                        // would emit `set p[N]` with no content and the formula
+                        // would be lost. Mirror the body walker's typed routing:
+                        // detect the oMathPara-wrapper and emit `add equation`
+                        // targeting the cell paragraph instead. `add equation`
+                        // (display) on an existing cell paragraph appends the
+                        // m:oMathPara into it, reproducing the wrapper shape.
+                        var cellEq = word.TryGetDisplayEquationAtParagraph(cc.Path);
+                        if (cellEq != null)
+                        {
+                            bool eqIsTrailingAutoP = k == trailingAutoP;
+                            // First cell paragraph (or the SDK auto-trailing one)
+                            // reuses an auto-present seeded paragraph; otherwise
+                            // create a fresh host paragraph for the equation.
+                            if (firstParaSeen && !eqIsTrailingAutoP)
+                                items.Add(new BatchItem
+                                {
+                                    Command = "add",
+                                    Parent = cellTargetPath,
+                                    Type = "paragraph",
+                                });
+                            EmitCellDisplayEquation(cellEq,
+                                $"{cellTargetPath}/p[{cellParaIdx}]", items);
+                            firstParaSeen = true;
+                            continue;
+                        }
                         bool isTrailingAutoP = k == trailingAutoP;
                         EmitParagraph(word, cc.Path, cellTargetPath, cellParaIdx, items,
                                       autoPresent: !firstParaSeen || isTrailingAutoP, ctx);
@@ -398,6 +426,32 @@ public static partial class WordBatchEmitter
                 });
             }
         }
+    }
+
+    // BUG-R4 (DBF-R4-02): emit a typed `add equation` (display) targeting a cell
+    // paragraph path. Mirrors TryEmitDisplayEquation (WordBatchEmitter.Paragraph.cs)
+    // but for an arbitrary cell-paragraph parent (TryEmitDisplayEquation is hard-
+    // coded to parent "/body"). `add equation` on an existing cell paragraph
+    // appends the m:oMathPara into it, reproducing the source wrapper shape.
+    private static void EmitCellDisplayEquation(DocumentNode eqNode, string parentPath, List<BatchItem> items)
+    {
+        var mode = eqNode.Format.TryGetValue("mode", out var m) ? m?.ToString() : "display";
+        var eqProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mode"] = string.IsNullOrEmpty(mode) ? "display" : mode!
+        };
+        if (!string.IsNullOrEmpty(eqNode.Text))
+            eqProps["formula"] = eqNode.Text!;
+        if (eqNode.Format.TryGetValue("align", out var eqAlign)
+            && eqAlign != null && !string.IsNullOrEmpty(eqAlign.ToString()))
+            eqProps["align"] = eqAlign.ToString()!;
+        items.Add(new BatchItem
+        {
+            Command = "add",
+            Parent = parentPath,
+            Type = "equation",
+            Props = eqProps
+        });
     }
 
     // Cell Format includes both true tcPr keys and "leaked" keys read from

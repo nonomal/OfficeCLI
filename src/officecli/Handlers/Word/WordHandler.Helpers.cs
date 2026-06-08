@@ -170,21 +170,105 @@ public partial class WordHandler
 
     /// <summary>
     /// Find the paragraph path where a CommentRangeStart with the given ID is anchored.
-    /// Returns "/body/p[N]" or null if not found.
+    /// Returns "/body/p[N]" for a top-level body paragraph, or the full semantic
+    /// table path "/body/tbl[N]/tr[M]/tc[K]/p[J]" when the anchor lives inside a
+    /// table cell. Returns null if not found.
+    /// BUG-R4 (DBF-R4-01): previously iterated only body.Elements&lt;Paragraph&gt;()
+    /// (top-level body paragraphs), so a comment anchored inside a table cell
+    /// resolved to null — Query never set Format["anchoredTo"] and EmitComments
+    /// fell back to the hard-coded "/body/p[1]", relocating the comment out of
+    /// the cell on dump→batch. Resolve through the same full-document paragraph
+    /// scope its sibling FindCommentAnchorRunIndex already uses (Descendants),
+    /// and build the correct cell path so the comment re-anchors in the cell.
     /// </summary>
     private string? FindCommentAnchorPath(string commentId)
     {
         var body = _doc.MainDocumentPart?.Document?.Body;
         if (body == null) return null;
 
-        var paragraphs = body.Elements<Paragraph>().ToList();
-        for (int i = 0; i < paragraphs.Count; i++)
+        foreach (var para in body.Descendants<Paragraph>())
         {
-            var hasRange = paragraphs[i].Descendants<CommentRangeStart>()
+            var hasRange = para.Descendants<CommentRangeStart>()
                 .Any(rs => rs.Id?.Value == commentId);
-            if (hasRange) return $"/body/{BuildParaPathSegment(paragraphs[i], i + 1)}";
+            if (hasRange) return BuildBodyParagraphFullPath(body, para);
         }
         return null;
+    }
+
+    /// <summary>
+    /// BUG-R4 (DBF-R4-02): if the paragraph at <paramref name="paraPath"/> is a
+    /// pure display-equation wrapper (a <c>w:p</c> whose only content is
+    /// <c>m:oMathPara</c>), return the typed equation DocumentNode (mode/formula/
+    /// align) for it; otherwise null. The body walker reaches this via the
+    /// dedicated /body/oMathPara[N] addressing, but a cell oMathPara surfaces in
+    /// the cell-content walker as a plain paragraph path whose Get returns an
+    /// empty paragraph — so EmitTable could not detect it. This lets the cell
+    /// walker re-route the wrapper to a typed `add equation`, mirroring the body
+    /// walker's behavior, without changing the cell path addressing scheme.
+    /// </summary>
+    internal DocumentNode? TryGetDisplayEquationAtParagraph(string paraPath)
+    {
+        var element = NavigateToElement(ParsePath(paraPath));
+        if (element is not Paragraph para || !IsOMathParaWrapperParagraph(para))
+            return null;
+        var inner = para.ChildElements.FirstOrDefault(
+            c => c.LocalName == "oMathPara" || c is M.Paragraph);
+        if (inner == null) return null;
+        // Reuse ElementToNode's oMathPara → typed equation projection so the
+        // mode/formula/align extraction stays single-sourced.
+        return ElementToNode(inner, paraPath, 0);
+    }
+
+    /// <summary>
+    /// Build a "/body"-rooted path to a paragraph by walking its ancestor chain,
+    /// emitting tbl[i]/tr[j]/tc[k] segments for every enclosing table cell.
+    /// Top-level body paragraphs yield "/body/p[N]"; cell paragraphs yield
+    /// "/body/tbl[N]/tr[M]/tc[K]/p[J]". Mirrors BuildOleRunPath's table-aware
+    /// ancestor walk. Returns null if the paragraph is not under the given body.
+    /// </summary>
+    private static string? BuildBodyParagraphFullPath(Body body, Paragraph para)
+    {
+        // Ancestors() returns innermost first; reverse to outer-to-inner order.
+        var ancestors = para.Ancestors().TakeWhile(a => a != body).Reverse().ToList();
+
+        var sb = new StringBuilder("/body");
+        OpenXmlElement cursor = body;
+        foreach (var anc in ancestors)
+        {
+            if (anc is DocumentFormat.OpenXml.Wordprocessing.Table tblAnc)
+            {
+                var tblIdx = cursor.Elements<DocumentFormat.OpenXml.Wordprocessing.Table>()
+                    .TakeWhile(t => t != tblAnc).Count() + 1;
+                sb.Append($"/tbl[{tblIdx}]");
+                cursor = tblAnc;
+            }
+            else if (anc is TableRow rowAnc)
+            {
+                var rowIdx = cursor.Elements<TableRow>()
+                    .TakeWhile(r => r != rowAnc).Count() + 1;
+                sb.Append($"/tr[{rowIdx}]");
+                cursor = rowAnc;
+            }
+            else if (anc is TableCell cellAnc)
+            {
+                var cellIdx = cursor.Elements<TableCell>()
+                    .TakeWhile(c => c != cellAnc).Count() + 1;
+                sb.Append($"/tc[{cellIdx}]");
+                cursor = cellAnc;
+            }
+        }
+
+        var paraIdx = cursor.Elements<Paragraph>().TakeWhile(p => p != para).Count() + 1;
+        if (!ReferenceEquals(cursor.Elements<Paragraph>().ElementAtOrDefault(paraIdx - 1), para))
+            return null; // paragraph not a direct child of the resolved cursor
+        // Top-level body paragraphs use the paraId form so EmitComments can map
+        // the source paraId -> target index via paraIdToTargetIdx. Cell paragraphs
+        // are positionally stable across dump→batch (the table is re-created with
+        // fresh paraIds), so emit a positional p[J] segment that EmitComments
+        // passes through verbatim. CONSISTENCY(word-table-positional).
+        bool inCell = cursor is TableCell;
+        sb.Append(inCell ? $"/p[{paraIdx}]" : $"/{BuildParaPathSegment(para, paraIdx)}");
+        return sb.ToString();
     }
 
     /// <summary>

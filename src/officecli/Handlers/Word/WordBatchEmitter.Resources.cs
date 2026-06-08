@@ -621,9 +621,22 @@ public static partial class WordBatchEmitter
             string parentTarget = "/body/p[1]";  // safe fallback to first body para
             if (props.TryGetValue("anchoredTo", out var anchor))
             {
-                var pid = ExtractParaId(anchor);
-                if (pid != null && paraIdToTargetIdx.TryGetValue(pid, out var idx))
-                    parentTarget = $"/body/p[{idx}]";
+                // BUG-R4 (DBF-R4-01): a comment anchored inside a table cell
+                // resolves to "/body/tbl[N]/tr[M]/tc[K]/p[J]" — a positional
+                // path that is structurally stable across dump→batch (the table
+                // is re-created with fresh paraIds, so the body paraId map can't
+                // help). Pass it through verbatim so the comment re-anchors in
+                // the cell instead of falling back to /body/p[1].
+                if (anchor.Contains("/tbl[", StringComparison.OrdinalIgnoreCase))
+                {
+                    parentTarget = anchor;
+                }
+                else
+                {
+                    var pid = ExtractParaId(anchor);
+                    if (pid != null && paraIdToTargetIdx.TryGetValue(pid, out var idx))
+                        parentTarget = $"/body/p[{idx}]";
+                }
                 props.Remove("anchoredTo");
             }
             // BUG-DUMP4-03: emit the 1-based run index where the source

@@ -1859,6 +1859,24 @@ public partial class WordHandler
                     }
                     break;
                 }
+                case "hidemark":
+                    // BUG-DUMP-CELLTAIL: <w:hideMark/> toggle (cell marked to
+                    // measure its mark for autofit even when empty). Bare
+                    // boolean child the generic TryCreateTypedChild can't
+                    // synthesise (no @val). Insert in CT_TcPr schema order.
+                    tcPr.RemoveAllChildren<HideMark>();
+                    if (IsTruthy(value))
+                        InsertTcPrChildInOrder(tcPr, new HideMark());
+                    break;
+                case "tcfittext":
+                    // BUG-DUMP-CELLTAIL: <w:tcFitText/> toggle (fit text to
+                    // cell width). Distinct from the run-level "fittext" case
+                    // above which writes <w:fitText> on rPr — this is the
+                    // tcPr-level toggle. Same bare-boolean handling as hideMark.
+                    tcPr.RemoveAllChildren<TableCellFitText>();
+                    if (IsTruthy(value))
+                        InsertTcPrChildInOrder(tcPr, new TableCellFitText());
+                    break;
                 default:
                     // Generic dotted "element.attr=value" fallback (shd.fill,
                     // tcMar.left, tcBorders.top, …). Same helper as /styles

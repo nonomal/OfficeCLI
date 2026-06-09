@@ -1035,6 +1035,20 @@ public partial class WordHandler
                 if (tcPr.NoWrap == null) tcPr.NoWrap = new NoWrap();
             }
         }
+        // BUG-DUMP-CELLTAIL: <w:tcFitText/> toggle. CONSISTENCY(add-set-symmetry):
+        // mirror Set's tcFitText case. Appended before hideMark so the resulting
+        // child order follows CT_TcPr (tcFitText → vAlign → hideMark).
+        if (properties.TryGetValue("tcFitText", out var tcFitTextVal)
+            || properties.TryGetValue("tcfittext", out tcFitTextVal))
+        {
+            if (IsTruthy(tcFitTextVal))
+            {
+                var tcPr = newCell.GetFirstChild<TableCellProperties>()
+                    ?? newCell.PrependChild(new TableCellProperties());
+                if (tcPr.GetFirstChild<TableCellFitText>() == null)
+                    tcPr.AppendChild(new TableCellFitText());
+            }
+        }
         if (properties.TryGetValue("hideMark", out var hideMarkVal)
             || properties.TryGetValue("hidemark", out hideMarkVal))
         {

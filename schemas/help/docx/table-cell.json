@@ -310,6 +310,36 @@
       "readback": "true | (absent)",
       "enforcement": "report"
     },
+    "hideMark": {
+      "type": "bool",
+      "description": "w:hideMark — ignore the cell's end-of-cell mark when measuring the row height for autofit (the cell appears empty even though it holds a paragraph mark).",
+      "aliases": [
+        "hidemark"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop hideMark=true"
+      ],
+      "readback": "true | (absent)",
+      "enforcement": "report"
+    },
+    "tcFitText": {
+      "type": "bool",
+      "description": "w:tcFitText — fit the cell's text to its width (the tcPr-level toggle). Distinct from the run-level 'fitText' property, which squeezes each run via w:fitText.",
+      "aliases": [
+        "tcfittext"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop tcFitText=true"
+      ],
+      "readback": "true | (absent)",
+      "enforcement": "report"
+    },
     "padding.top": {
       "type": "number",
       "description": "top cell margin in twips (integer; 1 twip = 1/20 pt, e.g. 100 = 5pt). Raw integer only — no unit suffix.",

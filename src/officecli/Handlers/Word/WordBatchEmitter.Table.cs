@@ -102,6 +102,15 @@ public static partial class WordBatchEmitter
         // pct) — those round-trip through the existing `width=` key.
         bool sourceHadNoTblW = tableNode.Format.TryGetValue("_noTblW", out var noTblW)
             && noTblW is bool b && b;
+        // BUG-DUMP-AUTOFITW: a table is autofit unless layout is explicitly
+        // "fixed" (OOXML default, and what ReadTableProps emits when the
+        // <w:tblLayout> element is absent). EmitTable passes this to
+        // ExtractCellOnlyProps so tcW-less cells in an autofit table keep
+        // their tcW-less state (no fabricated width) — only fixed-layout
+        // tables and cells with real source tcW emit a width.
+        bool tableIsAutofit = !(tableNode.Format.TryGetValue("layout", out var layoutObj)
+            && layoutObj is string layoutStr
+            && layoutStr.Equals("fixed", StringComparison.OrdinalIgnoreCase));
         if (sourceHadNoTblW && !tableProps.ContainsKey("width"))
             tableProps["skipTblW"] = "true";
         // Drop the internal-only markers from emitted props (BatchItem.Props
@@ -332,7 +341,7 @@ public static partial class WordBatchEmitter
                 // to avoid double-application.
                 // tcPrChange D1 round-trip: fold attribution into the
                 // cell's prop-set step (mirrors the row branch above).
-                var cellProps = ExtractCellOnlyProps(cellNode.Format);
+                var cellProps = ExtractCellOnlyProps(cellNode.Format, tableIsAutofit);
                 bool cellHadRevision = FoldRevisionIntoProps(cellNode.Format, "tcPrChange", cellProps);
                 if (cellProps.Count > 0 || cellHadRevision)
                 {
@@ -520,13 +529,28 @@ public static partial class WordBatchEmitter
     {
         "fill", "width", "valign", "vmerge", "hmerge", "colspan", "nowrap", "textDirection",
         "cnfStyle",
+        // BUG-DUMP-CELLTAIL: forward the long-tail tcPr toggles so dump→batch
+        // round-trips them (Add.Table.cs / Set.cs apply both).
+        "hideMark", "tcFitText",
     };
 
-    private static Dictionary<string, string> ExtractCellOnlyProps(Dictionary<string, object?> raw)
+    private static Dictionary<string, string> ExtractCellOnlyProps(
+        Dictionary<string, object?> raw, bool tableIsAutofit)
     {
+        // BUG-DUMP-AUTOFITW: drop the fabricated width when the table is
+        // autofit AND this cell's width was derived from tblGrid (no source
+        // <w:tcW>). Re-emitting a synthetic tcW over-constrains Word's column
+        // solver and shifts boundaries. Fixed-layout tables and cells with a
+        // real source tcW (no _widthDerived marker) are unchanged — they keep
+        // their width + the existing skipGridSync handling.
+        bool widthDerived = raw.TryGetValue("_widthDerived", out var wd)
+            && wd is bool wdb && wdb;
+        bool suppressWidth = tableIsAutofit && widthDerived;
         var filtered = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, val) in raw)
         {
+            if (suppressWidth && key.Equals("width", StringComparison.OrdinalIgnoreCase))
+                continue;
             if (CellOnlyKeys.Contains(key) ||
                 key.StartsWith("border.", StringComparison.OrdinalIgnoreCase) ||
                 key.StartsWith("padding.", StringComparison.OrdinalIgnoreCase) ||

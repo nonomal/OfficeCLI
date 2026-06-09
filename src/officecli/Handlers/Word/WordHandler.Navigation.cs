@@ -4324,6 +4324,16 @@ public partial class WordHandler
         if (element is BookmarkStart bkStart)
             return BookmarkStartToNode(bkStart, node);
 
+        if (element is PermStart permStartEl)
+            return PermStartToNode(permStartEl, node);
+
+        if (element is PermEnd permEndEl)
+        {
+            node.Type = "permEnd";
+            if (permEndEl.Id?.Value != null) node.Format["id"] = permEndEl.Id.Value.ToString();
+            return node;
+        }
+
         if (element is Footnote fnEl)
             return FootnoteToNode(fnEl, node, path, depth);
 
@@ -4602,6 +4612,15 @@ public partial class WordHandler
             var cnfRead = tcPr.GetFirstChild<ConditionalFormatStyle>();
             if (cnfRead?.Val?.Value is string cnfVal && !string.IsNullOrEmpty(cnfVal))
                 node.Format["cnfStyle"] = cnfVal;
+            // BUG-DUMP-CELLTAIL: the cell reader is a curated list with no
+            // FillUnknownChildProps long-tail (unlike run rPr / paragraph pPr),
+            // so any tcPr child outside the curated set was silently dropped on
+            // dump→batch. Surface the two common toggles explicitly (mirrors the
+            // row-level cantSplit/tblHeader reads); Add/Set already support both.
+            if (tcPr.GetFirstChild<HideMark>() != null)
+                node.Format["hideMark"] = true;
+            if (tcPr.GetFirstChild<TableCellFitText>() != null)
+                node.Format["tcFitText"] = true;
         }
         // BUG-R4-05: when no per-cell tcW is set, synthesize width from the
         // parent table's tblGrid/gridCol so Get always exposes a unit-qualified
@@ -4627,7 +4646,18 @@ public partial class WordHandler
                             total += gv;
                     }
                     if (total > 0)
+                    {
                         node.Format["width"] = total + "dxa";
+                        // BUG-DUMP-AUTOFITW: flag this width as derived from
+                        // tblGrid (the cell had NO source <w:tcW>). EmitTable
+                        // suppresses the fabricated width for AUTOFIT tables so
+                        // Word's column solver keeps inheriting from tblGrid
+                        // instead of being over-constrained by a synthetic tcW
+                        // (which shifts boundaries, worst with gridSpan/vMerge).
+                        // Internal-only marker (underscore-prefixed); the plain
+                        // `get` width readback is unchanged.
+                        node.Format["_widthDerived"] = true;
+                    }
                 }
             }
         }

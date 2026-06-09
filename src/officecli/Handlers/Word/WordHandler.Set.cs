@@ -706,7 +706,16 @@ public partial class WordHandler
         "dashdotstroked" => BorderValues.DashDotStroked,
         "threedembed" or "3demboss" => BorderValues.ThreeDEmboss,
         "threedengrave" or "3dengrave" => BorderValues.ThreeDEngrave,
-        _ => throw new ArgumentException($"Invalid border style: '{style}'. Valid values: single, thick, double, dotted, dashed, none, triple, wave, outset, inset, etc.")
+        // BUG-DUMP-ARTBORDER: ST_Border has a large ART family (hearts, apples,
+        // balloons3Colors, …) with no named SDK fields. Mapping only line-style
+        // tokens above and throwing here dropped art page borders on dump→batch
+        // AND collaterally aborted the whole atomic `set /` command — taking the
+        // valid `background` prop down with it. Be lenient (project input
+        // philosophy): pass any unknown token through the string-backed
+        // BorderValues ctor. Valid ST_Border values round-trip; genuinely bad
+        // tokens produce XML that Word ignores / validate flags — same outcome
+        // as other lenient parses, never a hard reject.
+        _ => new BorderValues(style)
     };
 
     // CONSISTENCY(border-empty-segment): space is uint? rather than uint so the

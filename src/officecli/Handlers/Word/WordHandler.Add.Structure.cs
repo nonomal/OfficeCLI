@@ -381,9 +381,13 @@ public partial class WordHandler
 
         var mainPart2 = _doc.MainDocumentPart!;
         var fnPart = mainPart2.FootnotesPart ?? mainPart2.AddNewPart<FootnotesPart>();
+        // Word emits the mandatory separator notes carrying the separator
+        // glyph marks (<w:separator/> / <w:continuationSeparator/>), not empty
+        // text runs. Synthesizing them as the spec-defined marks keeps a
+        // dump->batch round-trip of a real document structurally faithful.
         fnPart.Footnotes ??= new Footnotes(
-            new Footnote(new Paragraph(new Run(new Text("")))) { Type = FootnoteEndnoteValues.Separator, Id = -1 },
-            new Footnote(new Paragraph(new Run(new Text("")))) { Type = FootnoteEndnoteValues.ContinuationSeparator, Id = 0 }
+            new Footnote(new Paragraph(new Run(new SeparatorMark()))) { Type = FootnoteEndnoteValues.Separator, Id = -1 },
+            new Footnote(new Paragraph(new Run(new ContinuationSeparatorMark()))) { Type = FootnoteEndnoteValues.ContinuationSeparator, Id = 0 }
         );
 
         var fnId = (fnPart.Footnotes.Elements<Footnote>()
@@ -434,9 +438,11 @@ public partial class WordHandler
 
         var mainPart3 = _doc.MainDocumentPart!;
         var enPart = mainPart3.EndnotesPart ?? mainPart3.AddNewPart<EndnotesPart>();
+        // Mirror AddFootnote: separator notes carry the separator glyph marks
+        // (<w:separator/> / <w:continuationSeparator/>), not empty text runs.
         enPart.Endnotes ??= new Endnotes(
-            new Endnote(new Paragraph(new Run(new Text("")))) { Type = FootnoteEndnoteValues.Separator, Id = -1 },
-            new Endnote(new Paragraph(new Run(new Text("")))) { Type = FootnoteEndnoteValues.ContinuationSeparator, Id = 0 }
+            new Endnote(new Paragraph(new Run(new SeparatorMark()))) { Type = FootnoteEndnoteValues.Separator, Id = -1 },
+            new Endnote(new Paragraph(new Run(new ContinuationSeparatorMark()))) { Type = FootnoteEndnoteValues.ContinuationSeparator, Id = 0 }
         );
 
         var enId = (enPart.Endnotes.Elements<Endnote>()

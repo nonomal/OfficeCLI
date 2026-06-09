@@ -1439,6 +1439,13 @@ public partial class WordHandler
         node.Type = "bookmark";
         node.Format["name"] = bkStart.Name?.Value ?? "";
         node.Format["id"] = bkStart.Id?.Value ?? "";
+        // BUG-DUMP-BMSPAN: flag a content-wrapping bookmark so the emitter
+        // splits it into a positioned start (`open=true`) + a separate
+        // `end=true` op after the wrapped runs, preserving the range. Holds
+        // for the BookmarkEnd both inside the same paragraph and as a body-
+        // direct sibling (POI/Word emit the End after </w:p>).
+        if (IsContentSpanBookmark(bkStart))
+            node.Format["_spanOpen"] = true;
         // BUG-DUMP10-04: for cross-paragraph bookmark spans, walk
         // forward over sibling paragraphs in the same body and
         // surface the BookmarkEnd's paragraph offset (0-based).
@@ -2956,6 +2963,21 @@ public partial class WordHandler
                     foreach (var inner in cxBlock.ChildElements)
                         WalkBodyChild(inner);
                 }
+                else if (child is BookmarkEnd bodyBkEnd)
+                {
+                    // BUG-DUMP-BMSPAN: a body-direct BookmarkEnd (POI/Word emit
+                    // the End after </w:p> for a paragraph-anchored bookmark).
+                    // For a content-wrapping bookmark, surface it as a named
+                    // span-end node so EmitBody replays a positioned
+                    // `add bookmark name=X end=true` after the wrapped paragraph,
+                    // preserving the range. Empty bookmarks need no end node —
+                    // the combined start op already recreates the pair.
+                    var beNode = ElementToNode(child, $"{path}/bookmarkEnd[1]", depth - 1);
+                    var beName = ResolveBookmarkEndName(bodyBkEnd);
+                    if (IsContentSpanBookmark(bodyBkEnd) && !string.IsNullOrEmpty(beName))
+                        beNode.Format["name"] = beName!;
+                    node.Children.Add(beNode);
+                }
                 else
                 {
                     // Non-structural (sectPr etc.) — keep localName naming
@@ -3704,10 +3726,24 @@ public partial class WordHandler
             // node.Children). The trailing standalone bookmark loop below
             // is now skipped when this branch surfaces them.
             var paraBookmarks = para.Elements<BookmarkStart>().ToList();
+            // BUG-DUMP-BMSPAN: a bookmark that WRAPS content (runs/equations
+            // between BookmarkStart and the matching BookmarkEnd) must round-
+            // trip with the End placed AFTER the wrapped content, not adjacent
+            // to the Start. Surface the matching BookmarkEnd as its own DOM-
+            // ordered "bookmarkEnd" node so the emitter can replay a separate,
+            // positioned `add bookmark ... end=true` op (mirrors the existing
+            // two-marker model; the End may even live in a downstream
+            // paragraph — cross-paragraph spans surface their End there).
+            // Empty/zero-length bookmarks (End immediately follows Start) keep
+            // the single combined `add bookmark` op so they stay empty.
+            var paraBookmarkEnds = para.Elements<BookmarkEnd>()
+                .Where(be => be.Id?.Value != null && IsContentSpanBookmark(be))
+                .ToList();
             var ordered = runs.Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "run", el: (OpenXmlElement)r))
                 .Concat(inlineEqsAll.Select(e => (pos: descendantPos.TryGetValue(e, out var p) ? p : int.MaxValue, kind: "eq", el: (OpenXmlElement)e)))
                 .Concat(bareFieldUnknowns.Select(u => (pos: descendantPos.TryGetValue(u, out var p) ? p : int.MaxValue, kind: u.LocalName == "fldChar" ? "fieldChar" : "instrText", el: (OpenXmlElement)u)))
                 .Concat(paraBookmarks.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bookmark", el: (OpenXmlElement)b)))
+                .Concat(paraBookmarkEnds.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bookmarkEnd", el: (OpenXmlElement)b)))
                 .OrderBy(t => t.pos)
                 .ToList();
             int bareFieldIdx = 0;
@@ -3764,7 +3800,25 @@ public partial class WordHandler
                     // Path index counts bookmarks among themselves to
                     // stay 1-based, mirroring the legacy bmIdx counter.
                     int bmPathIdx = paraBookmarks.IndexOf((BookmarkStart)entry.el);
+                    // _spanOpen is set inside BookmarkStartToNode (ElementToNode).
                     node.Children.Add(ElementToNode(entry.el, $"{path}/bookmark[{bmPathIdx + 1}]", depth - 1));
+                }
+                else if (entry.kind == "bookmarkEnd")
+                {
+                    // BUG-DUMP-BMSPAN: standalone BookmarkEnd marker for a
+                    // content-wrapping bookmark. Carries only the matching
+                    // bookmark name so the emitter can replay a positioned
+                    // `add bookmark name=X end=true` after the wrapped runs.
+                    var be = (BookmarkEnd)entry.el;
+                    var beNode = new DocumentNode
+                    {
+                        Type = "bookmarkEnd",
+                        Path = $"{path}/bookmarkEnd[{be.Id?.Value}]",
+                    };
+                    var matchName = ResolveBookmarkEndName(be);
+                    if (!string.IsNullOrEmpty(matchName))
+                        beNode.Format["name"] = matchName!;
+                    node.Children.Add(beNode);
                 }
                 else
                 {

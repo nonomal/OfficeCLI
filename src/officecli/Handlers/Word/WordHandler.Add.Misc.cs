@@ -172,6 +172,35 @@ public partial class WordHandler
         if (string.IsNullOrEmpty(bkName))
             throw new ArgumentException("'name' property is required for bookmark");
 
+        // BUG-DUMP-BMSPAN: `end=true` places ONLY a <w:bookmarkEnd> closing an
+        // already-open <w:bookmarkStart> of the same name (the start was added
+        // earlier with `open=true`). This is the second half of the two-marker
+        // round-trip for a content-wrapping bookmark; replaying it AFTER the
+        // wrapped runs keeps them inside the range. Match the most-recent open
+        // start (no BookmarkEnd with its id yet) so nested same-name bookmarks
+        // close LIFO, and insert the End at the requested position so it lands
+        // after the wrapped content in document order.
+        if (IsTruthy(properties.GetValueOrDefault("end", "")))
+        {
+            var openStart = body.Descendants<BookmarkStart>()
+                .Where(bs => string.Equals(bs.Name?.Value, bkName, StringComparison.Ordinal)
+                    && bs.Id?.Value != null
+                    && !body.Descendants<BookmarkEnd>().Any(be => be.Id?.Value == bs.Id!.Value))
+                .LastOrDefault();
+            if (openStart == null)
+                throw new ArgumentException(
+                    $"bookmark end for '{bkName}' has no matching open bookmarkStart " +
+                    "(add the start with open=true first)");
+            var endOnly = new BookmarkEnd { Id = openStart.Id!.Value };
+            if (parent is Paragraph endPara2)
+                InsertIntoParagraph(endPara2, new OpenXmlElement[] { endOnly }, index);
+            else
+                InsertAtIndexOrAppend(parent, endOnly, index);
+            return $"{parentPath}/bookmarkEnd[@id={openStart.Id!.Value}]";
+        }
+
+        bool spanOpen = IsTruthy(properties.GetValueOrDefault("open", ""));
+
         if (bkName.Any(c => c == '/' || c == '[' || c == ']'))
             throw new ArgumentException(
                 $"Bookmark name '{bkName}' contains path-special characters " +
@@ -243,7 +272,19 @@ public partial class WordHandler
         // `{parentPath}/bookmarkStart[...]` fails Get (CONSISTENCY(add-get-symmetry)).
         Paragraph? wrappingPara = null;
 
-        if (properties.TryGetValue("text", out var bkText))
+        if (spanOpen)
+        {
+            // BUG-DUMP-BMSPAN: content-wrapping bookmark — place ONLY the
+            // <w:bookmarkStart> here; the matching <w:bookmarkEnd> arrives via
+            // a later `end=true` op positioned after the wrapped runs. Without
+            // this branch the fallback below pairs Start+End adjacently and the
+            // range collapses to zero length the moment the runs replay after.
+            if (parent is Paragraph openPara)
+                InsertIntoParagraph(openPara, new OpenXmlElement[] { bookmarkStart }, index);
+            else
+                InsertAtIndexOrAppend(parent, bookmarkStart, index);
+        }
+        else if (properties.TryGetValue("text", out var bkText))
         {
             if (hasAnchor && bkPara != null)
             {

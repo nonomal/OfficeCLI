@@ -283,6 +283,62 @@ public partial class WordHandler
         return hasChinese && hasEnglish && hasChineseChars;
     }
 
+    // BUG-DUMP-BMSPAN: a bookmark "wraps content" when its range
+    // (BookmarkStart … matching BookmarkEnd, same w:id) contains at least one
+    // content element (Run / equation / field) — possibly spanning paragraphs.
+    // Such bookmarks must round-trip as two positioned markers (start before
+    // the content, end after), or the range collapses to zero length and every
+    // REF/PAGEREF/TOC anchor pointing at it resolves to nothing. A zero-length
+    // bookmark (End is the immediate document-order successor of Start) is NOT
+    // a span and keeps the single combined `add bookmark` op so it stays empty.
+    private static bool IsContentSpanBookmark(BookmarkStart bkStart)
+    {
+        var id = bkStart.Id?.Value;
+        if (string.IsNullOrEmpty(id)) return false;
+        var root = bkStart.Ancestors<Body>().FirstOrDefault() as OpenXmlElement
+            ?? bkStart.Ancestors<TableCell>().FirstOrDefault() as OpenXmlElement
+            ?? bkStart.Ancestors().LastOrDefault();
+        if (root == null) return false;
+        bool started = false;
+        foreach (var el in root.Descendants())
+        {
+            if (!started)
+            {
+                if (ReferenceEquals(el, bkStart)) started = true;
+                continue;
+            }
+            if (el is BookmarkEnd be && be.Id?.Value == id) return false; // adjacent → empty
+            // Content between Start and End → this is a wrapping span.
+            if (el is Run || el is M.OfficeMath || el is M.Paragraph
+                || el is SimpleField || el is Hyperlink)
+                return true;
+        }
+        return false;
+    }
+
+    // Overload: classify by the BookmarkEnd half (resolve its paired Start).
+    private bool IsContentSpanBookmark(BookmarkEnd bkEnd)
+    {
+        var id = bkEnd.Id?.Value;
+        if (string.IsNullOrEmpty(id)) return false;
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        var start = body?.Descendants<BookmarkStart>()
+            .FirstOrDefault(bs => bs.Id?.Value == id);
+        return start != null && IsContentSpanBookmark(start);
+    }
+
+    // Resolve the w:name of the BookmarkStart paired with this BookmarkEnd
+    // (matched by w:id) so a standalone end marker can be addressed by name.
+    private string? ResolveBookmarkEndName(BookmarkEnd bkEnd)
+    {
+        var id = bkEnd.Id?.Value;
+        if (string.IsNullOrEmpty(id)) return null;
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        var start = body?.Descendants<BookmarkStart>()
+            .FirstOrDefault(bs => bs.Id?.Value == id);
+        return start?.Name?.Value;
+    }
+
     private static string GetBookmarkText(BookmarkStart bkStart)
     {
         var bkId = bkStart.Id?.Value;

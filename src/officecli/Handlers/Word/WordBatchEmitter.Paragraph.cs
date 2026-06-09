@@ -168,6 +168,7 @@ public static partial class WordBatchEmitter
                 || c.Type == "equation"
                 || c.Type == "tab"
                 || c.Type == "bookmark"
+                || c.Type == "bookmarkEnd"
                 // R10-bug1: include ole children so TryEmitOleRun can fire
                 // a warning instead of letting them be silently filtered
                 // out of the run list (full round-trip is a backlog item).
@@ -631,9 +632,35 @@ public static partial class WordBatchEmitter
     {
         // BUG-DUMP25-01: bookmark child emitted in DOM order so a
         // BookmarkStart between runs survives round-trip at its original
-        // intra-paragraph offset. Deferred bookmarks (endPara=true) are
-        // pushed onto ctx.DeferredBookmarks so the End sibling can land in
-        // a downstream paragraph.
+        // intra-paragraph offset.
+        //
+        // BUG-DUMP-BMSPAN: a content-WRAPPING bookmark (`_spanOpen=true`, set
+        // by Navigation when the range holds runs/equations/fields) is split
+        // into TWO positioned ops: an `open=true` start here (places only
+        // <w:bookmarkStart>) and a matching `end=true` op emitted at the
+        // BookmarkEnd's own DOM position (a separate `bookmarkEnd` child, even
+        // a downstream paragraph for cross-paragraph spans). Document-order
+        // replay then keeps the wrapped content INSIDE the range so
+        // REF/PAGEREF/TOC anchors survive. A zero-length bookmark (no
+        // `_spanOpen`) keeps the single combined op so it stays empty.
+        if (run.Type == "bookmarkEnd")
+        {
+            var endProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (run.Format.TryGetValue("name", out var enm) && enm != null
+                && enm.ToString() is { Length: > 0 } ens)
+                endProps["name"] = ens;
+            else
+                return true; // unnamed end marker — start emit recreates pair
+            endProps["end"] = "true";
+            items.Add(new BatchItem
+            {
+                Command = "add",
+                Parent = paraTargetPath,
+                Type = "bookmark",
+                Props = endProps
+            });
+            return true;
+        }
         if (run.Type != "bookmark") return false;
         var bmProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (run.Format.TryGetValue("name", out var bmName) && bmName != null)
@@ -642,27 +669,15 @@ public static partial class WordBatchEmitter
             if (!string.IsNullOrEmpty(s)) bmProps["name"] = s;
         }
         if (bmProps.Count == 0) return true; // skip unnamed/anonymous bookmarks
-        bool deferred = false;
-        if (run.Format.TryGetValue("endPara", out var bmEnd) && bmEnd != null)
-        {
-            var s = bmEnd.ToString();
-            if (!string.IsNullOrEmpty(s) && s != "0")
-            {
-                bmProps["endPara"] = s;
-                deferred = true;
-            }
-        }
-        var bmItem = new BatchItem
+        if (run.Format.TryGetValue("_spanOpen", out var sp) && sp is bool bsp && bsp)
+            bmProps["open"] = "true";
+        items.Add(new BatchItem
         {
             Command = "add",
             Parent = paraTargetPath,
             Type = "bookmark",
             Props = bmProps
-        };
-        if (deferred && ctx != null)
-            ctx.DeferredBookmarks.Add(bmItem);
-        else
-            items.Add(bmItem);
+        });
         return true;
     }
 

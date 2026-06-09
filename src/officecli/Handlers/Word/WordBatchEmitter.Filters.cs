@@ -26,6 +26,10 @@ public static partial class WordBatchEmitter
         // propagated to synthetic field nodes) by Navigation. Consumed by the
         // field-emit branch only; never replayed as a Set/Add property.
         "_hyperlinkParent",
+        // BUG-DUMP-BMSPAN: internal flag set by BookmarkStartToNode marking a
+        // content-wrapping bookmark. Consumed by TryEmitBookmarkRun (translated
+        // to open=true) / EmitBody only; never replayed verbatim as a property.
+        "_spanOpen",
         // BUG-R12A(BUG1): synthetic flag set by CoalesceHyperlinkRuns to route a
         // multi-run / formatted hyperlink group through structured emit. Consumed
         // by EmitPlainOrHyperlinkRun only; never replayed as an Add/Set property.

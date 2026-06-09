@@ -591,9 +591,17 @@ public static partial class WordBatchEmitter
                             bmProps["name"] = nm.ToString()!;
                         else
                             break; // BookmarkStart with no name is unusable
-                        // Preserve a cross-paragraph span (End sits N paragraphs
-                        // after Start) so the round-tripped anchor keeps its range.
-                        if (child.Format.TryGetValue("endPara", out var ep)
+                        // BUG-DUMP-BMSPAN: a content-wrapping bookmark splits
+                        // into a positioned `open=true` start here and a
+                        // separate `end=true` op at the matching bookmarkEnd's
+                        // own DOM position (handled by the `bookmarkEnd` case
+                        // below). This supersedes the old `endPara` offset for
+                        // body-direct bookmarks: the End is replayed at its real
+                        // position rather than relocated by paragraph count.
+                        if (child.Format.TryGetValue("_spanOpen", out var so)
+                            && so is bool bso && bso)
+                            bmProps["open"] = "true";
+                        else if (child.Format.TryGetValue("endPara", out var ep)
                             && ep != null && ep.ToString() is { Length: > 0 } eps && eps != "0")
                             bmProps["endPara"] = eps;
                         items.Add(new BatchItem
@@ -606,9 +614,28 @@ public static partial class WordBatchEmitter
                     }
                     break;
                 case "bookmarkEnd":
-                    // Paired with the body-level bookmarkStart emit above. The
-                    // matching `add bookmark` re-creates start+end together so
-                    // the standalone end node needs no emit.
+                    // BUG-DUMP-BMSPAN: a NAMED body-direct bookmarkEnd closes a
+                    // content-wrapping bookmark opened with `open=true`. Replay a
+                    // positioned `end=true` op here so the End lands after the
+                    // wrapped paragraph in document order, keeping the range
+                    // non-empty (REF/PAGEREF/TOC anchors survive). An unnamed end
+                    // node belongs to an empty bookmark whose combined start op
+                    // already recreated the pair — emit nothing.
+                    if (child.Format.TryGetValue("name", out var beNm)
+                        && beNm != null && beNm.ToString() is { Length: > 0 } beNs)
+                    {
+                        items.Add(new BatchItem
+                        {
+                            Command = "add",
+                            Parent = "/body",
+                            Type = "bookmark",
+                            Props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["name"] = beNs,
+                                ["end"] = "true",
+                            }
+                        });
+                    }
                     break;
                 case "equation":
                     // BUG-DUMP13-03: a bare <m:oMathPara> direct child of

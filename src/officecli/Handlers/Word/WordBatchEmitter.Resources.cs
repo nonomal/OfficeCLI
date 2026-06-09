@@ -885,10 +885,11 @@ public static partial class WordBatchEmitter
 
             // Remaining runs of the first paragraph (run [1] already rode on
             // `add comment`). p[1] always exists after `add comment`.
-            for (int ri = 1; ri < firstParaRuns.Count; ri++)
-            {
-                EmitCommentRun(firstParaRuns[ri], $"{targetCommentPath}/p[1]", items);
-            }
+            // BUG-R13A: coalesce hyperlink runs so a hyperlink in the comment
+            // body round-trips as a typed `add hyperlink` (was dropped as a
+            // flat `add r` with unsupported url/isHyperlink props).
+            EmitContainerBodyRuns(firstParaRuns.Skip(1).ToList(),
+                $"{targetCommentPath}/p[1]", items);
 
             // Additional paragraphs (paragraph [1] is the `add comment` body).
             for (int pi = 1; pi < bodyParas.Count; pi++)
@@ -907,10 +908,7 @@ public static partial class WordBatchEmitter
                 // AddParagraph with no `text` produces an empty paragraph; emit
                 // each run so per-run formatting survives. The new paragraph is
                 // the (pi+1)-th paragraph of the comment.
-                foreach (var run in runs)
-                {
-                    EmitCommentRun(run, $"{targetCommentPath}/p[{pi + 1}]", items);
-                }
+                EmitContainerBodyRuns(runs, $"{targetCommentPath}/p[{pi + 1}]", items);
             }
         }
     }
@@ -931,6 +929,22 @@ public static partial class WordBatchEmitter
     // bodies don't carry those in the supported round-trip).
     private static void EmitCommentRun(DocumentNode run, string paraTargetPath, List<BatchItem> items)
     {
+        // BUG-R13A: a run flattened out of a <w:hyperlink> wrapper carries
+        // url/anchor/isHyperlink (and _hyperlinkParent) Format keys that
+        // `add r` does not understand — emitting it as a flat `add r` silently
+        // dropped the hyperlink wrapper + URL on replay (only the link text
+        // survived as a plain run). Route such runs through the body walker's
+        // EmitPlainOrHyperlinkRun, which emits a proper typed `add hyperlink`
+        // op (rebuilding the <w:hyperlink> + rel relationship). Plain runs fall
+        // through to the flat `add r` path unchanged. Multi-run hyperlinks are
+        // coalesced upstream in EmitContainerBodyRuns; this single-run guard
+        // covers the in-loop callers that emit one run at a time.
+        if (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")
+            || run.Format.ContainsKey("isHyperlink"))
+        {
+            EmitPlainOrHyperlinkRun(run, paraTargetPath, items);
+            return;
+        }
         var rProps = FilterEmittableProps(run.Format);
         if (!string.IsNullOrEmpty(run.Text))
             rProps["text"] = run.Text!;
@@ -941,6 +955,19 @@ public static partial class WordBatchEmitter
             Type = "r",
             Props = rProps.Count > 0 ? rProps : null
         });
+    }
+
+    // BUG-R13A: emit a sequence of container-body (comment / footnote / endnote)
+    // runs, coalescing consecutive runs that share the same <w:hyperlink>
+    // wrapper into one structured `add hyperlink` (+ per-run `add r`) so a
+    // multi-run formatted hyperlink survives the round-trip with every run's
+    // rPr intact. Reuses the body-paragraph walker's CoalesceHyperlinkRuns /
+    // EmitPlainOrHyperlinkRun machinery (single source of truth for hyperlink
+    // emit). Non-hyperlink runs pass through EmitCommentRun unchanged.
+    private static void EmitContainerBodyRuns(List<DocumentNode> runs, string paraTargetPath, List<BatchItem> items)
+    {
+        foreach (var run in CoalesceHyperlinkRuns(runs))
+            EmitCommentRun(run, paraTargetPath, items);
     }
 
     // BUG-R9A(BUG1): fold a run's rPr format keys into the `add comment` prop
@@ -1056,8 +1083,11 @@ public static partial class WordBatchEmitter
         // run + p[1] already exist after the `add <kind>` above.
         string targetNotePath = $"/{kind}[{targetNoteIdx}]";
 
-        for (int ri = 1; ri < firstParaRuns.Count; ri++)
-            EmitCommentRun(firstParaRuns[ri], $"{targetNotePath}/p[1]", items);
+        // BUG-R13A: coalesce hyperlink runs so a hyperlink inside a footnote/
+        // endnote body round-trips as a typed `add hyperlink` (was dropped as a
+        // flat `add r` carrying unsupported url/isHyperlink props).
+        EmitContainerBodyRuns(firstParaRuns.Skip(1).ToList(),
+            $"{targetNotePath}/p[1]", items);
 
         for (int pi = 1; pi < bodyParas.Count; pi++)
         {
@@ -1072,8 +1102,7 @@ public static partial class WordBatchEmitter
                 Props = paraProps.Count > 0 ? paraProps : null
             });
             var runs = para.Children.Where(c => IsRoundTrippableNoteRun(word, c)).ToList();
-            foreach (var run in runs)
-                EmitCommentRun(run, $"{targetNotePath}/p[{pi + 1}]", items);
+            EmitContainerBodyRuns(runs, $"{targetNotePath}/p[{pi + 1}]", items);
         }
     }
 

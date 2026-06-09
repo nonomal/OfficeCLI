@@ -614,6 +614,24 @@ public partial class WordHandler
                     TrySetDocDefaults("docdefaults.fontsize", value);
                     break;
 
+                // Dump→batch fidelity: a source body sectPr that OMITS <w:pgSz>
+                // (deferring to Word's application default — US Letter) must NOT
+                // inherit the blank template's stamped A4 pgSz on rebuild. The
+                // emitter signals the absence with pageSize="none"; remove the
+                // element so the rebuilt sectPr also defers to the app default.
+                // ("none" is the established remove sentinel on sectPr children —
+                // see pageStart/lineNumbers/valign/pgBorders in
+                // WordHandler.Set.SectionLayout.cs.) Independent of pageMargin so
+                // a source with one but not the other round-trips correctly.
+                case "pagesize":
+                    if (string.Equals(value, "none", StringComparison.OrdinalIgnoreCase))
+                        BodySectionPropertiesForRemove()?.RemoveAllChildren<PageSize>();
+                    break;
+                case "pagemargin":
+                    if (string.Equals(value, "none", StringComparison.OrdinalIgnoreCase))
+                        BodySectionPropertiesForRemove()?.RemoveAllChildren<PageMargin>();
+                    break;
+
                 case "pagewidth" or "width":
                 {
                     var twW = ParseTwips(value);
@@ -753,6 +771,33 @@ public partial class WordHandler
             throw;
         }
     }
+
+    /// <summary>
+    /// Reports whether the body-level sectPr explicitly carries a
+    /// &lt;w:pgSz&gt; / &lt;w:pgMar&gt;. Used by the batch emitter to decide
+    /// whether to emit a `pageSize=none` / `pageMargin=none` remove signal:
+    /// a source that OMITS these defers to Word's application default
+    /// (US Letter), and the rebuilt blank's stamped A4 must be stripped so
+    /// both render identically. Reports independently per element.
+    /// </summary>
+    internal (bool hasPageSize, bool hasPageMargin) BodySectionPageGeometryPresence()
+    {
+        var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+        if (sectPr == null) return (false, false);
+        return (sectPr.GetFirstChild<PageSize>() != null,
+                sectPr.GetFirstChild<PageMargin>() != null);
+    }
+
+    /// <summary>
+    /// Returns the existing body-level sectPr WITHOUT auto-stamping a
+    /// PageSize/PageMargin. Used only by the pageSize/pageMargin remove
+    /// sentinels: EnsureSectionProperties() re-stamps a default PageSize as a
+    /// side effect, which would resurrect the very element a sibling
+    /// `pageSize=none` had just removed (order-dependent corruption when both
+    /// removes are in one `set /` call). Null when no sectPr exists yet.
+    /// </summary>
+    private SectionProperties? BodySectionPropertiesForRemove()
+        => _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
 
     private SectionProperties EnsureSectionProperties()
     {

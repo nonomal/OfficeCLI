@@ -1423,6 +1423,23 @@ public static partial class WordBatchEmitter
         // "source omits a slot the blank stamped" pollution the old
         // per-property clears (bare-font rewrite, the BUG-X6-05 font.latin=""
         // clear) were patching one slot at a time.
+        //
+        // Page-geometry absence: when the source body sectPr OMITS <w:pgSz>
+        // (and/or <w:pgMar>), Get returns no pageWidth/pageHeight/marginTop/…
+        // keys, so nothing above stamps them — but the rebuild target is a
+        // blank doc whose sectPr already carries the template's A4 pgSz +
+        // default pgMar. Left untouched, the rebuild renders A4 while real
+        // Word renders the pgSz-less source as its application default (US
+        // Letter) → whole-document re-wrap. Emit an explicit remove signal
+        // (`pageSize=none` / `pageMargin=none`; "none" is the established
+        // sectPr-child remove sentinel) so the rebuilt sectPr also defers to
+        // the app default. Independent per element — a source with pgSz but
+        // no pgMar (or vice versa) is handled correctly. When the source HAS
+        // the element the normal pageWidth/marginTop emit above carries it,
+        // and no remove signal is emitted.
+        var (hasPgSz, hasPgMar) = word.BodySectionPageGeometryPresence();
+        if (!hasPgSz) props["pageSize"] = "none";
+        if (!hasPgMar) props["pageMargin"] = "none";
         if (props.Count == 0) return;
         items.Add(new BatchItem
         {

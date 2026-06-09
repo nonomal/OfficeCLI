@@ -17,8 +17,13 @@ public partial class WordHandler
 {
     // ==================== Table Rendering ====================
 
-    private void RenderTableHtml(StringBuilder sb, Table table, string? dataPath = null)
+    private void RenderTableHtml(StringBuilder sb, Table table, string? dataPath = null, int depth = 0)
     {
+        // CONSISTENCY(dos-hardening): nested-table recursion has no structural
+        // bound; a crafted deeply-nested table would overflow the stack
+        // (uncatchable crash) during `view html`. See DocumentLimits.
+        DocumentLimits.EnsureDepth(depth);
+
         // Check table-level borders to determine if this is a borderless layout table
         // First try direct table borders, then fall back to table style borders
         var tblPr = table.GetFirstChild<TableProperties>();
@@ -347,7 +352,7 @@ public partial class WordHandler
                     else if (child is Table nestedTable)
                     {
                         CloseCellList();
-                        RenderTableHtml(sb, nestedTable);
+                        RenderTableHtml(sb, nestedTable, depth: depth + 1);
                     }
                 }
                 CloseCellList();

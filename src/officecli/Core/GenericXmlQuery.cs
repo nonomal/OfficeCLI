@@ -43,7 +43,7 @@ internal static class GenericXmlQuery
         }
 
         Traverse(root, localName, nsUri, attributes, containsText, "", results,
-            new Dictionary<string, int>());
+            new Dictionary<string, int>(), 0);
 
         return results;
     }
@@ -51,8 +51,13 @@ internal static class GenericXmlQuery
     private static void Traverse(OpenXmlElement element, string targetLocalName,
         string? targetNsUri, Dictionary<string, string> attributes, string? containsText,
         string parentPath, List<DocumentNode> results,
-        Dictionary<string, int> parentCounters)
+        Dictionary<string, int> parentCounters, int depth)
     {
+        // CONSISTENCY(dos-hardening): refuse pathologically deep nesting before
+        // the recursion overflows the stack (an uncatchable crash that would
+        // escape the top-level SafeRun handler). See DocumentLimits.
+        DocumentLimits.EnsureDepth(depth);
+
         var elLocalName = element.LocalName;
 
         // Build counter key (namespace-qualified to avoid collisions)
@@ -75,7 +80,7 @@ internal static class GenericXmlQuery
         foreach (var child in element.ChildElements)
         {
             Traverse(child, targetLocalName, targetNsUri, attributes, containsText,
-                currentPath, results, childCounters);
+                currentPath, results, childCounters, depth + 1);
         }
     }
 

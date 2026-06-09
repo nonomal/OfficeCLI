@@ -1210,7 +1210,7 @@ public partial class PowerPointHandler
                         var ny = (long)(((nestedXfrm.Offset.Y?.Value ?? 0) - offY) * scaleY);
                         var ncx = (long)((nestedXfrm.Extents.Cx?.Value ?? 0) * scaleX);
                         var ncy = (long)((nestedXfrm.Extents.Cy?.Value ?? 0) * scaleY);
-                        RenderNestedGroup(sb, nestedGrp, slidePart, themeColors, nx, ny, ncx, ncy);
+                        RenderNestedGroup(sb, nestedGrp, slidePart, themeColors, nx, ny, ncx, ncy, depth: 1);
                     }
                     break;
                 }
@@ -1259,8 +1259,13 @@ public partial class PowerPointHandler
     /// Recursively handles arbitrary nesting depth.
     /// </summary>
     private void RenderNestedGroup(StringBuilder sb, GroupShape grp, SlidePart slidePart,
-        Dictionary<string, string> themeColors, long x, long y, long cx, long cy)
+        Dictionary<string, string> themeColors, long x, long y, long cx, long cy, int depth = 0)
     {
+        // CONSISTENCY(dos-hardening): nested-group recursion is unbounded; a
+        // crafted deeply-nested grpSp would overflow the stack during
+        // `view html`. See DocumentLimits.
+        DocumentLimits.EnsureDepth(depth);
+
         var grpXfrm = grp.GroupShapeProperties?.TransformGroup;
 
         // Child coordinate system of this nested group
@@ -1304,7 +1309,7 @@ public partial class PowerPointHandler
                         var ny = (long)(((nestedXfrm.Offset.Y?.Value ?? 0) - offY) * scaleY);
                         var ncx = (long)((nestedXfrm.Extents.Cx?.Value ?? 0) * scaleX);
                         var ncy = (long)((nestedXfrm.Extents.Cy?.Value ?? 0) * scaleY);
-                        RenderNestedGroup(sb, nestedGrp, slidePart, themeColors, nx, ny, ncx, ncy);
+                        RenderNestedGroup(sb, nestedGrp, slidePart, themeColors, nx, ny, ncx, ncy, depth: depth + 1);
                     }
                     break;
                 }

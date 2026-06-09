@@ -278,7 +278,16 @@ internal static class AttributeFilter
         {
             try
             {
-                return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase);
+                // CONSISTENCY(find-regex): bound matching with a hard timeout so
+                // catastrophic-backtracking patterns (e.g. r"(a+)+$") against
+                // attacker-influenced document text fail fast instead of hanging
+                // the process. Mirrors FindHelpers.FindMatchRanges.
+                return Regex.IsMatch(text, pattern, RegexOptions.IgnoreCase, DocumentLimits.RegexMatchTimeout);
+            }
+            catch (System.Text.RegularExpressions.RegexMatchTimeoutException)
+            {
+                // Pathological pattern — treat as no-match rather than hanging.
+                return false;
             }
             catch (System.ArgumentException)
             {

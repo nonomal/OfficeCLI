@@ -36,6 +36,17 @@ public static class DocumentHandlerFactory
             };
 
         var ext = Path.GetExtension(filePath).ToLowerInvariant();
+
+        // CONSISTENCY(dos-hardening): reject decompression bombs before the
+        // Open XML SDK / System.IO.Packaging touches the package. A few KB of
+        // zip can inflate to many gigabytes and OOM the process (or, on a
+        // 32-bit size-field overflow, surface only as a raw "Arithmetic
+        // operation resulted in an overflow"). Only the native zip formats are
+        // inspected; plugin-handled formats may not be zips and are left to
+        // their own handler. See DocumentLimits for the thresholds.
+        if (ext is ".docx" or ".xlsx" or ".pptx")
+            GuardDecompressionBomb(filePath);
+
         try
         {
             return OpenHandler(filePath, ext, editable);
@@ -63,6 +74,71 @@ public static class DocumentHandlerFactory
                 Code = "corrupt_file",
                 Suggestion = "Verify the file is a valid .docx/.xlsx/.pptx (e.g. unzip -t)."
             };
+        }
+    }
+
+    /// <summary>
+    /// CONSISTENCY(dos-hardening): inspect the zip container's entry count and
+    /// total/ratio of uncompressed bytes and reject obvious decompression
+    /// bombs. Uses the central <see cref="ZipFile.OpenRead"/> directory only
+    /// (no entry is actually inflated), so this is cheap. A file that is not a
+    /// valid zip is left untouched — the normal open path produces the existing
+    /// corrupt_file error for it.
+    /// </summary>
+    private static void GuardDecompressionBomb(string filePath)
+    {
+        ZipArchive archive;
+        try
+        {
+            archive = ZipFile.OpenRead(filePath);
+        }
+        catch (InvalidDataException)
+        {
+            // Not a valid zip container — let OpenHandler surface corrupt_file.
+            return;
+        }
+
+        using (archive)
+        {
+            if (archive.Entries.Count > DocumentLimits.MaxZipEntries)
+                throw new CliException(
+                    $"Cannot open {Path.GetFileName(filePath)}: package has {archive.Entries.Count} entries " +
+                    $"(limit {DocumentLimits.MaxZipEntries}); rejected as a potential decompression bomb.")
+                {
+                    Code = "decompression_bomb",
+                    Suggestion = "Verify the file is a genuine .docx/.xlsx/.pptx and not a crafted archive."
+                };
+
+            long totalUncompressed = 0;
+            long totalCompressed = 0;
+            foreach (var entry in archive.Entries)
+            {
+                totalUncompressed += entry.Length;
+                totalCompressed += entry.CompressedLength;
+
+                if (totalUncompressed > DocumentLimits.MaxUncompressedBytes)
+                    throw new CliException(
+                        $"Cannot open {Path.GetFileName(filePath)}: uncompressed size exceeds " +
+                        $"{DocumentLimits.MaxUncompressedBytes / (1024 * 1024 * 1024)} GiB; " +
+                        $"rejected as a potential decompression bomb.")
+                    {
+                        Code = "decompression_bomb",
+                        Suggestion = "Verify the file is a genuine .docx/.xlsx/.pptx and not a crafted archive."
+                    };
+            }
+
+            // Ratio check only once there is enough data to be meaningful (a few
+            // KB of highly-compressible XML legitimately exceeds the ratio).
+            if (totalCompressed > 64 * 1024 &&
+                totalUncompressed / Math.Max(1, totalCompressed) > DocumentLimits.MaxCompressionRatio)
+                throw new CliException(
+                    $"Cannot open {Path.GetFileName(filePath)}: compression ratio " +
+                    $"{totalUncompressed / Math.Max(1, totalCompressed)}× exceeds {DocumentLimits.MaxCompressionRatio}×; " +
+                    $"rejected as a potential decompression bomb.")
+                {
+                    Code = "decompression_bomb",
+                    Suggestion = "Verify the file is a genuine .docx/.xlsx/.pptx and not a crafted archive."
+                };
         }
     }
 

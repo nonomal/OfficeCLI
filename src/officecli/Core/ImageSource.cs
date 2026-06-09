@@ -1,7 +1,9 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using DocumentFormat.OpenXml.Packaging;
 
 namespace OfficeCli.Core;
@@ -135,15 +137,61 @@ internal static class ImageSource
         return (new MemoryStream(bytes), contentType);
     }
 
+    // Cap on a fetched image to bound memory use on a hostile/huge response.
+    private const long MaxRemoteImageBytes = 100L * 1024 * 1024; // 100 MB
+
     private static (Stream, PartTypeInfo) ResolveUrl(string url)
     {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        // SSRF guard: validate the *actual* IP at connect time, for every
+        // connection including each redirect hop. Redirects stay enabled so
+        // legitimate public CDNs that 30x still work, but no hop is allowed to
+        // land on a loopback / private / link-local address (cloud metadata,
+        // localhost services, intranet hosts). Validating in ConnectCallback —
+        // rather than resolving the hostname up front — also closes the
+        // DNS-rebinding/TOCTOU window, since the address we vet is the address
+        // we connect to.
+        var handler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 10,
+            ConnectCallback = async (ctx, ct) =>
+            {
+                var host = ctx.DnsEndPoint.Host;
+                var addresses = await Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+                foreach (var addr in addresses)
+                {
+                    if (!IsPublicAddress(addr))
+                        throw new ArgumentException(
+                            $"Refusing to fetch image from non-public address '{addr}' (host '{host}'). " +
+                            "Remote image sources must resolve to a public IP (SSRF protection).");
+                }
+                var target = addresses.FirstOrDefault()
+                    ?? throw new ArgumentException($"Could not resolve host '{host}'.");
+                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                try
+                {
+                    await socket.ConnectAsync(target, ctx.DnsEndPoint.Port, ct).ConfigureAwait(false);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            }
+        };
+
+        using var client = new HttpClient(handler, disposeHandler: true) { Timeout = TimeSpan.FromSeconds(30) };
         client.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI");
 
         var response = client.GetAsync(url).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
 
-        var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+        // Enforce the size cap whether or not the server sends Content-Length.
+        var declared = response.Content.Headers.ContentLength;
+        if (declared is > MaxRemoteImageBytes)
+            throw new ArgumentException($"Remote image exceeds {MaxRemoteImageBytes / (1024 * 1024)} MB limit.");
+        var bytes = ReadBounded(response.Content.ReadAsStream(), MaxRemoteImageBytes, url);
         var stream = new MemoryStream(bytes);
 
         // Try content-type header first
@@ -162,6 +210,59 @@ internal static class ImageSource
             return (stream, sniffed);
 
         throw new ArgumentException($"Cannot determine image type from URL: {url}. Specify format via file extension or content-type header.");
+    }
+
+    private static byte[] ReadBounded(Stream src, long max, string url)
+    {
+        using var ms = new MemoryStream();
+        var buf = new byte[81920];
+        long total = 0;
+        int n;
+        while ((n = src.Read(buf, 0, buf.Length)) > 0)
+        {
+            total += n;
+            if (total > max)
+                throw new ArgumentException($"Remote image at {url} exceeds {max / (1024 * 1024)} MB limit.");
+            ms.Write(buf, 0, n);
+        }
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// True only for globally-routable addresses. Blocks loopback, private
+    /// (RFC1918), link-local (incl. 169.254.0.0/16 cloud-metadata), unique-local
+    /// IPv6 (fc00::/7), multicast and unspecified — the SSRF target ranges.
+    /// </summary>
+    internal static bool IsPublicAddress(IPAddress address)
+    {
+        var addr = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+        if (IPAddress.IsLoopback(addr)) return false;
+        if (addr.Equals(IPAddress.Any) || addr.Equals(IPAddress.IPv6Any)) return false;
+
+        if (addr.AddressFamily == AddressFamily.InterNetwork)
+        {
+            var b = addr.GetAddressBytes(); // big-endian
+            if (b[0] == 10) return false;                                   // 10.0.0.0/8
+            if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return false;      // 172.16.0.0/12
+            if (b[0] == 192 && b[1] == 168) return false;                   // 192.168.0.0/16
+            if (b[0] == 169 && b[1] == 254) return false;                   // 169.254.0.0/16 link-local (cloud metadata)
+            if (b[0] == 127) return false;                                  // 127.0.0.0/8
+            if (b[0] == 100 && b[1] >= 64 && b[1] <= 127) return false;     // 100.64.0.0/10 CGNAT
+            if (b[0] == 0) return false;                                    // 0.0.0.0/8
+            if (b[0] >= 224) return false;                                  // 224.0.0.0/4 multicast + 240/4 reserved
+            return true;
+        }
+
+        if (addr.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (addr.IsIPv6LinkLocal || addr.IsIPv6SiteLocal || addr.IsIPv6Multicast) return false;
+            var b = addr.GetAddressBytes();
+            if ((b[0] & 0xFE) == 0xFC) return false;                        // fc00::/7 unique-local
+            return true;
+        }
+
+        return false;
     }
 
     private static PartTypeInfo MimeToContentType(string mime)

@@ -30,6 +30,12 @@ static partial class CommandBuilder
             var file = result.GetValue(getFileArg)!;
             var path = result.GetValue(pathArg)!;
             var depth = result.GetValue(depthOpt);
+            // CONSISTENCY(dos-hardening): cap user-supplied depth so a huge
+            // --depth on a deeply-nested doc can't drive the node-building
+            // recursion (and its O(n^2) InnerText/OuterXml-per-node cost) into
+            // a multi-minute hang or stack overflow. See DocumentLimits.
+            if (depth > DocumentLimits.MaxRecursionDepth)
+                depth = DocumentLimits.MaxRecursionDepth;
             var savePath = result.GetValue(saveOpt);
 
             // Special pseudo-path "selected" — query the running watch process

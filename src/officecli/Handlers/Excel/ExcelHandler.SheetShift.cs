@@ -81,10 +81,20 @@ public partial class ExcelHandler
         {
             // cellIs/formula rules carry cell refs inside <formula> (e.g. $C2>5)
             // that must follow the displacement, same as cell formulas.
+            // databar/colorScale/iconSet value objects can also carry a formula
+            // in their `val` attribute (<cfvo type="formula" val="A10">); shift
+            // those too. Other cfvo types (num/percent/min/max/...) are not refs
+            // and pass through untouched.
             if (formulaTextMapper != null)
                 foreach (var rule in cf.Elements<ConditionalFormattingRule>())
+                {
                     foreach (var f in rule.Elements<Formula>())
                         if (!string.IsNullOrEmpty(f.Text)) f.Text = formulaTextMapper(f.Text);
+                    foreach (var cfvo in rule.Descendants<ConditionalFormatValueObject>())
+                        if (cfvo.Type?.Value == ConditionalFormatValueObjectValues.Formula
+                            && !string.IsNullOrEmpty(cfvo.Val?.Value))
+                            cfvo.Val = formulaTextMapper(cfvo.Val!.Value!);
+                }
             if (cf.SequenceOfReferences?.HasValue != true) continue;
             var newRefs = cf.SequenceOfReferences.Items
                 .Where(r => r.Value != null)

@@ -86,7 +86,53 @@ public partial class WordHandler
         var rangeEnd = new CommentRangeEnd { Id = commentId };
         var refRun = new Run(new CommentReference { Id = commentId });
 
-        if (commentRun != null)
+        // BUG-DUMP-COMMENT-POINTREF: a zero-width / point-anchored comment in the
+        // source carries ONLY <w:commentReference> (no commentRangeStart/End).
+        // The dump emitter detects this and passes pointRef=true (alias
+        // range=false) so we replay just the reference run — without it,
+        // AddComment unconditionally synthesized a range and a point comment
+        // silently became a ranged comment on round-trip.
+        bool pointRef = false;
+        if (properties.TryGetValue("pointRef", out var prRaw)
+            || properties.TryGetValue("pointref", out prRaw))
+            pointRef = IsTruthy(prRaw);
+        else if ((properties.TryGetValue("range", out var rngRaw)
+                  || properties.TryGetValue("Range", out rngRaw))
+                 && IsExplicitFalseAddOverride(rngRaw))
+            pointRef = true;
+
+        if (pointRef)
+        {
+            // Reference-only: place a single <w:commentReference> run at the
+            // requested anchor; no range markers. The reference run alone is a
+            // valid OOXML point comment.
+            if (commentRun != null)
+            {
+                commentRun.InsertAfterSelf(refRun);
+            }
+            else if (index.HasValue)
+            {
+                InsertIntoParagraph(commentPara, new OpenXmlElement[] { refRun }, index);
+            }
+            else
+            {
+                int runStartIdx = 0;
+                if ((properties.TryGetValue("runstart", out var rsRaw)
+                     || properties.TryGetValue("runStart", out rsRaw))
+                    && int.TryParse(rsRaw, out var rsN))
+                    runStartIdx = rsN;
+                OpenXmlElement? anchorRun = null;
+                if (runStartIdx >= 1)
+                {
+                    var runs = commentPara.Elements<Run>().ToList();
+                    if (runStartIdx <= runs.Count)
+                        anchorRun = runs[runStartIdx - 1];
+                }
+                if (anchorRun != null) anchorRun.InsertAfterSelf(refRun);
+                else commentPara.AppendChild(refRun);
+            }
+        }
+        else if (commentRun != null)
         {
             commentRun.InsertBeforeSelf(rangeStart);
             commentRun.InsertAfterSelf(rangeEnd);

@@ -861,6 +861,13 @@ public static partial class WordBatchEmitter
                 // 0 = before all runs (paragraph start); always emit so
                 // replay knows the anchor is positional, not whole-paragraph.
                 props["runStart"] = runStart.ToString();
+                // BUG-DUMP-COMMENT-POINTREF: a zero-width / point-anchored
+                // comment in the source carries only <w:commentReference> (no
+                // commentRangeStart/End). Carry range=false so AddComment
+                // replays a reference-only run instead of synthesizing a
+                // spurious range — preserving the point comment's identity.
+                if (!word.CommentHasRange(cid.ToString()!))
+                    props["range"] = "false";
             }
             // The comment id is allocated by AddComment on the target side;
             // do not propagate the source id (would conflict on replay).

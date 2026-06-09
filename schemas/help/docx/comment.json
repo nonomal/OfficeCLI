@@ -58,6 +58,20 @@
       ],
       "readback": "n/a (encoded inline; surfaces via anchoredTo path)",
       "enforcement": "report"
+    },
+    "range": {
+      "type": "bool",
+      "description": "whether the comment spans a text range (default true: emits <w:commentRangeStart/> + <w:commentRangeEnd/> around the anchor plus a <w:commentReference/> run). Pass range=false for a zero-width / point-anchored comment that carries ONLY <w:commentReference/> — used by dump→batch to preserve reference-only comments without synthesizing a spurious range.",
+      "aliases": ["pointRef", "pointref"],
+      "add": true,
+      "set": false,
+      "get": false,
+      "examples": [
+        "--prop range=false",
+        "--prop pointRef=true"
+      ],
+      "readback": "n/a (encoded inline; affects emitted markers)",
+      "enforcement": "report"
     }
   }
 }

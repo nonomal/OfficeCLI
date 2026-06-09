@@ -180,6 +180,21 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// BUG-DUMP-COMMENT-POINTREF: true when the comment with
+    /// <paramref name="commentId"/> has a span — i.e. a CommentRangeStart marker
+    /// exists in the body. A reference-only (zero-width / point) comment carries
+    /// only a CommentReference run, so this returns false; the dump emitter then
+    /// passes range=false so replay doesn't synthesize a spurious range.
+    /// </summary>
+    public bool CommentHasRange(string commentId)
+    {
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return false;
+        return body.Descendants<CommentRangeStart>()
+            .Any(rs => rs.Id?.Value == commentId);
+    }
+
+    /// <summary>
     /// Find the paragraph path where a CommentRangeStart with the given ID is anchored.
     /// Returns "/body/p[N]" for a top-level body paragraph, or the full semantic
     /// table path "/body/tbl[N]/tr[M]/tc[K]/p[J]" when the anchor lives inside a
@@ -202,6 +217,16 @@ public partial class WordHandler
             var hasRange = para.Descendants<CommentRangeStart>()
                 .Any(rs => rs.Id?.Value == commentId);
             if (hasRange) return BuildBodyParagraphFullPath(body, para);
+        }
+        // BUG-DUMP-COMMENT-POINTREF: a reference-only (point) comment has no
+        // CommentRangeStart, so fall back to the paragraph that hosts its
+        // CommentReference run. Without this the point comment loses its anchor
+        // and dump relocates it to /body/p[1].
+        foreach (var para in body.Descendants<Paragraph>())
+        {
+            var hasRef = para.Descendants<CommentReference>()
+                .Any(cr => cr.Id?.Value == commentId);
+            if (hasRef) return BuildBodyParagraphFullPath(body, para);
         }
         return null;
     }

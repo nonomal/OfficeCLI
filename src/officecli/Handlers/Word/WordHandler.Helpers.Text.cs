@@ -159,6 +159,26 @@ public partial class WordHandler
     {
         return para.Descendants<Run>()
             .Where(r => r.GetFirstChild<CommentReference>() == null)
+            // BUG-DUMP-RUBY: a <w:ruby> (CJK phonetic guide — furigana ABOVE
+            // the base text) wraps independent <w:r>s in its <w:rt> (furigana)
+            // and <w:rubyBase> (base) — both paragraph Descendant Runs. Drop
+            // ONLY those inner runs so they don't flatten かんじ-above-漢字
+            // into the sequential plain runs "かんじ" + "漢字". The OUTER
+            // ruby-bearing run (a <w:r> directly containing <w:ruby>) is kept:
+            // text rendering surfaces its base text via GetRunText, and the
+            // dump path routes it to a verbatim raw-set (so <w:rt>/<w:rubyBase>/
+            // <w:rubyPr> survive) instead of emitting it as a plain run. A
+            // revision-wrapped ruby (<w:ins>/<w:del> ancestor) is left intact
+            // for the legacy DUMP7-10 flatten-with-attribution path.
+            .Where(r =>
+            {
+                var rubyAnc = r.Ancestors<Ruby>().FirstOrDefault();
+                if (rubyAnc != null
+                    && rubyAnc.Ancestors<InsertedRun>().FirstOrDefault() == null
+                    && rubyAnc.Ancestors<DeletedRun>().FirstOrDefault() == null)
+                    return false; // an inner <w:rt>/<w:rubyBase> run
+                return true;
+            })
             // BUG-DUMP4-06: skip runs nested inside an inline SdtRun. Those
             // runs are surfaced separately as a typed `sdt` paragraph child so
             // alias/tag/type metadata round-trips. Without this filter the
@@ -203,6 +223,19 @@ public partial class WordHandler
 
     private static string GetRunText(Run run)
     {
+        // BUG-DUMP-RUBY: a ruby-bearing run (<w:r><w:ruby>…) carries no direct
+        // <w:t>; its visible inline text is the <w:rubyBase> base text (the
+        // furigana in <w:rt> renders ABOVE the base, not inline). GetAllRuns
+        // keeps the outer ruby run and drops the inner ones, so surface the
+        // base text here for view/readback. Mirrors the HtmlPreview ruby path
+        // (WordHandler.HtmlPreview.Text.cs), which renders base + <rt>.
+        var rubyEl = run.GetFirstChild<Ruby>();
+        if (rubyEl != null)
+        {
+            var rubyBase = rubyEl.ChildElements.FirstOrDefault(c => c.LocalName == "rubyBase");
+            return rubyBase == null ? "" :
+                string.Concat(rubyBase.Descendants<Text>().Select(t => t.Text));
+        }
         // CONSISTENCY(run-text-tab): walk run children in document order so
         // <w:tab/> renders as \t in the readback. Plain Elements<Text>() drops
         // tabs silently, which broke dump round-trip (the tab IS in the XML

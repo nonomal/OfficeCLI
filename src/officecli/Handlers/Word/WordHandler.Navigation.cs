@@ -3739,7 +3739,22 @@ public partial class WordHandler
             var paraBookmarkEnds = para.Elements<BookmarkEnd>()
                 .Where(be => be.Id?.Value != null && IsContentSpanBookmark(be))
                 .ToList();
-            var ordered = runs.Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "run", el: (OpenXmlElement)r))
+            // BUG-DUMP-RUBY: ruby-bearing runs (a <w:r> wrapping <w:ruby>, the
+            // CJK phonetic guide) are excluded from GetAllRuns (their inner
+            // <w:rt>/<w:rubyBase> runs would otherwise flatten into sequential
+            // plain runs, dropping the wrapper). Surface the outer run as a
+            // "ruby" kind in the DOM-ordered merge so it emits at its original
+            // intra-paragraph position; the emitter re-inserts the verbatim
+            // <w:r><w:ruby>…</w:r> via raw-set. Revision-wrapped ruby
+            // (<w:ins>/<w:del> ancestor) is left to the legacy DUMP7-10 path.
+            var paraRubyRuns = para.Descendants<Run>()
+                .Where(r => r.GetFirstChild<Ruby>() != null
+                    && r.Ancestors<InsertedRun>().FirstOrDefault() == null
+                    && r.Ancestors<DeletedRun>().FirstOrDefault() == null)
+                .ToList();
+            var ordered = runs.Where(r => r.GetFirstChild<Ruby>() == null)
+                .Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "run", el: (OpenXmlElement)r))
+                .Concat(paraRubyRuns.Select(r => (pos: descendantPos.TryGetValue(r, out var p) ? p : int.MaxValue, kind: "ruby", el: (OpenXmlElement)r)))
                 .Concat(inlineEqsAll.Select(e => (pos: descendantPos.TryGetValue(e, out var p) ? p : int.MaxValue, kind: "eq", el: (OpenXmlElement)e)))
                 .Concat(bareFieldUnknowns.Select(u => (pos: descendantPos.TryGetValue(u, out var p) ? p : int.MaxValue, kind: u.LocalName == "fldChar" ? "fieldChar" : "instrText", el: (OpenXmlElement)u)))
                 .Concat(paraBookmarks.Select(b => (pos: descendantPos.TryGetValue(b, out var p) ? p : int.MaxValue, kind: "bookmark", el: (OpenXmlElement)b)))
@@ -3790,6 +3805,30 @@ public partial class WordHandler
                         inlineEqIdx++;
                     }
                     node.Children.Add(ElementToNode(entry.el, eqPath, depth - 1));
+                }
+                else if (entry.kind == "ruby")
+                {
+                    // BUG-DUMP-RUBY: emit the ruby-bearing run at its DOM
+                    // position. The node carries the verbatim outer-run XML
+                    // (stashed under _rawRubyXml) so the emitter re-inserts the
+                    // <w:r><w:ruby>…</w:r> via a raw-set append, preserving
+                    // <w:rt> (furigana) + <w:rubyBase> (base text) + <w:rubyPr>
+                    // (alignment/hps/lid). Base text surfaces in Text so view/
+                    // readback isn't empty.
+                    var rubyRun = (Run)entry.el;
+                    var rubyEl = rubyRun.GetFirstChild<Ruby>()!;
+                    var rubyBase = rubyEl.ChildElements.FirstOrDefault(c => c.LocalName == "rubyBase");
+                    var baseText = rubyBase == null ? "" :
+                        string.Concat(rubyBase.Descendants<Text>().Select(t => t.Text));
+                    var rubyNode = new DocumentNode
+                    {
+                        Type = "ruby",
+                        Text = baseText,
+                        Path = $"{path}/r[{runIdx + 1}]",
+                    };
+                    rubyNode.Format["_rawRubyXml"] = rubyRun.OuterXml;
+                    node.Children.Add(rubyNode);
+                    runIdx++;
                 }
                 else if (entry.kind == "bookmark")
                 {

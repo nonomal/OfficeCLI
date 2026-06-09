@@ -169,6 +169,9 @@ public static partial class WordBatchEmitter
                 || c.Type == "tab"
                 || c.Type == "bookmark"
                 || c.Type == "bookmarkEnd"
+                // BUG-DUMP-RUBY: ruby (phonetic guide) child surfaces the
+                // verbatim <w:r><w:ruby> XML for a raw-set append.
+                || c.Type == "ruby"
                 // R10-bug1: include ole children so TryEmitOleRun can fire
                 // a warning instead of letting them be silently filtered
                 // out of the run list (full round-trip is a backlog item).
@@ -322,6 +325,7 @@ public static partial class WordBatchEmitter
         foreach (var run in runs)
         {
             if (TryEmitBookmarkRun(run, paraTargetPath, items, ctx)) continue;
+            if (TryEmitRubyRun(run, parentPath, paraTargetPath, items, ctx)) continue;
             if (TryEmitBreakRun(run, paraTargetPath, items)) continue;
             if (TryEmitTabRun(run, paraTargetPath, items)) continue;
             if (TryEmitPtabRun(run, paraTargetPath, items)) continue;
@@ -639,6 +643,11 @@ public static partial class WordBatchEmitter
         // BUG-FIELD-COLLAPSE: a synthetic field run carries `instruction=…` —
         // collapse would lose the field chain on replay.
         if (r.Type == "field") return false;
+        // BUG-DUMP-RUBY: a sole ruby (phonetic-guide) run must stay on the
+        // explicit-run path so TryEmitRubyRun raw-sets the <w:ruby> verbatim.
+        // Collapsing into `add p` would fold the base text into a plain run
+        // and drop the <w:ruby>/<w:rt>/<w:rubyBase> wrapper.
+        if (r.Type == "ruby") return false;
         // BUG-DUMP7-03: inline equation must emit `add equation` explicitly.
         if (r.Type == "equation") return false;
         return true;
@@ -714,6 +723,44 @@ public static partial class WordBatchEmitter
             {
                 ["type"] = string.IsNullOrEmpty(breakType) ? "line" : breakType!
             }
+        });
+        return true;
+    }
+
+    private static bool TryEmitRubyRun(DocumentNode run, string parentPath, string paraTargetPath, List<BatchItem> items, BodyEmitContext? ctx)
+    {
+        // BUG-DUMP-RUBY: a <w:ruby> (CJK phonetic guide) has no scalar
+        // representation on add/set — its <w:rt> (furigana) and <w:rubyBase>
+        // (base text) carry independent runs with their own rPr, and the
+        // <w:rubyPr> alignment/hps/hpsRaise/hpsBaseText/lid attributes have no
+        // add-API. Re-insert the captured <w:r><w:ruby>…</w:r> verbatim via a
+        // raw-set append, mirroring the textbox/connector raw-set fallback in
+        // TryEmitPictureRun (same shape: append the run's outer XML to the
+        // just-emitted host paragraph at /w:document/w:body/w:p[last()]).
+        if (run.Type != "ruby") return false;
+        var rawXml = run.Format.TryGetValue("_rawRubyXml", out var rx) ? rx?.ToString() : null;
+        if (string.IsNullOrEmpty(rawXml))
+            return true; // nothing to emit (shouldn't happen) — consumed anyway
+        // The verbatim raw-set targets /w:document/w:body/w:p[last()]; only a
+        // body host has that addressable last() paragraph. A ruby inside a
+        // header/footer/cell would need a different anchor — flag the loss
+        // rather than mis-anchoring (full non-body round-trip is a backlog
+        // item; same conservatism as the non-body textbox raw-set).
+        if (parentPath != "/body")
+        {
+            ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                Element: "ruby",
+                Path: run.Path,
+                Reason: "ruby (phonetic guide) inside a header/footer/table cell could not be serialized for round-trip; the base text is lost from the replayed document"));
+            return true;
+        }
+        items.Add(new BatchItem
+        {
+            Command = "raw-set",
+            Part = "/document",
+            Xpath = "/w:document/w:body/w:p[last()]",
+            Action = "append",
+            Xml = rawXml!
         });
         return true;
     }

@@ -1216,49 +1216,78 @@ public partial class ExcelHandler
 
     /// <summary>
     /// Shift row numbers in a cell/range reference after a row deletion.
-    /// Returns null if the reference sits exactly on the deleted row (should be removed).
-    /// For ranges: if either endpoint is on the deleted row the range is removed;
-    /// endpoints after the deleted row are decremented by 1.
+    /// Single cell: returns null when it sits on the deleted row. Range: shrinks
+    /// — an endpoint on the deleted row collapses inward (start clamps to the
+    /// deleted row, end drops by one); endpoints after the deleted row decrement
+    /// by one. The range is dropped only when it collapses entirely (its whole
+    /// span was the deleted row), mirroring how Excel keeps A1:A4 as A1:A3 after
+    /// deleting row 1 instead of discarding the structure.
     /// </summary>
     private static string? ShiftRowInRef(string? refStr, int deletedRow)
     {
         if (string.IsNullOrEmpty(refStr)) return null;
         var parts = refStr.Split(':');
-        var shifted = new List<string>(parts.Length);
-        foreach (var part in parts)
+
+        if (parts.Length == 1)
         {
             try
             {
-                var (col, row) = ParseCellReference(part);
+                var (col, row) = ParseCellReference(parts[0]);
                 if (row == deletedRow) return null;
-                shifted.Add(row > deletedRow ? $"{col}{row - 1}" : part);
+                return row > deletedRow ? $"{col}{row - 1}" : parts[0];
             }
-            catch { shifted.Add(part); }
+            catch { return refStr; }
         }
-        return string.Join(":", shifted);
+
+        try
+        {
+            var (startCol, startRow) = ParseCellReference(parts[0]);
+            var (endCol, endRow) = ParseCellReference(parts[1]);
+            // start clamps: only moves when strictly below the deleted row.
+            int newStart = startRow > deletedRow ? startRow - 1 : startRow;
+            // end clamps: moves when at or below the deleted row (loses that row).
+            int newEnd = endRow >= deletedRow ? endRow - 1 : endRow;
+            if (newStart > newEnd) return null; // whole span was the deleted row
+            return $"{startCol}{newStart}:{endCol}{newEnd}";
+        }
+        catch { return refStr; }
     }
 
     /// <summary>
     /// Shift column letters in a cell/range reference after a column deletion.
-    /// Returns null if the reference sits exactly on the deleted column.
+    /// Single cell: returns null when it sits on the deleted column. Range:
+    /// shrinks the same way <see cref="ShiftRowInRef"/> does for rows; dropped
+    /// only when the whole span was the deleted column.
     /// </summary>
     private static string? ShiftColInRef(string? refStr, int deletedColIdx)
     {
         if (string.IsNullOrEmpty(refStr)) return null;
         var parts = refStr.Split(':');
-        var shifted = new List<string>(parts.Length);
-        foreach (var part in parts)
+
+        if (parts.Length == 1)
         {
             try
             {
-                var (col, row) = ParseCellReference(part);
+                var (col, row) = ParseCellReference(parts[0]);
                 var colIdx = ColumnNameToIndex(col);
                 if (colIdx == deletedColIdx) return null;
-                shifted.Add(colIdx > deletedColIdx ? $"{IndexToColumnName(colIdx - 1)}{row}" : part);
+                return colIdx > deletedColIdx ? $"{IndexToColumnName(colIdx - 1)}{row}" : parts[0];
             }
-            catch { shifted.Add(part); }
+            catch { return refStr; }
         }
-        return string.Join(":", shifted);
+
+        try
+        {
+            var (startCol, startRow) = ParseCellReference(parts[0]);
+            var (endCol, endRow) = ParseCellReference(parts[1]);
+            int startIdx = ColumnNameToIndex(startCol);
+            int endIdx = ColumnNameToIndex(endCol);
+            int newStart = startIdx > deletedColIdx ? startIdx - 1 : startIdx;
+            int newEnd = endIdx >= deletedColIdx ? endIdx - 1 : endIdx;
+            if (newStart > newEnd) return null; // whole span was the deleted column
+            return $"{IndexToColumnName(newStart)}{startRow}:{IndexToColumnName(newEnd)}{endRow}";
+        }
+        catch { return refStr; }
     }
 
     // ShiftNamedRangeRows / ShiftNamedRangeCols removed — see comment above

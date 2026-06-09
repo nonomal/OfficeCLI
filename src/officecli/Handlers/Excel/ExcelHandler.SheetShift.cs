@@ -33,6 +33,7 @@ using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
+using C = DocumentFormat.OpenXml.Drawing.Charts;
 
 namespace OfficeCli.Handlers;
 
@@ -235,6 +236,27 @@ public partial class ExcelHandler
                     }
                 }
                 if (drDirty) wsDr.Save();
+            }
+        }
+
+        // 6c. chart series references (<c:f> in each ChartPart under DrawingsPart),
+        // e.g. Sheet1!$B$1:$B$5. Route through formulaTextMapper so refs targeting
+        // this sheet follow the displacement and refs to other sheets are left
+        // alone (the shifter's sheet-scope guard handles that).
+        if (formulaTextMapper != null && worksheet.DrawingsPart != null)
+        {
+            foreach (var chartPart in worksheet.DrawingsPart.ChartParts)
+            {
+                var cs = chartPart.ChartSpace;
+                if (cs == null) continue;
+                bool chDirty = false;
+                foreach (var f in cs.Descendants<C.Formula>())
+                {
+                    if (string.IsNullOrEmpty(f.Text)) continue;
+                    var nf = formulaTextMapper(f.Text);
+                    if (!string.Equals(nf, f.Text, StringComparison.Ordinal)) { f.Text = nf; chDirty = true; }
+                }
+                if (chDirty) cs.Save();
             }
         }
 

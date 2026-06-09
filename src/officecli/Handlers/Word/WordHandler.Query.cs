@@ -1371,13 +1371,20 @@ public partial class WordHandler
         if (firstPara?.ParagraphProperties?.Justification?.Val != null)
             node.Format["align"] = firstPara.ParagraphProperties.Justification.Val.InnerText;
 
-        node.ChildCount = header.Elements<Paragraph>().Count() + header.Elements<Table>().Count();
+        // BUG-R11A(BUG3): include block-SDT children. A header body may be
+        // wrapped in (possibly nested) <w:sdt><w:sdtContent>; without SdtBlock
+        // here Get returned zero children and the dump's header walk emitted an
+        // empty part, dropping the whole header body (PAGE/NUMPAGES and all).
+        node.ChildCount = header.Elements<Paragraph>().Count()
+            + header.Elements<Table>().Count()
+            + header.Elements<SdtBlock>().Count();
         // CONSISTENCY(header-footer-get): default depth (=1) returns the
         // single header/footer node, mirroring `query header` / `query footer`.
-        // Block children (paragraphs + tables) only expand at explicit depth >= 2.
+        // Block children (paragraphs + tables + block-SDTs) only expand at
+        // explicit depth >= 2.
         if (depth >= 1)
         {
-            int pIdx = 0, tblIdx = 0;
+            int pIdx = 0, tblIdx = 0, sdtIdx = 0;
             foreach (var child in header.ChildElements)
             {
                 if (child is Paragraph para)
@@ -1390,6 +1397,11 @@ public partial class WordHandler
                 {
                     tblIdx++;
                     node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                }
+                else if (child is SdtBlock hSdt)
+                {
+                    sdtIdx++;
+                    node.Children.Add(ElementToNode(hSdt, $"{path}/{BuildSdtPathSegment(hSdt, sdtIdx)}", depth - 1));
                 }
             }
         }
@@ -1442,11 +1454,14 @@ public partial class WordHandler
         if (firstPara?.ParagraphProperties?.Justification?.Val != null)
             node.Format["align"] = firstPara.ParagraphProperties.Justification.Val.InnerText;
 
-        node.ChildCount = footer.Elements<Paragraph>().Count() + footer.Elements<Table>().Count();
+        // BUG-R11A(BUG3): include block-SDT children — see GetHeaderNode.
+        node.ChildCount = footer.Elements<Paragraph>().Count()
+            + footer.Elements<Table>().Count()
+            + footer.Elements<SdtBlock>().Count();
         // CONSISTENCY(header-footer-get): see GetHeaderNode.
         if (depth >= 1)
         {
-            int pIdx = 0, tblIdx = 0;
+            int pIdx = 0, tblIdx = 0, sdtIdx = 0;
             foreach (var child in footer.ChildElements)
             {
                 if (child is Paragraph para)
@@ -1459,6 +1474,11 @@ public partial class WordHandler
                 {
                     tblIdx++;
                     node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                }
+                else if (child is SdtBlock fSdt)
+                {
+                    sdtIdx++;
+                    node.Children.Add(ElementToNode(fSdt, $"{path}/{BuildSdtPathSegment(fSdt, sdtIdx)}", depth - 1));
                 }
             }
         }

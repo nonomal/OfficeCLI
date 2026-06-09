@@ -2853,10 +2853,16 @@ public partial class WordHandler
         // them alongside paragraphs. Mirrors body-listing logic above.
         node.Type = element is Header ? "header" : "footer";
         node.Text = string.Concat(element.Descendants<Text>().Select(t => t.Text));
-        node.ChildCount = element.Elements<Paragraph>().Count() + element.Elements<Table>().Count();
+        // BUG-R11A(BUG3): include block-SDT children. A header/footer body may be
+        // wrapped in (possibly nested) <w:sdt><w:sdtContent>; without SdtBlock
+        // here Get returned zero children and the dump emitted an empty part —
+        // dropping the entire header/footer body (PAGE/NUMPAGES fields and all).
+        node.ChildCount = element.Elements<Paragraph>().Count()
+            + element.Elements<Table>().Count()
+            + element.Elements<SdtBlock>().Count();
         if (depth > 0)
         {
-            int pIdx = 0, tblIdx = 0;
+            int pIdx = 0, tblIdx = 0, sdtIdx = 0;
             foreach (var child in element.ChildElements)
             {
                 if (child is Paragraph hfPara)
@@ -2869,6 +2875,11 @@ public partial class WordHandler
                 {
                     tblIdx++;
                     node.Children.Add(ElementToNode(child, $"{path}/tbl[{tblIdx}]", depth - 1));
+                }
+                else if (child is SdtBlock hfSdt)
+                {
+                    sdtIdx++;
+                    node.Children.Add(ElementToNode(hfSdt, $"{path}/{BuildSdtPathSegment(hfSdt, sdtIdx)}", depth - 1));
                 }
             }
         }

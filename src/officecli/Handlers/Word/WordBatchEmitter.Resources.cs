@@ -569,9 +569,14 @@ public static partial class WordBatchEmitter
         // children, but the previous filter only kept paragraphs and silently
         // dropped tables. Iterate in source order, tracking per-type indices
         // so paragraph and table paths line up with replay output.
+        // BUG-R11A(BUG3): include block-SDT children. A header/footer body can be
+        // wrapped in (possibly nested) <w:sdt><w:sdtContent>; without `sdt` here
+        // the walk produced zero content ops and the entire part body (PAGE/
+        // NUMPAGES fields and all) was dropped on dump → batch.
         var blockChildren = (partNode.Children ?? new List<DocumentNode>())
             .Where(c => c.Type == "paragraph" || c.Type == "p"
-                     || c.Type == "table" || c.Type == "tbl")
+                     || c.Type == "table" || c.Type == "tbl"
+                     || c.Type == "sdt")
             .ToList();
         // partNode.Format does not expose `type`; the caller resolves the
         // role (default/first/even) from the section's headerRef.* / footerRef.*
@@ -695,8 +700,17 @@ public static partial class WordBatchEmitter
         // table that seed has no source counterpart. Suppress the seed-reuse so
         // any later paragraph adds AFTER the table instead of overwriting the
         // leading seed, then drop the phantom seed below.
-        bool firstChildIsTable = blockChildren.Count > 0
-            && (blockChildren[0].Type == "table" || blockChildren[0].Type == "tbl");
+        //
+        // BUG-R11A(BUG3): an SDT-wrapped header/footer body (the whole body is a
+        // block <w:sdt>) is the same shape — its first child is neither a
+        // paragraph the seed can host. Generalize the leading-seed opt-out to
+        // "first child is a table OR a block-SDT".
+        bool firstChildIsNonPara = blockChildren.Count > 0
+            && (blockChildren[0].Type == "table" || blockChildren[0].Type == "tbl"
+                || blockChildren[0].Type == "sdt");
+        // The host part for raw-set: /document for body, otherwise the part path.
+        var hfRawPart = partTargetPath;
+        var hfRootXPath = kind == "header" ? "/w:hdr" : "/w:ftr";
         foreach (var child in blockChildren)
         {
             if (child.Type == "table" || child.Type == "tbl")
@@ -710,16 +724,30 @@ public static partial class WordBatchEmitter
                 EmitTable(word, child.Path, tblIdx, items, ctx: hfCtx,
                           parentTablePath: null, containerPath: partTargetPath);
             }
+            else if (child.Type == "sdt")
+            {
+                // BUG-R11A(BUG3): a block <w:sdt> that is a direct child of the
+                // header/footer body. Reuse the cell-SDT machinery: rich block
+                // content (the canonical PAGE/NUMPAGES footer, and the nested
+                // <w:sdt><w:sdtContent><w:sdt> shape) round-trips verbatim via a
+                // raw-set into the part root — injecting the OUTER sdt preserves
+                // any nesting. Text-shaped controls go through the typed
+                // `add sdt` path targeting the part. `cellHasContent: sawFirstPara`
+                // chooses prepend (lands ahead of the auto-seed when this SDT is
+                // the leading body content) vs append (after preceding paragraphs).
+                EmitCellSdt(word, child.Path, partTargetPath, hfRootXPath, hfRawPart,
+                            cellHasContent: sawFirstPara, items, hfCtx);
+            }
             else
             {
                 pIdx++;
                 EmitParagraph(word, child.Path, partTargetPath, pIdx, items,
-                              autoPresent: !sawFirstPara && !firstChildIsTable, hfCtx);
+                              autoPresent: !sawFirstPara && !firstChildIsNonPara, hfCtx);
                 sawFirstPara = true;
             }
         }
         // Remove the unconsumed auto-seeded leading paragraph (see above).
-        if (firstChildIsTable)
+        if (firstChildIsNonPara)
         {
             items.Add(new BatchItem
             {

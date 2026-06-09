@@ -300,6 +300,29 @@ public partial class ExcelHandler
             }
         }
 
+        // 6f. sortState (worksheet DOM): the sorted range and each sort-key
+        // column range follow the displacement; the whole state (or a single
+        // condition) is dropped when its range collapses onto the deleted line.
+        var sortState = ws.GetFirstChild<SortState>();
+        if (sortState?.Reference?.Value != null)
+        {
+            var newRef = refMapper(sortState.Reference.Value);
+            if (newRef == null) sortState.Remove();
+            else
+            {
+                if (!string.Equals(newRef, sortState.Reference.Value, StringComparison.Ordinal))
+                    sortState.Reference = newRef;
+                foreach (var sc in sortState.Elements<SortCondition>().ToList())
+                {
+                    if (sc.Reference?.Value == null) continue;
+                    var scRef = refMapper(sc.Reference.Value);
+                    if (scRef == null) sc.Remove();
+                    else if (!string.Equals(scRef, sc.Reference.Value, StringComparison.Ordinal))
+                        sc.Reference = scRef;
+                }
+            }
+        }
+
         // 7. cell formulas (text + shared/array ref attribute)
         var sheetData = ws.GetFirstChild<SheetData>();
         if (sheetData != null)

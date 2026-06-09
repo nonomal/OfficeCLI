@@ -789,6 +789,40 @@ public partial class WordHandler
     }
 
     /// <summary>
+    /// Raw body-sectPr page geometry in native OOXML twips, keyed by the same
+    /// batch prop names EmitSection uses (pageWidth/pageHeight, marginTop/…).
+    /// Used by the batch emitter to write bare-twip values instead of the
+    /// cm-rounded strings Get emits for human readback: twip→cm→twip is lossy
+    /// (e.g. 1418 twips → "2.5cm" → 1417), so dump→batch round-trips drifted by
+    /// ±1 twip. Bare integers parse back as exact twips (ParseTwips fallthrough),
+    /// so this keeps the round-trip byte-exact while leaving the canonical cm
+    /// Get output untouched. Only present keys are returned; absent pgSz/pgMar
+    /// (and their per-attribute absences) leave the slot out so the
+    /// pageSize=none / pageMargin=none sentinel path is unaffected.
+    /// </summary>
+    internal Dictionary<string, string> BodySectionPageGeometryTwips()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+        if (sectPr == null) return result;
+        var pgSz = sectPr.GetFirstChild<PageSize>();
+        if (pgSz?.Width?.Value != null) result["pageWidth"] = pgSz.Width.Value.ToString();
+        if (pgSz?.Height?.Value != null) result["pageHeight"] = pgSz.Height.Value.ToString();
+        var pgMar = sectPr.GetFirstChild<PageMargin>();
+        if (pgMar != null)
+        {
+            if (pgMar.Top?.Value != null) result["marginTop"] = ((uint)Math.Abs(pgMar.Top.Value)).ToString();
+            if (pgMar.Bottom?.Value != null) result["marginBottom"] = ((uint)Math.Abs(pgMar.Bottom.Value)).ToString();
+            if (pgMar.Left?.Value != null) result["marginLeft"] = pgMar.Left.Value.ToString();
+            if (pgMar.Right?.Value != null) result["marginRight"] = pgMar.Right.Value.ToString();
+            if (pgMar.Header?.Value != null) result["marginHeader"] = pgMar.Header.Value.ToString();
+            if (pgMar.Footer?.Value != null) result["marginFooter"] = pgMar.Footer.Value.ToString();
+            if (pgMar.Gutter?.Value != null) result["marginGutter"] = pgMar.Gutter.Value.ToString();
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Returns the existing body-level sectPr WITHOUT auto-stamping a
     /// PageSize/PageMargin. Used only by the pageSize/pageMargin remove
     /// sentinels: EnsureSectionProperties() re-stamps a default PageSize as a

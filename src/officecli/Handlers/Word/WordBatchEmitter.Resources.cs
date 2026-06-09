@@ -1437,6 +1437,20 @@ public static partial class WordBatchEmitter
         // no pgMar (or vice versa) is handled correctly. When the source HAS
         // the element the normal pageWidth/marginTop emit above carries it,
         // and no remove signal is emitted.
+        // Page geometry round-trip fix: the loop above sourced pageWidth/
+        // pageHeight/marginTop/… from Get's canonical cm strings, which round
+        // twips to 2 decimals (1418 twips → "2.5cm"). Replaying that through
+        // ParseTwips yields 1417 — a ±1-twip drift on every dump→batch cycle.
+        // Overwrite each PRESENT geometry key with its native-twip integer
+        // (bare numbers parse back as exact twips), so the rebuild's pgSz/pgMar
+        // match the source byte-for-byte. Only keys already in `props` are
+        // overwritten — the blank-baseline skip above and the pageSize=none /
+        // pageMargin=none sentinels below stay in force.
+        var rawTwips = word.BodySectionPageGeometryTwips();
+        foreach (var (gk, gv) in rawTwips)
+        {
+            if (props.ContainsKey(gk)) props[gk] = gv;
+        }
         var (hasPgSz, hasPgMar) = word.BodySectionPageGeometryPresence();
         if (!hasPgSz) props["pageSize"] = "none";
         if (!hasPgMar) props["pageMargin"] = "none";

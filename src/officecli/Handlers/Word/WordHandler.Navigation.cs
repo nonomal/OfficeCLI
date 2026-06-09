@@ -3265,11 +3265,19 @@ public partial class WordHandler
                 node.Format["sectionBreak"] = sectMark ?? "nextPage";
 
                 // Per-section page layout when overridden on this break.
+                // Emit native OOXML twips (bare integers) rather than the
+                // cm-rounded human form: these sectionBreak.* keys exist ONLY
+                // for the dump→batch round-trip (canonical Get readback for a
+                // section is via `query section`), and twip→cm→twip rounds to
+                // 2 decimals so it drifts ±1 twip per cycle (1418→"2.5cm"→1417).
+                // Bare integers parse back as exact twips (ParseTwips
+                // fallthrough), so the rebuilt inline sectPr matches byte-for-
+                // byte. Mirrors the body-sectPr fix in BodySectionPageGeometryTwips.
                 var pgSz = inlineSectPr.GetFirstChild<PageSize>();
                 if (pgSz?.Width?.Value != null)
-                    node.Format["sectionBreak.pageWidth"] = FormatTwipsToCm(pgSz.Width.Value);
+                    node.Format["sectionBreak.pageWidth"] = pgSz.Width.Value.ToString();
                 if (pgSz?.Height?.Value != null)
-                    node.Format["sectionBreak.pageHeight"] = FormatTwipsToCm(pgSz.Height.Value);
+                    node.Format["sectionBreak.pageHeight"] = pgSz.Height.Value.ToString();
                 if (pgSz?.Orient?.Value != null)
                     node.Format["sectionBreak.orientation"] = pgSz.Orient.InnerText;
 
@@ -3277,22 +3285,22 @@ public partial class WordHandler
                 if (pgMar != null)
                 {
                     if (pgMar.Top?.Value != null)
-                        node.Format["sectionBreak.marginTop"] = FormatTwipsToCm((uint)Math.Abs(pgMar.Top.Value));
+                        node.Format["sectionBreak.marginTop"] = ((uint)Math.Abs(pgMar.Top.Value)).ToString();
                     if (pgMar.Bottom?.Value != null)
-                        node.Format["sectionBreak.marginBottom"] = FormatTwipsToCm((uint)Math.Abs(pgMar.Bottom.Value));
+                        node.Format["sectionBreak.marginBottom"] = ((uint)Math.Abs(pgMar.Bottom.Value)).ToString();
                     if (pgMar.Left?.Value != null)
-                        node.Format["sectionBreak.marginLeft"] = FormatTwipsToCm(pgMar.Left.Value);
+                        node.Format["sectionBreak.marginLeft"] = pgMar.Left.Value.ToString();
                     if (pgMar.Right?.Value != null)
-                        node.Format["sectionBreak.marginRight"] = FormatTwipsToCm(pgMar.Right.Value);
+                        node.Format["sectionBreak.marginRight"] = pgMar.Right.Value.ToString();
                     // header/footer-from-edge + binding gutter (mirror the root
                     // and /section[N] readbacks) so a mid-document section
                     // break round-trips its full pgMar, not just the 4 edges.
                     if (pgMar.Header?.Value != null)
-                        node.Format["sectionBreak.marginHeader"] = FormatTwipsToCm(pgMar.Header.Value);
+                        node.Format["sectionBreak.marginHeader"] = pgMar.Header.Value.ToString();
                     if (pgMar.Footer?.Value != null)
-                        node.Format["sectionBreak.marginFooter"] = FormatTwipsToCm(pgMar.Footer.Value);
+                        node.Format["sectionBreak.marginFooter"] = pgMar.Footer.Value.ToString();
                     if (pgMar.Gutter?.Value != null)
-                        node.Format["sectionBreak.marginGutter"] = FormatTwipsToCm(pgMar.Gutter.Value);
+                        node.Format["sectionBreak.marginGutter"] = pgMar.Gutter.Value.ToString();
                 }
 
                 var pgNum = inlineSectPr.GetFirstChild<PageNumberType>();

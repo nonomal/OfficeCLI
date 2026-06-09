@@ -1396,6 +1396,15 @@ internal static class FormulaParser
                     baseArg = MakeMathRun("");
                 }
 
+                // A sub/superscript that immediately follows the n-ary operand
+                // binds to THAT operand, inside the nary body — not to the whole
+                // n-ary. \sum_{i=1}^n i^2 is Σ of i², i.e. the ^2 makes sSup(i,2)
+                // and stays inside <m:e>. Attach it here so the caller's
+                // TryAttachScript (line ~765) sees no trailing script and the
+                // nary is not re-wrapped as (Σi)². The nary's own _{}^{} limits
+                // were already consumed above; only the operand's script remains.
+                baseArg = TryAttachScript(tokens, ref pos, baseArg);
+
                 return new M.Nary(
                     naryProps,
                     new M.SubArgument(subArg != null ? ExtractChildren(subArg) : Array.Empty<OpenXmlElement>()),

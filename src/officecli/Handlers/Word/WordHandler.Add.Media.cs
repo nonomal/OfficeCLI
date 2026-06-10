@@ -450,6 +450,23 @@ public partial class WordHandler
                 OfficeCli.Core.SvgImageHelper.AppendSvgExtension(addedBlip, svgRelId);
         }
 
+        // BUG-DUMP-R45-4: re-inject image-level visual content the dump captured
+        // as verbatim XML (blip recolor/alpha children + spPr effectLst/outerShdw
+        // drop shadow). These have no flat-key representation; the fixed
+        // CreateImageRun/CreateAnchorImageRun rebuild would otherwise drop them.
+        // Each prop is present only when the source carried that content, so a
+        // plain picture is untouched.
+        if (properties.TryGetValue("blipEffects", out var blipEffectsXml)
+            && !string.IsNullOrWhiteSpace(blipEffectsXml))
+        {
+            ApplyBlipEffects(imgRun, blipEffectsXml);
+        }
+        if (properties.TryGetValue("spEffects", out var spEffectsXml)
+            && !string.IsNullOrWhiteSpace(spEffectsXml))
+        {
+            ApplySpPrEffects(imgRun, spEffectsXml);
+        }
+
         string resultPath;
         Paragraph imgPara;
         if (parent is Paragraph existingPara)
@@ -552,7 +569,9 @@ public partial class WordHandler
                 or "hrelative" or "vrelative" or "halign" or "valign" or "behindtext"
                 or "tooltip" or "tgtframe" or "tgtframe" or "history" or "url"
                 or "relid" or "id" or "contenttype" or "filesize"
-                or "src.svg")
+                or "src.svg"
+                // BUG-DUMP-R45-4: verbatim-XML props applied above, not rPr keys.
+                or "blipeffects" or "speffects")
                 continue;
             // BUG-DUMP-CROP: crop is a blipFill property, not a run-rPr key —
             // ApplyRunFormatting would silently drop it, so the dump→batch

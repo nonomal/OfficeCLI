@@ -2098,6 +2098,21 @@ public static partial class WordBatchEmitter
                     System.Text.RegularExpressions.RegexOptions.Singleline);
                 if (vPosMatch.Success)
                     picProps["vPosition"] = vPosMatch.Groups[1].Value + "emu";
+                // BUG-DUMP-R45-4: the reconstructor rebuilds <a:blip>/<pic:spPr>
+                // from a FIXED subset, silently dropping image-level visual
+                // content the source carried — recolor/alpha inside <a:blip>
+                // (duotone/biLevel/alphaModFix) and the spPr drop-shadow
+                // (<a:effectLst><a:outerShdw>). Mirror the chart verbatim-capture
+                // pattern: grab them as verbatim XML props so AddPicture can
+                // re-inject at schema-correct positions. Only set each prop when
+                // the source actually has that content (a plain picture stays
+                // plain — no spurious empty effectLst / blip children).
+                var blipInner = CapturePicBlipInnerXml(picXml);
+                if (!string.IsNullOrEmpty(blipInner))
+                    picProps["blipEffects"] = blipInner!;
+                var spEffectLst = CapturePicSpPrEffectLst(picXml);
+                if (!string.IsNullOrEmpty(spEffectLst))
+                    picProps["spEffects"] = spEffectLst!;
             }
             items.Add(new BatchItem
             {
@@ -2231,6 +2246,46 @@ public static partial class WordBatchEmitter
         // the drawing as unreconstructable so the raw-set sites skip it cleanly
         // and the caller surfaces a loss warning (mirrors the SmartArt path).
         xml.Contains("r:link");
+
+    // BUG-DUMP-R45-4: capture the inner XML of the FIRST <a:blip> inside a
+    // picture's drawing (the recolor/alpha children — duotone / biLevel /
+    // alphaModFix / lum* / clrChange — that AddPicture's fixed blip rebuild
+    // drops). The r:embed is an ATTRIBUTE of <a:blip>, not a child, so it is
+    // preserved automatically by AddPicture and excluded here. Returns null
+    // when the blip is self-closing or empty (a plain picture stays plain).
+    private static string? CapturePicBlipInnerXml(string picXml)
+    {
+        // Match the first non-self-closing <a:blip …>…</a:blip> and grab the
+        // inner content. A self-closing <a:blip … /> has no children → skip.
+        var m = System.Text.RegularExpressions.Regex.Match(
+            picXml,
+            @"<a:blip\b[^>]*?>(.*?)</a:blip>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        if (!m.Success) return null;
+        var inner = m.Groups[1].Value.Trim();
+        return inner.Length > 0 ? inner : null;
+    }
+
+    // BUG-DUMP-R45-4: capture the verbatim <a:effectLst>…</a:effectLst> sitting
+    // inside the picture's <pic:spPr> (the drop-shadow / glow / reflection that
+    // AddPicture's fixed spPr rebuild drops). Returns null when no effectLst is
+    // present so a plain picture stays plain.
+    private static string? CapturePicSpPrEffectLst(string picXml)
+    {
+        // Scope to the <pic:spPr> block first so we don't accidentally grab an
+        // effectLst from an unrelated sibling (none today, but keeps the regex
+        // honest if spPr structure grows).
+        var spMatch = System.Text.RegularExpressions.Regex.Match(
+            picXml,
+            @"<pic:spPr\b[^>]*?>(.*?)</pic:spPr>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        var scope = spMatch.Success ? spMatch.Groups[1].Value : picXml;
+        var m = System.Text.RegularExpressions.Regex.Match(
+            scope,
+            @"<a:effectLst\b[^>]*?>.*?</a:effectLst>|<a:effectLst\b[^>]*?/>",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+        return m.Success ? m.Value : null;
+    }
 
     // BUG-DUMP-R26-6: a legacy VML textbox is a <w:pict> carrying a
     // <v:textbox> (with <w:txbxContent>) or a <v:shape type="#_x0000_t202">

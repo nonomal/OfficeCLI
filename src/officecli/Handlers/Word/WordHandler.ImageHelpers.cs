@@ -455,6 +455,77 @@ public partial class WordHandler
         return true;
     }
 
+    // BUG-DUMP-R45-4: drawingml main namespace (the `a:` prefix the captured
+    // blip/spPr effect fragments use, with no xmlns of their own).
+    private const string DrawingMainNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+    // Parse a verbatim drawingml fragment that uses the bare `a:` prefix (as
+    // captured from the source picture XML, with no xmlns declaration) into a
+    // list of detached OpenXmlElements. Wraps the fragment in a temp element
+    // that declares xmlns:a so the SDK can resolve the prefix, then detaches
+    // the parsed children. Mirrors the OpenXmlUnknownElement+InnerXml pattern in
+    // ApplyW14TextEffect.
+    private static List<OpenXmlElement> ParseDrawingFragment(string fragment)
+    {
+        var holder = new OpenXmlUnknownElement("a", "tmpFragmentHolder", DrawingMainNs);
+        holder.InnerXml = fragment;
+        var children = holder.ChildElements.ToList();
+        foreach (var c in children) c.Remove();
+        return children;
+    }
+
+    // BUG-DUMP-R45-4: re-inject the source <a:blip>'s recolor/alpha children
+    // (duotone / biLevel / alphaModFix / lum* / clrChange) the fixed
+    // CreateImageRun/CreateAnchorImageRun blip rebuild dropped. The r:embed is an
+    // attribute on the rebuilt <a:blip> and is preserved; we only append the
+    // captured inner children. No-op if the run has no blip (defensive).
+    private static void ApplyBlipEffects(Run imgRun, string blipInnerXml)
+    {
+        var blip = imgRun.Descendants<A.Blip>().FirstOrDefault();
+        if (blip == null) return;
+        var children = ParseDrawingFragment(blipInnerXml);
+        // CT_Blip's child group precedes the extLst; the captured fragment is
+        // the source order verbatim, so append in sequence. AppendChild keeps
+        // them after any pre-existing child (a fresh blip has none).
+        foreach (var c in children)
+            blip.AppendChild(c);
+    }
+
+    // BUG-DUMP-R45-4: re-inject the source <pic:spPr>'s <a:effectLst> (drop
+    // shadow / glow / reflection) the fixed spPr rebuild dropped. Per
+    // CT_ShapeProperties order, effectLst follows the geometry/fill/line group,
+    // so insert it AFTER the last of xfrm/custGeom/prstGeom/fill/ln that exists
+    // (in practice immediately after <a:prstGeom>). No-op if the run has no
+    // ShapeProperties (defensive).
+    private static void ApplySpPrEffects(Run imgRun, string effectLstXml)
+    {
+        var spPr = imgRun.Descendants<PIC.ShapeProperties>().FirstOrDefault();
+        if (spPr == null) return;
+        // Don't double-inject if an effectLst is somehow already present.
+        if (spPr.GetFirstChild<A.EffectList>() != null) return;
+        var children = ParseDrawingFragment(effectLstXml);
+        // The anchor element after which effectLst belongs: the last present of
+        // the preceding-group elements (geometry/fill/line). prstGeom is always
+        // emitted by the rebuild; fall back to the last child otherwise.
+        OpenXmlElement? anchor =
+            (OpenXmlElement?)spPr.GetFirstChild<A.PresetGeometry>()
+            ?? spPr.GetFirstChild<A.CustomGeometry>()
+            ?? (OpenXmlElement?)spPr.GetFirstChild<A.Transform2D>()
+            ?? spPr.LastChild;
+        foreach (var c in children)
+        {
+            if (anchor != null)
+            {
+                anchor.InsertAfterSelf(c);
+                anchor = c;
+            }
+            else
+            {
+                spPr.AppendChild(c);
+            }
+        }
+    }
+
     private static string DetectWrapType(DW.Anchor anchor)
     {
         if (anchor.GetFirstChild<DW.WrapNone>() != null) return "none";

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System.IO.Pipes;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace OfficeCli;
@@ -213,7 +214,12 @@ public static class ResidentClient
     // On Linux/macOS, StreamReader/StreamWriter work fine and are faster (buffered
     // reads), so we keep using them.
 
-    private const int MaxLineLength = 1_048_576; // 1 MB safety limit
+    // Generous upper bound on a single pipe message. Far above any realistic
+    // command reply; it exists only to bound memory against a runaway/garbage
+    // stream. When exceeded we raise an explicit error instead of truncating to
+    // null — a silent truncate would be misreported up the stack as "command
+    // not delivered".
+    private const int MaxMessageLength = 512 * 1024 * 1024; // 512 MB
 
     private static void PipeWriteLine(Stream pipe, string line)
     {
@@ -235,21 +241,46 @@ public static class ResidentClient
             using var reader = new StreamReader(pipe, Encoding.UTF8, leaveOpen: true);
             return reader.ReadLine();
         }
-        var buffer = new byte[1];
-        var lineBytes = new List<byte>(256);
+        // Windows: read in whole chunks until the newline terminator. The payload
+        // is a single line of compact JSON (string contents have their newlines
+        // escaped), so the first '\n' ends the message and nothing follows it on a
+        // one-command-per-connection pipe. The newline is located with a
+        // vectorized span scan and chunks are appended in bulk — no per-byte work.
+        // A reply that fits in one read (the common case for small commands) is
+        // decoded straight from the read buffer with zero intermediate
+        // allocation. There is no length cap that silently drops an over-size
+        // reply; a generous ceiling only guards against a runaway stream and
+        // raises rather than truncating.
+        var chunk = new byte[65536];
+        List<byte>? acc = null; // allocated only when a reply spans multiple reads
         while (true)
         {
-            var bytesRead = pipe.Read(buffer, 0, 1);
-            if (bytesRead == 0) return lineBytes.Count > 0 ? Encoding.UTF8.GetString(lineBytes.ToArray()) : null;
-            if (buffer[0] == (byte)'\n')
+            var bytesRead = pipe.Read(chunk, 0, chunk.Length);
+            if (bytesRead == 0)
+                return acc is { Count: > 0 } ? DecodeLine(CollectionsMarshal.AsSpan(acc)) : null;
+
+            var span = chunk.AsSpan(0, bytesRead);
+            var nl = span.IndexOf((byte)'\n');
+            if (nl >= 0)
             {
-                if (lineBytes.Count > 0 && lineBytes[^1] == (byte)'\r')
-                    lineBytes.RemoveAt(lineBytes.Count - 1);
-                return Encoding.UTF8.GetString(lineBytes.ToArray());
+                var tail = span[..nl];
+                if (acc is null || acc.Count == 0)
+                    return DecodeLine(tail); // single-read fast path: no List, no copy
+                acc.AddRange(tail);
+                return DecodeLine(CollectionsMarshal.AsSpan(acc));
             }
-            if (lineBytes.Count >= MaxLineLength)
-                return null;
-            lineBytes.Add(buffer[0]);
+
+            acc ??= new List<byte>(bytesRead * 2);
+            acc.AddRange(span);
+            if (acc.Count > MaxMessageLength)
+                throw new IOException($"Resident pipe message exceeded {MaxMessageLength} bytes.");
         }
+    }
+
+    private static string DecodeLine(ReadOnlySpan<byte> line)
+    {
+        if (line.Length > 0 && line[^1] == (byte)'\r')
+            line = line[..^1];
+        return Encoding.UTF8.GetString(line);
     }
 }

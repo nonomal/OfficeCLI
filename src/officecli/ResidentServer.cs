@@ -1537,6 +1537,18 @@ public class ResidentServer : IDisposable
         }
         else
         {
+            // A dump streamed back to stdout rides the resident pipe as a single
+            // message. Past the pipe ceiling it cannot be delivered, so instead of
+            // letting the transport fail with an opaque error, steer the caller to
+            // the on-disk path: with --out the resident writes the file directly
+            // and only the path crosses the pipe. (Reuses the pipe's own ceiling so
+            // the two limits never drift apart.)
+            var bytes = Encoding.UTF8.GetByteCount(output);
+            if (bytes > MaxMessageLength)
+                throw new CliException(
+                    $"dump produced {bytes / (1024 * 1024)} MB of output, too large to return over the resident pipe. " +
+                    "Re-run with --out <file> to write it directly to disk (only the file path is returned).")
+                    { Code = "output_too_large" };
             Console.WriteLine(output);
         }
     }
@@ -1972,7 +1984,11 @@ public class ResidentServer : IDisposable
     // preview.  Raw byte I/O avoids the issue.
     // On Linux/macOS, StreamReader/StreamWriter work fine and are faster.
 
-    private const int MaxLineLength = 1_048_576; // 1 MB safety limit
+    // Generous upper bound on a single pipe message (see ResidentClient for the
+    // rationale): bounds memory against a runaway/garbage stream while never
+    // silently truncating a real request, which would surface up the stack as a
+    // bogus "command not delivered".
+    private const int MaxMessageLength = 512 * 1024 * 1024; // 512 MB
 
     private static async Task<string?> ReadLineFromPipeAsync(Stream pipe, CancellationToken token)
     {
@@ -1990,22 +2006,45 @@ public class ResidentServer : IDisposable
             using var reader = new StreamReader(pipe, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
             return await reader.ReadLineAsync(token);
         }
-        var buffer = new byte[1];
-        var lineBytes = new List<byte>(256);
+        // Windows: read in whole chunks until the newline terminator. The request
+        // is a single line of compact JSON (no embedded raw newlines) and nothing
+        // follows it on a one-command-per-connection pipe, so the first '\n' ends
+        // the message. The newline is located with a vectorized span scan and
+        // chunks are appended in bulk — no per-byte work. A request that fits in
+        // one read is decoded straight from the read buffer with zero intermediate
+        // allocation. There is no length cap that silently drops an over-size
+        // request; a generous ceiling only guards against a runaway stream.
+        var chunk = new byte[65536];
+        List<byte>? acc = null; // allocated only when a request spans multiple reads
         while (true)
         {
-            var bytesRead = await pipe.ReadAsync(buffer.AsMemory(0, 1), token);
-            if (bytesRead == 0) return lineBytes.Count > 0 ? Encoding.UTF8.GetString(lineBytes.ToArray()) : null;
-            if (buffer[0] == (byte)'\n')
+            var bytesRead = await pipe.ReadAsync(chunk.AsMemory(0, chunk.Length), token);
+            if (bytesRead == 0)
+                return acc is { Count: > 0 } ? DecodeLine(CollectionsMarshal.AsSpan(acc)) : null;
+
+            var span = chunk.AsSpan(0, bytesRead);
+            var nl = span.IndexOf((byte)'\n');
+            if (nl >= 0)
             {
-                if (lineBytes.Count > 0 && lineBytes[^1] == (byte)'\r')
-                    lineBytes.RemoveAt(lineBytes.Count - 1);
-                return Encoding.UTF8.GetString(lineBytes.ToArray());
+                var tail = span[..nl];
+                if (acc is null || acc.Count == 0)
+                    return DecodeLine(tail); // single-read fast path: no List, no copy
+                acc.AddRange(tail);
+                return DecodeLine(CollectionsMarshal.AsSpan(acc));
             }
-            if (lineBytes.Count >= MaxLineLength)
-                return null;
-            lineBytes.Add(buffer[0]);
+
+            acc ??= new List<byte>(bytesRead * 2);
+            acc.AddRange(span);
+            if (acc.Count > MaxMessageLength)
+                throw new IOException($"Resident pipe message exceeded {MaxMessageLength} bytes.");
         }
+    }
+
+    private static string DecodeLine(ReadOnlySpan<byte> line)
+    {
+        if (line.Length > 0 && line[^1] == (byte)'\r')
+            line = line[..^1];
+        return Encoding.UTF8.GetString(line);
     }
 
     private static async Task WriteLineToPipeAsync(Stream pipe, string line, CancellationToken token)

@@ -777,18 +777,26 @@ public partial class WordHandler
                 // CONSISTENCY(color-auto): bare "auto" is a legal Color val
                 // (Word's "automatic" text color); short-circuit before the
                 // scheme branch since "auto" is not a ThemeColorValues enum.
-                if (string.Equals(pColor, "auto", StringComparison.OrdinalIgnoreCase))
+                // BUG-DUMP-R44-1: split the ';themeColor=…' tail so an inline-text
+                // run color carrying an explicit hex + theme linkage keeps both.
+                var (pColorPos, pColorTheme) = ExtractThemeTail(pColor);
+                if (string.Equals(pColorPos, "auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    rProps.Color = new Color { Val = "auto" };
+                }
+                else if (pColorPos.Length == 0 && pColorTheme.Count > 0)
                 {
                     rProps.Color = new Color { Val = "auto" };
                 }
                 else
                 {
-                    var pSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(pColor);
+                    var pSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(pColorPos);
                     if (pSchemeName != null)
                         rProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(pSchemeName)) };
                     else
-                        rProps.Color = new Color { Val = SanitizeHex(pColor) };
+                        rProps.Color = new Color { Val = SanitizeHex(pColorPos) };
                 }
+                ApplyColorTheme(rProps.Color, pColorTheme);
             }
             if (properties.TryGetValue("underline", out var pUnderline) || properties.TryGetValue("font.underline", out pUnderline))
             {
@@ -1752,18 +1760,30 @@ public partial class WordHandler
             // names (accent1, dark2, hyperlink, …); same logic as
             // ApplyRunFormatting in WordHandler.Helpers.cs.
             // CONSISTENCY(color-auto): see WordHandler.Helpers.cs ApplyRunFormatting.
-            if (string.Equals(rColor, "auto", StringComparison.OrdinalIgnoreCase))
+            // BUG-DUMP-R44-1: split the ';themeColor=…' tail first so a direct
+            // run color carrying both an explicit hex AND a theme linkage (e.g.
+            // "#FFFFFF;themeColor=background1") keeps the hex as w:val and stamps
+            // the theme attrs — instead of SanitizeHex mangling the whole string
+            // (and the old code collapsing theme-only to garbage). Mirrors the
+            // ApplyRunFormatting case "color" fix.
+            var (rColorPos, rColorTheme) = ExtractThemeTail(rColor);
+            if (string.Equals(rColorPos, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                newRProps.Color = new Color { Val = "auto" };
+            }
+            else if (rColorPos.Length == 0 && rColorTheme.Count > 0)
             {
                 newRProps.Color = new Color { Val = "auto" };
             }
             else
             {
-                var rSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(rColor);
+                var rSchemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(rColorPos);
                 if (rSchemeName != null)
                     newRProps.Color = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(rSchemeName)) };
                 else
-                    newRProps.Color = new Color { Val = SanitizeHex(rColor) };
+                    newRProps.Color = new Color { Val = SanitizeHex(rColorPos) };
             }
+            ApplyColorTheme(newRProps.Color, rColorTheme);
         }
         if (properties.TryGetValue("underline", out var rUnderline) || properties.TryGetValue("font.underline", out rUnderline))
         {

@@ -778,6 +778,12 @@ public partial class WordHandler
                 // ThemeColor attribute instead of Val; Val is left at "auto"
                 // per ECMA-376 §17.3.2.6 (Excel rejects Val=accent1).
                 {
+                    // BUG-DUMP-R44-1: split the ';themeColor=…' tail first so a
+                    // direct run color carrying both an explicit hex and a theme
+                    // linkage (e.g. "FFFFFF;themeColor=background1") keeps the hex
+                    // as w:val AND stamps the theme attrs — instead of collapsing
+                    // to val="auto" (invisible). Mirrors the style-color path.
+                    var (posValue, colorTheme) = ExtractThemeTail(value);
                     Color colorEl;
                     // Bare "auto" is a legal Color val per ECMA-376 §17.3.2.6 —
                     // it tells Word to use the document's automatic text color.
@@ -785,22 +791,31 @@ public partial class WordHandler
                     // input lenience pass, but new ThemeColorValues("auto")
                     // throws (no such enum). Short-circuit before the scheme
                     // branch so dump-emitted color=auto round-trips correctly.
-                    if (string.Equals(value, "auto", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(posValue, "auto", StringComparison.OrdinalIgnoreCase))
                     {
+                        colorEl = new Color { Val = "auto" };
+                    }
+                    else if (posValue.Length == 0 && colorTheme.Count > 0)
+                    {
+                        // Theme-only linkage with no positional hex — Val=auto.
                         colorEl = new Color { Val = "auto" };
                     }
                     else
                     {
-                        var schemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(value);
+                        var schemeName = OfficeCli.Core.ParseHelpers.NormalizeSchemeColorName(posValue);
                         if (schemeName != null)
                         {
                             colorEl = new Color { Val = "auto", ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(schemeName)) };
                         }
                         else
                         {
-                            colorEl = new Color { Val = SanitizeHex(value) };
+                            colorEl = new Color { Val = SanitizeHex(posValue) };
                         }
                     }
+                    // Stamp themeColor/themeShade/themeTint from the tail (no-op
+                    // when the value carried none). When a scheme name already
+                    // set ThemeColor above, an explicit tail themeColor wins.
+                    ApplyColorTheme(colorEl, colorTheme);
                     InsertRunPropInSchemaOrder(props, colorEl);
                 }
                 return true;

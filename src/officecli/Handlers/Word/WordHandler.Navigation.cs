@@ -2030,8 +2030,15 @@ public partial class WordHandler
         // Complex-script readback (font.cs / size.cs / bold.cs / italic.cs).
         // See WordHandler.I18n.cs.
         ReadComplexScriptRunFormatting(run.RunProperties, null, node.Format);
-        if (run.RunProperties?.Color?.ThemeColor?.HasValue == true) node.Format["color"] = run.RunProperties.Color.ThemeColor.InnerText;
-        else if (run.RunProperties?.Color?.Val?.Value != null) node.Format["color"] = ParseHelpers.FormatHexColor(run.RunProperties.Color.Val.Value);
+        // BUG-DUMP-R44-1: direct run color must carry BOTH the explicit hex val
+        // AND the theme linkage (themeColor/themeShade/themeTint) via the shared
+        // ';themeColor=…' tail convention. The old code emitted only the theme
+        // name when ThemeColor was present, dropping an explicit w:val (e.g.
+        // <w:color w:val="FFFFFF" w:themeColor="background1"/> baked white text
+        // that rebuilt as val="auto" → invisible black-on-black). Mirrors the
+        // style-scoped fix (StyleColorWithThemeTail, BUG-DUMP-R43-3).
+        if (run.RunProperties?.Color != null && StyleColorWithThemeTail(run.RunProperties.Color) is { } runColor)
+            node.Format["color"] = runColor;
         if (run.RunProperties?.Underline?.Val != null) node.Format["underline"] = run.RunProperties.Underline.Val.InnerText;
         // CONSISTENCY(underline-color): backfilled from style Get edc8f884.
         if (run.RunProperties?.Underline?.Color?.Value != null)
@@ -4027,13 +4034,13 @@ public partial class WordHandler
             if (kernMark?.Val?.HasValue == true)
                 node.Format["markRPr.kern"] = kernMark.Val.Value.ToString();
             var clr = pmrpForDump.GetFirstChild<Color>();
-            if (clr != null)
-            {
-                if (clr.ThemeColor?.HasValue == true)
-                    node.Format["markRPr.color"] = clr.ThemeColor.InnerText;
-                else if (clr.Val?.Value != null)
-                    node.Format["markRPr.color"] = ParseHelpers.FormatHexColor(clr.Val.Value);
-            }
+            // BUG-DUMP-R44-1: paragraph-mark color must carry BOTH the hex val
+            // AND the theme linkage via the shared ';themeColor=…' tail, same as
+            // the direct run color path — emitting only the theme name dropped an
+            // explicit w:val (e.g. <w:color w:val="1F497D" w:themeColor="text2"/>
+            // rebuilt as val="auto").
+            if (clr != null && StyleColorWithThemeTail(clr) is { } markClr)
+                node.Format["markRPr.color"] = markClr;
             var rf = pmrpForDump.GetFirstChild<RunFonts>();
             // BUG-DUMP-MARKRPR-HANSI / BUG-DUMP-FONT-LATIN: collapse to
             // font.latin only when BOTH slots are present and equal. Divergent

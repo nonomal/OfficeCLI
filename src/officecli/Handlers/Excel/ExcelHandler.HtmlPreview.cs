@@ -3307,9 +3307,9 @@ public partial class ExcelHandler
         int intZeroPad = CountIntegerZeroPlaceholders(fmtCode);
 
         if (hasThousands)
-            return PadIntegerPart(value.ToString($"N{numDecimals}", System.Globalization.CultureInfo.InvariantCulture), intZeroPad);
+            return TrimOptionalDecimals(PadIntegerPart(value.ToString($"N{numDecimals}", System.Globalization.CultureInfo.InvariantCulture), intZeroPad), fmtCode);
         if (numDecimals > 0)
-            return PadIntegerPart(value.ToString($"F{numDecimals}", System.Globalization.CultureInfo.InvariantCulture), intZeroPad);
+            return TrimOptionalDecimals(PadIntegerPart(value.ToString($"F{numDecimals}", System.Globalization.CultureInfo.InvariantCulture), intZeroPad), fmtCode);
 
         // @ = text format — return raw
         if (fmt == "@") return value.ToString();
@@ -3366,6 +3366,58 @@ public partial class ExcelHandler
             else break;
         }
         return count;
+    }
+
+    /// <summary>
+    /// Apply optional fractional-digit-placeholder semantics to an already
+    /// fully-zero-padded numeric string. The fractional part of an Excel number
+    /// format mixes three placeholder kinds, read left-to-right after the '.':
+    ///   '0' = required digit (always shown, kept as a zero),
+    ///   '#' = optional digit (trailing zero suppressed — dropped entirely),
+    ///   '?' = optional digit (trailing zero suppressed but padded with a
+    ///         non-breaking space so decimal columns align).
+    /// The incoming <paramref name="formatted"/> was produced via "F{n}"/"N{n}"
+    /// (n = total placeholder count) so it is already rounded and fully padded.
+    /// We walk the placeholders right-to-left, trimming trailing zero digits whose
+    /// placeholder is '#' or '?', stopping at the first '0' placeholder or any
+    /// significant (non-zero) digit. If every fractional digit is dropped, the
+    /// decimal point is also removed (the trailing '?' alignment spaces remain).
+    /// </summary>
+    private static string TrimOptionalDecimals(string formatted, string fmtCode)
+    {
+        int dotIdx = fmtCode.IndexOf('.');
+        if (dotIdx < 0) return formatted;
+        // Collect the fractional placeholder kinds in order.
+        var placeholders = new List<char>();
+        for (int i = dotIdx + 1; i < fmtCode.Length; i++)
+        {
+            var c = fmtCode[i];
+            if (c == '0' || c == '#' || c == '?') placeholders.Add(c);
+            else break;
+        }
+        if (placeholders.Count == 0) return formatted;
+        // No optional placeholders → nothing to trim (all required '0').
+        if (!placeholders.Contains('#') && !placeholders.Contains('?')) return formatted;
+
+        int fmtDot = formatted.LastIndexOf('.');
+        if (fmtDot < 0) return formatted;
+        var intPart = formatted[..fmtDot];
+        var fracDigits = formatted[(fmtDot + 1)..].ToCharArray();
+        // fracDigits length should equal placeholders.Count (both = numDecimals).
+        var trailing = new StringBuilder(); // '?' alignment spaces, emitted after.
+        int p = Math.Min(placeholders.Count, fracDigits.Length) - 1;
+        for (; p >= 0; p--)
+        {
+            var kind = placeholders[p];
+            if (kind == '0') break;                 // required digit — stop trimming
+            if (fracDigits[p] != '0') break;        // significant digit — stop trimming
+            if (kind == '?') trailing.Insert(0, '\u00A0'); // '?' pads with a non-breaking space for column alignment
+            fracDigits[p] = '\0';
+        }
+        var kept = new string(fracDigits).Replace("\0", "");
+        if (kept.Length == 0)
+            return intPart + trailing.ToString();   // all fractional digits gone → drop '.'
+        return intPart + "." + kept + trailing.ToString();
     }
 
     /// <summary>

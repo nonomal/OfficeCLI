@@ -3111,10 +3111,16 @@ public partial class ExcelHandler
             }
         }
 
-        var fracMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"\?+\s*/\s*(\?+)");
+        // Variable-denominator fraction. Excel treats '#', '?' and '0' all as
+        // valid fraction digit placeholders, so detect a slash with one or more
+        // placeholders on BOTH sides (e.g. "# ??/??", "# #/#", "#/#", "?/100"'s
+        // numerator side, "0/0"). Date formats (m/d/yyyy) never match — their
+        // tokens are letters, not placeholders. The number of denominator-side
+        // placeholders bounds the max denominator (1→9, 2→99, …).
+        var fracMatch = System.Text.RegularExpressions.Regex.Match(fmtCode, @"[?#0]+\s*/\s*([?#0]+)");
         if (fracMatch.Success)
         {
-            int denomDigits = fracMatch.Groups[1].Value.Count(c => c == '?');
+            int denomDigits = fracMatch.Groups[1].Value.Count(c => c == '?' || c == '#' || c == '0');
             int maxDenom = (int)Math.Pow(10, denomDigits) - 1;
             if (maxDenom < 1) maxDenom = 9;
             bool neg = value < 0;

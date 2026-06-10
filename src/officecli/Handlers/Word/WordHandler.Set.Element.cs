@@ -2008,6 +2008,17 @@ public partial class WordHandler
                     else
                         trPr.RemoveAllChildren<CantSplit>();
                     break;
+                // BUG-DUMP-R37-3: <w:hidden/> — row not displayed/printed.
+                // Mirror the header/cantSplit toggle pattern.
+                case "hidden":
+                    if (IsTruthy(value))
+                    {
+                        if (trPr.GetFirstChild<Hidden>() == null)
+                            trPr.AppendChild(new Hidden());
+                    }
+                    else
+                        trPr.RemoveAllChildren<Hidden>();
+                    break;
                 case "cnfstyle":
                 {
                     // ST_Cnf @val bitmask (see ValidateCnfStyleBitmask). cnfStyle
@@ -2066,7 +2077,7 @@ public partial class WordHandler
                     }
                     else if (!GenericXmlQuery.TryCreateTypedChild(trPr, key, value))
                         unsupported.Add(unsupported.Count == 0
-                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, cnfStyle, rowAlign, c1, c2, ...)"
+                            ? $"{key} (valid row props: height, height.exact, header, cantSplit, hidden, cnfStyle, rowAlign, c1, c2, ...)"
                             : key);
                     break;
             }

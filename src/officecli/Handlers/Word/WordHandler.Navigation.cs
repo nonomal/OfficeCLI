@@ -4844,6 +4844,11 @@ public partial class WordHandler
             node.Format["header"] = true;
         if (trPr.GetFirstChild<CantSplit>() != null)
             node.Format["cantSplit"] = true;
+        // BUG-DUMP-R37-3: <w:hidden/> marks the whole row not displayed/printed
+        // (CT_TrPr). Previously unread — a hidden row reappeared on dump→batch.
+        // Mirror the header/cantSplit toggle reads; Add/Set grow matching cases.
+        if (trPr.GetFirstChild<Hidden>() != null)
+            node.Format["hidden"] = true;
         // BUG-DUMP-R24-1: row-level <w:jc> in <w:trPr> horizontally positions
         // the WHOLE ROW on the page (CT_TrPr). Distinct from table-level
         // tblPr/jc and from cell/paragraph alignment — use canonical key

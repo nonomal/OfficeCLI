@@ -762,6 +762,14 @@ public partial class WordHandler
                     newRowProps.AppendChild(new CantSplit());
             }
         }
+        // BUG-DUMP-R37-3: <w:hidden/> — row not displayed/printed.
+        // CONSISTENCY(add-set-symmetry): mirrors SetElementTableRow `hidden`.
+        if (properties.TryGetValue("hidden", out var rowHiddenVal) && IsTruthy(rowHiddenVal))
+        {
+            newRowProps ??= newRow.AppendChild(new TableRowProperties());
+            if (newRowProps.GetFirstChild<Hidden>() == null)
+                newRowProps.AppendChild(new Hidden());
+        }
         // BUG-DUMP-R24-1: row-level <w:jc> (whole-row alignment). jc ranks
         // after cantSplit/trHeight/tblHeader in CT_TrPr, so AppendChild keeps
         // schema order. CONSISTENCY(add-set-symmetry): mirrors SetElementTableRow.

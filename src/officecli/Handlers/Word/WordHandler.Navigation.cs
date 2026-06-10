@@ -4976,10 +4976,15 @@ public partial class WordHandler
             if (mar != null)
             {
                 // BUG-R4B(BUG1): decimal-tolerant cell-margin reads.
+                // BUG-DUMP-R37-2: logical start/end margins (<w:start>/<w:end>,
+                // the bidi-aware spelling) were silently dropped — only the
+                // physical <w:left>/<w:right> variants were read. Fall back to
+                // StartMargin/EndMargin when the physical slot is absent,
+                // mirroring the HtmlPreview CSS reader (LeftMargin ?? StartMargin).
                 if (SafeWidth(mar.TopMargin?.Width) is int mT) node.Format["padding.top"] = mT;
                 if (SafeWidth(mar.BottomMargin?.Width) is int mB) node.Format["padding.bottom"] = mB;
-                if (SafeWidth(mar.LeftMargin?.Width) is int mL) node.Format["padding.left"] = mL;
-                if (SafeWidth(mar.RightMargin?.Width) is int mR) node.Format["padding.right"] = mR;
+                if (SafeWidth(mar.LeftMargin?.Width ?? mar.StartMargin?.Width) is int mL) node.Format["padding.left"] = mL;
+                if (SafeWidth(mar.RightMargin?.Width ?? mar.EndMargin?.Width) is int mR) node.Format["padding.right"] = mR;
             }
             // Text direction
             if (tcPr.TextDirection?.Val?.Value != null)

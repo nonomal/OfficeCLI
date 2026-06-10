@@ -134,7 +134,7 @@ public partial class WordHandler
         }
 
         // ---- extract revision.* sub-keys (case-insensitive) ----
-        string? tcAuthor = null, tcDate = null, tcId = null, tcType = null;
+        string? tcAuthor = null, tcDate = null, tcId = null, tcType = null, tcBeforeXml = null;
         foreach (var (k, v) in properties)
         {
             var lk = k.ToLowerInvariant();
@@ -142,6 +142,12 @@ public partial class WordHandler
             else if (lk == "revision.date") tcDate = v;
             else if (lk == "revision.id") tcId = v;
             else if (lk == "revision.type") tcType = v;
+            // BUG-DUMP-R43-9: verbatim prior-properties snapshot the dump
+            // captured for tblPrChange/trPrChange/tcPrChange/sectPrChange.
+            // When present it overrides the current-state snapshot below so
+            // the *PrChange records the REAL pre-change properties (what
+            // Reject-Change restores), not the over-attributed current state.
+            else if (lk == "revision.beforexml") tcBeforeXml = v;
         }
         var author = string.IsNullOrEmpty(tcAuthor) ? "OfficeCLI" : tcAuthor!;
         DateTime date = DateTime.UtcNow;
@@ -175,7 +181,8 @@ public partial class WordHandler
         foreach (var (k, v) in properties)
         {
             var lk = k.ToLowerInvariant();
-            if (lk is "revision.type" or "revision.author" or "revision.date" or "revision.id")
+            if (lk is "revision.type" or "revision.author" or "revision.date" or "revision.id"
+                  or "revision.beforexml")
                 continue;
             stripped[k] = v;
         }
@@ -336,6 +343,10 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 rprChange.AppendChild(snapshotInner);
+                // BUG-DUMP-R43-8: dump-captured prior-rPr overrides the
+                // current-state snapshot when present.
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(rprChange, tcBeforeXml!);
                 // Schema CT_RPr places rPrChange last; AppendChild is correct.
                 rPr.AppendChild(rprChange);
             };
@@ -376,6 +387,8 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 pprChange.AppendChild(previous);
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(pprChange, tcBeforeXml!);
                 // Schema CT_PPr places pPrChange last; AppendChild is correct.
                 pPr.AppendChild(pprChange);
             };
@@ -435,6 +448,8 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 change.AppendChild(previous);
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(change, tcBeforeXml!);
                 tblPr.AppendChild(change);
 
                 if (preTblGrid is TableGrid preGrid)
@@ -543,6 +558,8 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 change.AppendChild(previous);
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(change, tcBeforeXml!);
                 trPr.AppendChild(change);
             };
             return (stripped, wrap);
@@ -589,6 +606,8 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 change.AppendChild(previous);
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(change, tcBeforeXml!);
                 tcPr.AppendChild(change);
 
                 if (parentTbl != null && preTblGrid is TableGrid preGrid)
@@ -635,6 +654,8 @@ public partial class WordHandler
                     Id = idStr,
                 };
                 change.AppendChild(previous);
+                if (!string.IsNullOrWhiteSpace(tcBeforeXml))
+                    ApplyBeforeXmlSnapshot(change, tcBeforeXml!);
                 sectPr.AppendChild(change);
             };
             return (stripped, wrap);
@@ -1558,5 +1579,33 @@ public partial class WordHandler
         foreach (var ch in snapshot.ChildElements.ToList())
             rebuilt.AppendChild(ch.CloneNode(true));
         grand.ReplaceChild(rebuilt, parent);
+    }
+
+    // BUG-DUMP-R43-8/9: a *PrChange wrapper records the prior property state
+    // as a nested old-props child (<w:pPr>/<w:rPr>/<w:tcPr>/…). Add v1 and the
+    // dump→batch fold both stamped that child EMPTY, so Word's Reject-Change
+    // could no longer restore the prior formatting — the payload was lost on
+    // round-trip even though author/id/date survived. The dump now surfaces the
+    // verbatim inner snapshot under `revision.beforeXml`; this helper replaces
+    // the empty inner child the creation path seeded with the real one.
+    //
+    // ONE mechanism for the whole *PrChange family: the inner old-props is a
+    // verbatim property snapshot, so we set the typed *PrChange's InnerXml to
+    // the captured fragment (the SDK re-types it on save). This sidesteps the
+    // PreviousParagraphProperties↔ParagraphPropertiesExtended SDK quirk that
+    // a strongly-typed rebuild would have to special-case, and mirrors the
+    // verbatim-passthrough that cellMerge.xml / ruby / textbox already use.
+    /// <summary>Replace the empty nested old-props child of a freshly-created
+    /// <c>*PrChange</c> marker with the verbatim snapshot captured on dump
+    /// (<c>revision.beforeXml</c>). The fragment is the inner old-props element's
+    /// OuterXml as serialized by the SDK (already carries its own xmlns:w), so
+    /// assigning it to InnerXml round-trips the real prior properties.</summary>
+    internal static void ApplyBeforeXmlSnapshot(OpenXmlElement change, string beforeXml)
+    {
+        if (string.IsNullOrWhiteSpace(beforeXml)) return;
+        // The captured fragment already includes namespace declarations (it is
+        // an OuterXml snapshot). Setting InnerXml replaces the empty seeded
+        // old-props child with the verbatim prior-state element.
+        change.InnerXml = beforeXml;
     }
 }

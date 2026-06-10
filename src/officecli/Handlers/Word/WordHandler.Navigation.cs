@@ -223,6 +223,10 @@ public partial class WordHandler
                     node.Format["sectPrChange.date"] = sDate.ToString("o");
                 if (sectPrChange.Id?.Value is { } sId)
                     node.Format["sectPrChange.id"] = sId.ToString();
+                // BUG-DUMP-R43-9: carry the verbatim prior-sectPr snapshot.
+                var sectPrev = sectPrChange.GetFirstChild<PreviousSectionProperties>();
+                if (sectPrev != null && sectPrev.HasChildren)
+                    node.Format["sectPrChange.beforeXml"] = sectPrev.OuterXml;
             }
             var pageSize = sectPr.GetFirstChild<PageSize>();
             if (pageSize?.Width?.Value != null) node.Format["pageWidth"] = FormatTwipsToCm(pageSize.Width.Value);
@@ -1946,10 +1950,16 @@ public partial class WordHandler
                     // child class round-trips through OpenXml 3.x.
                     var prevPrev = rPrChange.GetFirstChild<PreviousRunProperties>();
                     var prevPlain = rPrChange.GetFirstChild<RunProperties>();
-                    bool prevHas = (prevPrev != null && prevPrev.HasChildren)
-                                || (prevPlain != null && prevPlain.HasChildren);
-                    if (prevHas)
-                        node.Format["revision.beforeLost"] = true;
+                    OpenXmlElement? prevRun = (prevPrev != null && prevPrev.HasChildren)
+                        ? prevPrev
+                        : (prevPlain != null && prevPlain.HasChildren) ? prevPlain : null;
+                    // BUG-DUMP-R43-8: capture the verbatim prior-rPr snapshot so
+                    // the emitter can restore it (revision.beforeXml) instead of
+                    // dropping it and emitting an empty marker. Falls back to the
+                    // beforeLost warning only when the inner snapshot is empty
+                    // (nothing to carry).
+                    if (prevRun != null)
+                        node.Format["revision.beforeXml"] = prevRun.OuterXml;
                 }
             }
         }
@@ -2664,6 +2674,17 @@ public partial class WordHandler
         // internal-only (not a user-facing Set/Add key).
         node.Format["_gridCols"] = (gridColCount ?? 0).ToString();
 
+        // BUG-DUMP-R43-9: a <w:tblGridChange> records the prior column-grid as
+        // a tracked change. It carries no author/date (schema has only w:id) and
+        // no property-fold host, so unlike the other *PrChange markers it has no
+        // attribution to re-stamp — capture the FULL marker verbatim (mirrors
+        // cellMerge.xml) and let EmitTable raw-set it back into the tblGrid.
+        // Without this, a standalone tblGridChange (one not produced as a side
+        // effect of a width Set) was dropped entirely on round-trip.
+        var gridChange = table.GetFirstChild<TableGrid>()?.GetFirstChild<TableGridChange>();
+        if (gridChange != null)
+            node.Format["tblGridChange.xml"] = gridChange.OuterXml;
+
         var tp = table.GetFirstChild<TableProperties>();
         if (tp != null)
         {
@@ -2680,6 +2701,10 @@ public partial class WordHandler
                     node.Format["tblPrChange.author"] = tblPrChange.Author!.Value!;
                 if (tblPrChange.Date?.Value is DateTime tDate)
                     node.Format["tblPrChange.date"] = tDate.ToString("o");
+                // BUG-DUMP-R43-9: carry the verbatim prior-tblPr snapshot.
+                var tblPrev = tblPrChange.GetFirstChild<PreviousTableProperties>();
+                if (tblPrev != null && tblPrev.HasChildren)
+                    node.Format["tblPrChange.beforeXml"] = tblPrev.OuterXml;
             }
             // Table style
             // BUG-R3-05: empty Val (set via legacy code that wrote tblStyle
@@ -3446,10 +3471,15 @@ public partial class WordHandler
             // foreign producers). Probe both.
             var prevExt = pPrChange.GetFirstChild<ParagraphPropertiesExtended>();
             var prevPpr = pPrChange.GetFirstChild<PreviousParagraphProperties>();
-            bool prevPHas = (prevExt != null && prevExt.HasChildren)
-                         || (prevPpr != null && prevPpr.HasChildren);
-            if (prevPHas)
-                node.Format["revision.beforeLost"] = true;
+            OpenXmlElement? prevPpEl = (prevExt != null && prevExt.HasChildren)
+                ? prevExt
+                : (prevPpr != null && prevPpr.HasChildren) ? prevPpr : null;
+            // BUG-DUMP-R43-8: carry the verbatim prior-pPr snapshot so the
+            // emitter restores it via revision.beforeXml instead of stamping an
+            // empty <w:pPr/> marker. The inner element's OuterXml round-trips
+            // through AddParagraph's pPrChange InnerXml assignment.
+            if (prevPpEl != null)
+                node.Format["revision.beforeXml"] = prevPpEl.OuterXml;
         }
         // paraMarkIns: `<w:pPr><w:rPr><w:ins .../></w:rPr></w:pPr>` records
         // that the paragraph mark itself was inserted as a tracked change —
@@ -5010,6 +5040,10 @@ public partial class WordHandler
                 node.Format["trPrChange.author"] = trPrChange.Author!.Value!;
             if (trPrChange.Date?.Value is DateTime trDate)
                 node.Format["trPrChange.date"] = trDate.ToString("o");
+            // BUG-DUMP-R43-9: carry the verbatim prior-trPr snapshot.
+            var trPrev = trPrChange.GetFirstChild<PreviousTableRowProperties>();
+            if (trPrev != null && trPrev.HasChildren)
+                node.Format["trPrChange.beforeXml"] = trPrev.OuterXml;
         }
         // BUG-DUMP-R40-6: row-level tracked-change marker. <w:trPr><w:ins>/<w:del>
         // marks the whole row as inserted/deleted with track-changes on (CT_TrPr,
@@ -5142,6 +5176,12 @@ public partial class WordHandler
                     node.Format["tcPrChange.author"] = tcPrChange.Author!.Value!;
                 if (tcPrChange.Date?.Value is DateTime tcDate)
                     node.Format["tcPrChange.date"] = tcDate.ToString("o");
+                // BUG-DUMP-R43-9: carry the verbatim prior-tcPr snapshot so the
+                // Table emitter restores it (via revision.beforeXml) instead of
+                // re-stamping an empty <w:tcPr/> marker.
+                var tcPrev = tcPrChange.GetFirstChild<PreviousTableCellProperties>();
+                if (tcPrev != null && tcPrev.HasChildren)
+                    node.Format["tcPrChange.beforeXml"] = tcPrev.OuterXml;
             }
             // Borders (including diagonal)
             var cb = tcPr.TableCellBorders;

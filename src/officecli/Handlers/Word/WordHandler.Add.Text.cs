@@ -1231,6 +1231,12 @@ public partial class WordHandler
                 : GenerateRevisionId();
             pprChange.AppendChild(new PreviousParagraphProperties());
             pProps.AppendChild(pprChange);
+            // BUG-DUMP-R43-8: restore the prior-pPr snapshot the dump captured
+            // (revision.beforeXml) so Reject-Change recovers the original
+            // paragraph formatting instead of an empty <w:pPr/> marker.
+            if (properties.TryGetValue("revision.beforeXml", out var pTcBeforeXml)
+                && !string.IsNullOrWhiteSpace(pTcBeforeXml))
+                ApplyBeforeXmlSnapshot(pprChange, pTcBeforeXml);
         }
 
         // High-level paragraph-insertion revision: ANY revision.* sub-key
@@ -2210,6 +2216,12 @@ public partial class WordHandler
             // property set" — minimal marker form).
             rprChange.AppendChild(new RunProperties());
             rPr.AppendChild(rprChange);
+            // BUG-DUMP-R43-8: restore the prior-property snapshot the dump
+            // captured (revision.beforeXml) so Word's Reject-Change recovers
+            // the original run formatting instead of an empty marker.
+            if (properties.TryGetValue("revision.beforeXml", out var rTcBeforeXml)
+                && !string.IsNullOrWhiteSpace(rTcBeforeXml))
+                ApplyBeforeXmlSnapshot(rprChange, rTcBeforeXml);
         }
         if (trackChangeKind == "ins" || trackChangeKind == "del")
         {

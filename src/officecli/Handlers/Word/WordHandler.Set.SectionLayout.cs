@@ -557,6 +557,16 @@ public partial class WordHandler
                 EnsureSectPrChangeMarker().Id = value;
                 return true;
             }
+            // BUG-DUMP-R43-9: verbatim prior-sectPr snapshot. The `set /`
+            // section path has no BeginTrackChangeIfRequested decorator, so
+            // restore the real before-state here (replaces the empty
+            // <w:sectPr/> seeded by EnsureSectPrChangeMarker) — the same one
+            // mechanism the other *PrChange hosts use.
+            case "revision.beforexml":
+            {
+                ApplyBeforeXmlSnapshot(EnsureSectPrChangeMarker(), value);
+                return true;
+            }
 
             // ==================== Footnote / endnote numbering ====================
             // BUG-DUMP-SECT-FOOTNOTE: footnotePr.* / endnotePr.* on the body-level

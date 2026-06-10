@@ -326,6 +326,11 @@ public static partial class WordBatchEmitter
             tableSetProps["revision.author"] = tblPrAuthor!;
             if (!string.IsNullOrEmpty(tblPrDate))
                 tableSetProps["revision.date"] = tblPrDate!;
+            // BUG-DUMP-R43-9: carry the verbatim prior-tblPr snapshot so the
+            // tblPrChange records the real pre-change properties.
+            var tblPrBeforeXml = TryStringFormat(tableNode.Format, "tblPrChange.beforeXml");
+            if (tblPrBeforeXml != null)
+                tableSetProps["revision.beforeXml"] = tblPrBeforeXml;
         }
         else
         {
@@ -363,6 +368,30 @@ public static partial class WordBatchEmitter
                 Props = tableSetProps
             });
         }
+
+        // BUG-DUMP-R43-9: re-apply a <w:tblGridChange> (prior column-grid
+        // tracked-change) verbatim. It has no author/date attribution to fold
+        // and no Set key, so — like cellMerge.xml — it round-trips via a raw-set
+        // append into the table's <w:tblGrid>. Guarded to body tables (the
+        // (//w:tbl)[N] selector targets top-level body tables, same restriction
+        // as the cell raw-set above); the SDK reorders tblGrid children to
+        // schema order on save, so append is safe. Only emitted when the grid
+        // doesn't already carry a tblGridChange from a width-Set side effect
+        // (the snapshot here is the authoritative source state).
+        if (containerPath == "/body"
+            && tableNode.Format.TryGetValue("tblGridChange.xml", out var gridChangeRaw)
+            && gridChangeRaw?.ToString() is { Length: > 0 } gridChangeXml)
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/document",
+                Xpath = $"(//w:tbl)[{tableOrdinal}]/w:tblGrid",
+                Action = "append",
+                Xml = gridChangeXml,
+            });
+        }
+
         for (int r = 0; r < rows.Count; r++)
         {
             // Emit row-level properties (header / height / height.rule) as a
@@ -870,6 +899,12 @@ public static partial class WordBatchEmitter
         props["revision.author"] = author;
         var date = TryStringFormat(format, $"{prefix}.date");
         if (date != null) props["revision.date"] = date;
+        // BUG-DUMP-R43-9: carry the verbatim prior-properties snapshot so
+        // BeginTrackChangeIfRequested restores the REAL pre-change tcPr/trPr
+        // (what Reject-Change recovers) instead of the over-attributed
+        // current-state snapshot. One mechanism, all *PrChange hosts.
+        var beforeXml = TryStringFormat(format, $"{prefix}.beforeXml");
+        if (beforeXml != null) props["revision.beforeXml"] = beforeXml;
         return true;
     }
 

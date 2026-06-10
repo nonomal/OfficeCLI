@@ -941,6 +941,10 @@ public partial class WordHandler
                 secNode.Format["sectPrChange.date"] = sDate.ToString("o");
             if (sectPrChange.Id?.Value is { } sId)
                 secNode.Format["sectPrChange.id"] = sId.ToString();
+            // BUG-DUMP-R43-9: carry the verbatim prior-sectPr snapshot.
+            var sectPrev = sectPrChange.GetFirstChild<PreviousSectionProperties>();
+            if (sectPrev != null && sectPrev.HasChildren)
+                secNode.Format["sectPrChange.beforeXml"] = sectPrev.OuterXml;
         }
 
         var sectType = sectPr.GetFirstChild<SectionType>();

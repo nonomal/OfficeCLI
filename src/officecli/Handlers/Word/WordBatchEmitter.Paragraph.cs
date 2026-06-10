@@ -64,18 +64,13 @@ public static partial class WordBatchEmitter
                 props["revision.date"] = pmiDate;
         }
         props.Remove("paraMarkIns.id");
-        // revision.beforeLost — Get-side flag set when pPrChange's
-        // PreviousParagraphProperties carries a real pre-change pPr snapshot
-        // that Add v1 can't reconstruct. Strip the key (Add wouldn't accept
-        // it) and emit a dump warning so callers know the Reject-Change
-        // restoration state will not survive replay.
-        if (props.Remove("revision.beforeLost", out var _) && ctx != null)
-        {
-            ctx.Warnings.Add(new DocxUnsupportedWarning(
-                Element: "revision.before",
-                Path: pNode.Path,
-                Reason: "pPrChange previous-properties snapshot dropped on dump→batch round-trip; Word's Reject-Change restoration state will be lost on replay"));
-        }
+        // BUG-DUMP-R43-8: pPrChange's PreviousParagraphProperties snapshot now
+        // round-trips verbatim via revision.beforeXml (set by the pPrChange
+        // readback in Navigation.cs and consumed by AddParagraph). The former
+        // revision.beforeLost warn-and-drop path is retired — the prior-pPr
+        // payload is preserved, not lost. (A defensive strip remains in case a
+        // stale dump still carries the legacy key.)
+        props.Remove("revision.beforeLost", out var _);
         // paraMarkDel.* — surfaces the dump path through AddParagraph's
         // paraMarkDel block (added alongside this readback). Pass the keys
         // through unchanged; AddParagraph allowlists the prefix and consumes
@@ -2929,17 +2924,11 @@ public static partial class WordBatchEmitter
         {
             rProps["revision.id"] = sharedId;
         }
-        // revision.beforeLost — see EmitParagraph counterpart. Strip from
-        // the emitted props (AddRun would flag it UNSUPPORTED) and surface
-        // a dump warning so the lost rPrChange snapshot is visible to the
-        // caller.
-        if (rProps.Remove("revision.beforeLost") && ctx != null)
-        {
-            ctx.Warnings.Add(new DocxUnsupportedWarning(
-                Element: "revision.before",
-                Path: run.Path,
-                Reason: "rPrChange previous-properties snapshot dropped on dump→batch round-trip; Word's Reject-Change restoration state will be lost on replay"));
-        }
+        // BUG-DUMP-R43-8: rPrChange's PreviousRunProperties snapshot now
+        // round-trips verbatim via revision.beforeXml (see EmitParagraph
+        // counterpart). The former warn-and-drop path is retired — the
+        // prior-rPr payload is preserved. Defensive strip only, for stale dumps.
+        rProps.Remove("revision.beforeLost");
 
         // Hyperlink-wrapped run: Get flattens a <w:hyperlink>'s child run
         // into a regular run-typed node but copies the resolved URL onto

@@ -821,6 +821,21 @@ public partial class WordHandler
             shd.ThemeTint = tt;
     }
 
+    // BUG-DUMP-R43-3: stamp w:themeColor / w:themeShade / w:themeTint on a
+    // <w:color> from the ExtractThemeTail map. Mirrors ApplyBorderTheme /
+    // ApplyShadingTheme. Only present keys are written, so a plain color is
+    // unaffected. Used by AddStyle for style run-color theme linkage.
+    private static void ApplyColorTheme(Color color, Dictionary<string, string> theme)
+    {
+        if (theme.Count == 0) return;
+        if (theme.TryGetValue("themeColor", out var tc) && tc.Length > 0)
+            color.ThemeColor = new EnumValue<ThemeColorValues>(new ThemeColorValues(tc));
+        if (theme.TryGetValue("themeShade", out var tsh) && tsh.Length > 0)
+            color.ThemeShade = tsh;
+        if (theme.TryGetValue("themeTint", out var tt) && tt.Length > 0)
+            color.ThemeTint = tt;
+    }
+
     // CONSISTENCY(border-size-roundtrip): expose whether the caller provided
     // a SIZE segment so MakeBorder can suppress w:sz on nil borders that
     // never had it in the source. Mirrors the w:space "only when given"

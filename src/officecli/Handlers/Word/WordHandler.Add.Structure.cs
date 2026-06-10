@@ -1231,7 +1231,17 @@ public partial class WordHandler
         }
         if (properties.TryGetValue("color", out var sColor))
         {
-            styleRPr.Color = new Color { Val = SanitizeHex(sColor) };
+            // BUG-DUMP-R43-3: the style color value may carry a theme linkage as
+            // a ';'-tail (themeColor=accent1;themeShade=..;themeTint=..), same
+            // convention as shading/border theme tails. Split off the tail,
+            // stamp w:val from the positional hex (when present), and re-apply
+            // the theme attrs so a heading's color follows the theme after a swap.
+            var (colorPositional, colorTheme) = ExtractThemeTail(sColor);
+            var styleColor = new Color();
+            if (!string.IsNullOrEmpty(colorPositional))
+                styleColor.Val = SanitizeHex(colorPositional);
+            ApplyColorTheme(styleColor, colorTheme);
+            styleRPr.Color = styleColor;
             hasRPr = true;
         }
         if (hasRPr) newStyle.AppendChild(styleRPr);

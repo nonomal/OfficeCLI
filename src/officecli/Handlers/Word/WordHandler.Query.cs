@@ -709,8 +709,17 @@ public partial class WordHandler
                 if (rPr.GetFirstChild<BoldComplexScript>() != null) styleNode.Format["bold.cs"] = true;
                 if (rPr.Italic != null) styleNode.Format["italic"] = true;
                 if (rPr.GetFirstChild<ItalicComplexScript>() != null) styleNode.Format["italic.cs"] = true;
-                if (rPr.Color?.Val?.Value != null) styleNode.Format["color"] = ParseHelpers.FormatHexColor(rPr.Color.Val.Value);
-                else if (rPr.Color?.ThemeColor?.HasValue == true) styleNode.Format["color"] = rPr.Color.ThemeColor.InnerText;
+                // BUG-DUMP-R43-3: a style's run color may carry a theme linkage
+                // (<w:color w:val="4F81BD" w:themeColor="accent1"/>) — the hex is
+                // a baked snapshot of the theme slot, and dropping w:themeColor
+                // freezes the heading to the old hex after a theme swap. Surface
+                // the theme attrs as a ';'-tail on the color value (same convention
+                // as the shading/border theme tails), so AddStyle can re-stamp them.
+                if (rPr.Color != null)
+                {
+                    var styleColorVal = StyleColorWithThemeTail(rPr.Color);
+                    if (styleColorVal != null) styleNode.Format["color"] = styleColorVal;
+                }
                 if (rPr.Underline?.Val != null) styleNode.Format["underline"] = rPr.Underline.Val.InnerText;
                 // CONSISTENCY(underline-color): underline.color not yet exposed by paragraph/run Get; backfill there too.
                 if (rPr.Underline?.Color?.Value != null) styleNode.Format["underline.color"] = ParseHelpers.FormatHexColor(rPr.Underline.Color.Value);
@@ -3368,6 +3377,33 @@ public partial class WordHandler
         }
 
         return sb.ToString();
+    }
+
+    // BUG-DUMP-R43-3: build the style run-color Format value, appending the
+    // theme linkage (themeColor/themeShade/themeTint) as a ';'-tail when present.
+    // Mirrors the shading/border theme-tail convention so AddStyle round-trips
+    // the linkage via ExtractThemeTail. A plain color (no theme attrs) returns
+    // just the hex/scheme value unchanged. A theme-only color (w:themeColor with
+    // no w:val) returns "themeColor=accent1;..." with no leading positional hex.
+    private static string? StyleColorWithThemeTail(Color color)
+    {
+        string? baseVal = color.Val?.Value != null
+            ? ParseHelpers.FormatHexColor(color.Val.Value)
+            : null;
+        bool hasTheme = color.ThemeColor?.HasValue == true
+            || color.ThemeShade?.Value != null
+            || color.ThemeTint?.Value != null;
+        if (!hasTheme)
+            return baseVal; // plain color (or null when neither val nor theme set)
+        var tail = new System.Text.StringBuilder();
+        if (baseVal != null) tail.Append(baseVal);
+        if (color.ThemeColor?.HasValue == true) tail.Append(";themeColor=").Append(color.ThemeColor.InnerText);
+        if (color.ThemeShade?.Value is string tsh) tail.Append(";themeShade=").Append(tsh);
+        if (color.ThemeTint?.Value is string tt) tail.Append(";themeTint=").Append(tt);
+        // When baseVal is null the string starts with ';' — trim it so
+        // ExtractThemeTail's positional remainder is empty, not a leading blank.
+        var s = tail.ToString();
+        return s.StartsWith(';') ? s[1..] : s;
     }
 
     // BUG-DUMP-STYLE-LATENT: surface a style's latent-style flags so dump→batch

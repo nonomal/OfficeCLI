@@ -1726,6 +1726,49 @@ public static partial class WordBatchEmitter
                 "non-textbox drawing/shape could not be serialized for round-trip; it will be missing from the replayed document"));
             return true;
         }
+        // BUG-DUMP-R31-4: a run whose drawing is a <wps:wsp> DrawingML SHAPE
+        // (preset geometry + outline + spPr fill — e.g. an ellipse with a
+        // blipFill image and a red a:ln) surfaces as type="picture" because
+        // GetImageBinary finds the blipFill's embedded image. Routed through the
+        // `add picture` path below it is FLATTENED to a plain <pic:pic> rect: the
+        // prstGeom, the a:ln outline and the shape semantics are all lost. A
+        // wps:wsp shape must round-trip AS A SHAPE — raw-set its drawing verbatim
+        // so geometry + outline + fill structure survive — not be downgraded to a
+        // picture. Distinguish a genuine inline <pic:pic> (keep the picture path)
+        // from a wps:wsp shape (raw-set passthrough). Mirrors the VML-textbox /
+        // non-textbox-shape raw-set convention.
+        {
+            var shapeXml = word.GetElementXml(run.Path);
+            if (!string.IsNullOrEmpty(shapeXml)
+                && IsWpsShapeDrawing(shapeXml)
+                && ctx != null
+                && ResolveRawSetHost(parentPath, ctx) is { } shapeHost)
+            {
+                // The shape's blipFill references an embedded image part via
+                // r:embed; the dump can't carry that media binary + rel into a
+                // raw-set, so a verbatim passthrough would dangle the r:embed and
+                // corrupt the file. Scrub the blipFill rel (replace with a neutral
+                // solidFill placeholder so the shape stays a valid filled shape)
+                // and warn that the image bitmap is dropped — the geometry and
+                // outline, the load-bearing shape semantics, still round-trip.
+                // A wps:wsp with NO external rel (plain fill) raw-sets verbatim.
+                var scrubbed = ScrubDrawingBlipFillRels(shapeXml, out var blipDropped);
+                if (blipDropped)
+                    ctx.Warnings.Add(new DocxUnsupportedWarning(
+                        Element: "shape.blipFill",
+                        Path: run.Path,
+                        Reason: "DrawingML shape (wps:wsp) image fill (a:blipFill r:embed) dropped — shape-image round-trip is not supported; the shape's geometry and outline are preserved and the fill was replaced with a neutral placeholder to keep the rebuilt drawing valid"));
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = shapeHost.Part,
+                    Xpath = shapeHost.XPath,
+                    Action = "append",
+                    Xml = scrubbed
+                });
+                return true;
+            }
+        }
         var binary = word.GetImageBinary(run.Path);
         if (binary.HasValue)
         {
@@ -1930,6 +1973,71 @@ public static partial class WordBatchEmitter
             || rawXml.Contains("<w:pict")
             || rawXml.Contains("<mc:AlternateContent")
             || rawXml.Contains("<wps:");
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R31-4: True when a run's drawing is a modern DrawingML SHAPE
+    /// (<c>&lt;wps:wsp&gt;</c> with preset geometry / spPr) rather than a plain
+    /// inline <c>&lt;pic:pic&gt;</c> picture. Such a shape may carry a blipFill
+    /// image (so it surfaces as type="picture"), but its geometry + outline are
+    /// shape semantics that the picture-emit path would flatten away. Textboxes
+    /// (which carry their own typed/raw-set path) are excluded — they are handled
+    /// upstream by IsTextboxDrawing.
+    /// </summary>
+    private static bool IsWpsShapeDrawing(string rawXml)
+    {
+        if (string.IsNullOrEmpty(rawXml)) return false;
+        if (IsTextboxDrawing(rawXml)) return false;          // textbox has its own path
+        if (!rawXml.Contains("<wps:wsp", StringComparison.Ordinal)) return false;
+        // A genuine shape carries a preset/custom geometry or its own shape
+        // properties — that's what the picture path cannot represent.
+        return rawXml.Contains("prstGeom", StringComparison.Ordinal)
+            || rawXml.Contains("custGeom", StringComparison.Ordinal)
+            || rawXml.Contains("<wps:spPr", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R31-4: replace every <c>&lt;a:blipFill&gt;</c> whose blip
+    /// carries a relationship reference (r:embed / r:link) with a neutral
+    /// <c>&lt;a:solidFill&gt;&lt;a:srgbClr val="FFFFFF"/&gt;&lt;/a:solidFill&gt;</c>
+    /// placeholder. The dump cannot carry the referenced image binary + part
+    /// rels through a raw-set, so a verbatim passthrough would dangle the rel and
+    /// corrupt the rebuilt drawing. Scrubbing keeps the shape a schema-valid
+    /// filled shape (geometry + outline intact) at the cost of the image bitmap.
+    /// Mirrors StripDanglingThemeBlipRefs in WordBatchEmitter.Resources.cs.
+    /// </summary>
+    private static string ScrubDrawingBlipFillRels(string xml, out bool dropped)
+    {
+        dropped = false;
+        if (string.IsNullOrEmpty(xml) || !xml.Contains("blipFill", StringComparison.Ordinal))
+            return xml;
+        if (!xml.Contains(":embed=", StringComparison.Ordinal)
+            && !xml.Contains(":link=", StringComparison.Ordinal))
+            return xml;
+        try
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(xml);
+            if (doc.Root == null) return xml;
+            var aNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/drawingml/2006/main";
+            var rNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+            foreach (var blipFill in doc.Descendants(aNs + "blipFill").ToList())
+            {
+                var blip = blipFill.Element(aNs + "blip");
+                var hasRel = blip != null && blip.Attributes().Any(a => a.Name.Namespace == rNs);
+                if (!hasRel) continue;
+                var placeholder = new System.Xml.Linq.XElement(aNs + "solidFill",
+                    new System.Xml.Linq.XElement(aNs + "srgbClr",
+                        new System.Xml.Linq.XAttribute("val", "FFFFFF")));
+                blipFill.ReplaceWith(placeholder);
+                dropped = true;
+            }
+            if (!dropped) return xml;
+            return doc.Root.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+        }
+        catch
+        {
+            return xml;
+        }
     }
 
     /// <summary>

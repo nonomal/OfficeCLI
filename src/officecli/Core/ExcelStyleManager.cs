@@ -1415,6 +1415,10 @@ internal class ExcelStyleManager
             "center" => HorizontalAlignmentValues.Center,
             "right" => HorizontalAlignmentValues.Right,
             "justify" => HorizontalAlignmentValues.Justify,
+            "general" => HorizontalAlignmentValues.General,
+            "fill" => HorizontalAlignmentValues.Fill,
+            "centeracrossselection" or "centercontinuous" => HorizontalAlignmentValues.CenterContinuous,
+            "distributed" => HorizontalAlignmentValues.Distributed,
             _ => throw new ArgumentException($"Invalid horizontal alignment: '{value}'. Valid values: left, center, right, justify.")
         };
 
@@ -1424,6 +1428,8 @@ internal class ExcelStyleManager
             "top" => VerticalAlignmentValues.Top,
             "center" => VerticalAlignmentValues.Center,
             "bottom" => VerticalAlignmentValues.Bottom,
+            "justify" => VerticalAlignmentValues.Justify,
+            "distributed" => VerticalAlignmentValues.Distributed,
             _ => throw new ArgumentException($"Invalid vertical alignment: '{value}'. Valid values: top, center, bottom.")
         };
 }

@@ -696,6 +696,14 @@ public static partial class WordBatchEmitter
         var r = runs[0];
         // Picture / ptab runs need their own typed `add` rows.
         if (r.Type == "picture" || r.Type == "ptab") return false;
+        // BUG-DUMP-R25-2: a sole run whose only content is a tab CHARACTER
+        // (<w:r><w:tab/></w:r>, surfaced as Type=="tab" with empty Text) must
+        // stay on the explicit-run path so TryEmitTabRun replays `add r
+        // text="\t"`. Collapsing into `add p` flattens it via GetRunText and
+        // — with no <w:t> text to carry — the tab character vanishes. In
+        // multi-run paragraphs the tab survives because sibling run ops keep
+        // the structure; only this sole-run case was lost.
+        if (r.Type == "tab") return false;
         // OLE / embedded-object runs must stay on the explicit-run path so
         // TryEmitOleRun fires. Collapsing folds the ole metadata (progId,
         // fileSize, drawAspect, …) into `add p` props that AddParagraph

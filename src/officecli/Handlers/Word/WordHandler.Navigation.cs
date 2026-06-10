@@ -2234,12 +2234,23 @@ public partial class WordHandler
         // <w:r><w:tab/></w:r> run has no <w:t> child but node.Text="\t".
         if (node.Type == "run" && !run.Elements<Text>().Any())
         {
-            var tabEl = run.GetFirstChild<TabChar>();
-            if (tabEl != null)
+            var tabEls = run.Elements<TabChar>().ToList();
+            // BUG-DUMP-R25-2: a tab-only run carrying MULTIPLE <w:tab/> chars
+            // (no <w:t>) must keep its count. The single-`tab` upgrade below
+            // sets node.Text="" and the emitter then hardcodes one "\t", so the
+            // extra tabs were dropped on dump round-trip. Mirror the multi-break
+            // case directly below: GetRunText already surfaced them as
+            // node.Text="\t\t\t" (one \t per TabChar) and AddText splits run
+            // text on \t back into one TabChar each — so for the multi-tab case
+            // keep the run as a `run` and let the text path carry the count.
+            // Only a SINGLE tab takes the type=tab upgrade.
+            if (tabEls.Count == 1)
             {
                 node.Type = "tab";
                 node.Text = "";
             }
+            // tabEls.Count > 1 falls through: node stays type="run" with
+            // node.Text="\t\t…" (set by GetRunText), round-tripped via add r.
         }
         // CONSISTENCY(run-text-break): gate on "no Text element" (not
         // "node.Text empty"), same as the tab upgrade above. GetRunText

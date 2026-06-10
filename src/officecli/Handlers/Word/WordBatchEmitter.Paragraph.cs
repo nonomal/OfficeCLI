@@ -2640,6 +2640,12 @@ public static partial class WordBatchEmitter
     // keys on inner <w:p> count — a run-level SDT has no inner paragraph.)
     private static bool IsRichInlineSdt(string sdtXml)
     {
+        // BUG-DUMP-R27-4: a run-level SDT carrying a repeatingSection /
+        // repeatingSectionItem / docPartObj sdtPr marker must raw-set verbatim
+        // (the typed path can't express the special type). See
+        // HasSpecialSdtTypeMarker in WordBatchEmitter.Resources.cs.
+        if (HasSpecialSdtTypeMarker(sdtXml))
+            return true;
         // BUG-DUMP-R26-5: nested inline SDT. The outer <w:sdt> wraps one or more
         // child <w:sdt> in its sdtContent (L1>L2>L3 tag/id/alias nesting). The
         // flat `add sdt text=` path seeds a single run from the innermost text

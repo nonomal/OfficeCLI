@@ -1361,14 +1361,39 @@ public static partial class WordBatchEmitter
             }
             else
             {
-                items.Add(new BatchItem
+                // BUG-DUMP-R27-4: CT_Tc requires <w:tcPr> (when present) to be
+                // the cell's FIRST child, before any block content. Prepending
+                // the rich SDT to the cell landed it BEFORE <w:tcPr>
+                // (<w:tc><w:sdt/><w:tcPr/>…) → "unexpected child element tcPr"
+                // and an invalid file. The rebuilt cell always carries a tcPr
+                // (AddTable seeds the cell width), so for the empty-cell case
+                // target the cell's tcPr with `insertafter` — the SDT lands
+                // after tcPr and before the auto-seeded leading paragraph,
+                // preserving CT_Tc order and the source's "SDT is the cell's
+                // leading content" shape. The append case (cell already has
+                // emitted content) already lands after tcPr + that content.
+                if (cellHasContent)
                 {
-                    Command = "raw-set",
-                    Part = rawPart,
-                    Xpath = cellXPath,
-                    Action = cellHasContent ? "append" : "prepend",
-                    Xml = rawXml
-                });
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = rawPart,
+                        Xpath = cellXPath,
+                        Action = "append",
+                        Xml = rawXml
+                    });
+                }
+                else
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = rawPart,
+                        Xpath = $"{cellXPath}/w:tcPr",
+                        Action = "insertafter",
+                        Xml = rawXml
+                    });
+                }
                 return;
             }
         }
@@ -1441,8 +1466,26 @@ public static partial class WordBatchEmitter
     // break / tab. Such SDTs round-trip verbatim via raw-set; everything else
     // (single plain text run, form-control pickers) stays on the introspectable
     // typed `add sdt` path.
+    // BUG-DUMP-R27-4: an SDT whose sdtPr carries a special-type marker —
+    // <w15:repeatingSection> / <w15:repeatingSectionItem> (the "repeat +" UI)
+    // or <w:docPartObj> (a building-block / Quick-Part gallery registration) —
+    // cannot round-trip through the typed `add sdt` path. The typed emit reads
+    // only text/lock/placeholder/combo-dropdown sdtPr children and would
+    // reclassify the control as a generic richtext SDT, silently dropping the
+    // repeating-section structure and the gallery descriptors. Treat the marker
+    // as "rich" so the whole <w:sdt> raw-sets verbatim (same passthrough the
+    // nested-inline-SDT case uses), preserving the SDT BEHAVIOR. Namespace
+    // prefixes are matched loosely (w15:/w14:/etc.) by local element name.
+    internal static bool HasSpecialSdtTypeMarker(string sdtXml)
+        => System.Text.RegularExpressions.Regex.IsMatch(
+               sdtXml, @"<[A-Za-z0-9]+:repeatingSection(Item)?[ />]")
+        || System.Text.RegularExpressions.Regex.IsMatch(
+               sdtXml, @"<w:docPartObj[ />]");
+
     private static bool IsRichBlockSdt(string sdtXml)
     {
+        if (HasSpecialSdtTypeMarker(sdtXml))
+            return true;
         // <w:p> / <w:p attr...> — but not <w:pPr>, <w:pict>, <w:proofErr> (the
         // char after "w:p" must be a space or '>').
         if (System.Text.RegularExpressions.Regex.Matches(sdtXml, "<w:p[ >]").Count > 1)

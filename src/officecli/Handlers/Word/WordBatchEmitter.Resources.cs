@@ -262,13 +262,29 @@ public static partial class WordBatchEmitter
             var doc = System.Xml.Linq.XDocument.Parse(stylesXml);
             var wNs = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
             var el = doc.Root?.Element(wNs + "docDefaults");
-            // Source carries no docDefaults — leave the blank target's in place
-            // (removing it risks a docDefaults-less styles.xml some consumers
-            // dislike; absence here is rare and low-impact).
             dd = el?.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
         }
         catch { return; }
-        if (string.IsNullOrEmpty(dd)) return;
+
+        // BUG-DUMP-R32-2: the dump→batch rebuild starts from the blank-`create`
+        // template, whose styles.xml DOES carry an opinionated <w:docDefaults>
+        // (Calibri, sz=22/11pt). When the SOURCE styles.xml has NO docDefaults,
+        // the template's leaked through unchanged — its sz=22 default compressed
+        // line height enough to reflow a table across the page break (SSIM
+        // 0.816 → 0.899 once stripped). Faithfully round-trip the source's
+        // docDefaults-presence: emit a `remove` so the rebuilt styles.xml has no
+        // docDefaults either, matching the source.
+        if (string.IsNullOrEmpty(dd))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/styles",
+                Xpath = "/w:styles/w:docDefaults",
+                Action = "remove",
+            });
+            return;
+        }
 
         items.Add(new BatchItem
         {

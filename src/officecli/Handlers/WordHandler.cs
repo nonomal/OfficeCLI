@@ -376,6 +376,66 @@ public partial class WordHandler : IDocumentHandler
         return _doc.MainDocumentPart!;
     }
 
+    // BUG-DUMP-R45-1: enumerate the embedded font binaries (word/fonts/*.odttf)
+    // attached to the FontTablePart, keyed by the relationship id the
+    // fontTable.xml <w:embed*> elements reference. The dump emits each as a
+    // companion `raw-set /fontTable --action embed-binary` carrying the bytes as
+    // a data: URI; the apply side rebuilds the FontPart with the SAME r:id so the
+    // round-tripped embed refs (kept verbatim in the fontTable XML) resolve.
+    // The .odttf bytes are obfuscated with the w:fontKey already in the XML —
+    // they round-trip raw, no de/re-obfuscation needed.
+    internal List<(string RelId, byte[] Bytes, string ContentType)> GetEmbeddedFontParts()
+    {
+        var result = new List<(string, byte[], string)>();
+        var ftp = _doc.MainDocumentPart?.FontTablePart;
+        if (ftp == null) return result;
+        foreach (var fp in ftp.FontParts)
+        {
+            string relId;
+            try { relId = ftp.GetIdOfPart(fp); }
+            catch { continue; }
+            if (string.IsNullOrEmpty(relId)) continue;
+            try
+            {
+                using var s = fp.GetStream();
+                using var ms = new MemoryStream();
+                s.CopyTo(ms);
+                result.Add((relId, ms.ToArray(), fp.ContentType));
+            }
+            catch { /* unreadable font part — skip; emitter falls back to strip */ }
+        }
+        return result;
+    }
+
+    // BUG-DUMP-R45-2: enumerate the image binaries (word/media/*) attached to
+    // the NumberingDefinitionsPart, keyed by the relationship id the
+    // numbering.xml <w:numPicBullet> VML <v:imagedata r:id> references. Mirrors
+    // GetEmbeddedFontParts — the dump emits each as a companion
+    // `raw-set /numbering --action embed-binary` so the apply side rebuilds the
+    // ImagePart with the SAME r:id and the kept numPicBullet VML resolves.
+    internal List<(string RelId, byte[] Bytes, string ContentType)> GetNumberingImageParts()
+    {
+        var result = new List<(string, byte[], string)>();
+        var ndp = _doc.MainDocumentPart?.NumberingDefinitionsPart;
+        if (ndp == null) return result;
+        foreach (var ip in ndp.ImageParts)
+        {
+            string relId;
+            try { relId = ndp.GetIdOfPart(ip); }
+            catch { continue; }
+            if (string.IsNullOrEmpty(relId)) continue;
+            try
+            {
+                using var s = ip.GetStream();
+                using var ms = new MemoryStream();
+                s.CopyTo(ms);
+                result.Add((relId, ms.ToArray(), ip.ContentType));
+            }
+            catch { /* unreadable image part — skip */ }
+        }
+        return result;
+    }
+
     // ==================== Raw Layer ====================
 
     public string Raw(string partPath, int? startRow = null, int? endRow = null, HashSet<string>? cols = null)
@@ -423,6 +483,20 @@ public partial class WordHandler : IDocumentHandler
         if (partPath == null) throw new ArgumentNullException(nameof(partPath));
         var mainPart = _doc.MainDocumentPart
             ?? throw new InvalidOperationException("No main document part");
+
+        // BUG-DUMP-R45-1 / BUG-DUMP-R45-2: companion binary-attach action for the
+        // /fontTable and /numbering raw-set replace. The dump emits the part XML
+        // verbatim (keeping <w:embed*> / <w:numPicBullet> refs) PLUS one
+        // `embed-binary` op per referenced binary, carrying the bytes as a
+        // `data:<ct>;base64,…` URI in `xml` and the SOURCE relationship id in
+        // `xpath`. Rebuild the FontPart / ImagePart with that exact r:id so the
+        // already-replaced XML's refs resolve — no XML rewrite, no dangling rel.
+        // Mirrors the OLE base64-inline round-trip (OleHelper.AddEmbeddedPartFromBytes).
+        if (string.Equals(action, "embed-binary", StringComparison.OrdinalIgnoreCase))
+        {
+            RawEmbedBinary(mainPart, partPath, xpath, xml);
+            return;
+        }
 
         if (RawXmlHelper.IsZipUriPath(partPath))
         {
@@ -594,6 +668,49 @@ public partial class WordHandler : IDocumentHandler
         // their own structured message. Writing here pollutes batch --json
         // output (extra stdout lines escaped into result.message strings).
         _ = affected;
+    }
+
+    // BUG-DUMP-R45-1 / BUG-DUMP-R45-2: apply an `embed-binary` companion op.
+    // partPath selects the host part (/fontTable → FontPart, /numbering →
+    // ImagePart); xpath carries the source relationship id to reuse; xml is a
+    // `data:<contentType>;base64,…` URI. The FontTablePart / NumberingDefinitions
+    // Part is created lazily by the preceding `raw-set replace`, so it already
+    // exists here. AddNewPart<T>(contentType, id) attaches the part with the
+    // exact r:id, so the verbatim <w:embed*> / <v:imagedata> ref resolves.
+    private void RawEmbedBinary(MainDocumentPart mainPart, string partPath, string? xpath, string? xml)
+    {
+        var relId = xpath;
+        if (string.IsNullOrEmpty(relId))
+            throw new ArgumentException("embed-binary requires the relationship id in 'xpath'.");
+        if (!OleHelper.TryDecodeDataUri(xml, out var bytes, out var contentType) || bytes.Length == 0)
+            throw new ArgumentException("embed-binary requires a non-empty data: URI in 'xml'.");
+
+        var lowerPath = partPath.ToLowerInvariant();
+        if (lowerPath is "/fonttable")
+        {
+            var ftp = mainPart.FontTablePart
+                ?? throw new InvalidOperationException("No fontTable part for embed-binary");
+            var ct = string.IsNullOrEmpty(contentType)
+                ? "application/vnd.openxmlformats-officedocument.obfuscatedFont"
+                : contentType;
+            var fp = ftp.AddNewPart<FontPart>(ct, relId);
+            using var ms = new MemoryStream(bytes);
+            fp.FeedData(ms);
+        }
+        else if (lowerPath is "/numbering")
+        {
+            var ndp = mainPart.NumberingDefinitionsPart
+                ?? throw new InvalidOperationException("No numbering part for embed-binary");
+            var ct = string.IsNullOrEmpty(contentType) ? "image/png" : contentType;
+            var ip = ndp.AddNewPart<ImagePart>(ct, relId);
+            using var ms = new MemoryStream(bytes);
+            ip.FeedData(ms);
+        }
+        else
+        {
+            throw new ArgumentException(
+                $"embed-binary not supported for part '{partPath}' (only /fontTable, /numbering).");
+        }
     }
 
     /// <summary>

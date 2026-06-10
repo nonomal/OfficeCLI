@@ -66,6 +66,7 @@ public static partial class WordBatchEmitter
         "/word/theme/",            // theme1.xml etc — EmitThemeRaw
         "/word/header",            // header1.xml, header2.xml... EmitHeadersFooters
         "/word/footer",            // footer1.xml etc
+        "/word/fonts/",            // BUG-DUMP-R45-1: embedded fonts (.odttf) — EmitFontTableRaw embed-binary
         "/word/media/",            // images — picture run emit
         "/word/charts/",           // chart XML + embedded xlsx — chart run emit
         "/word/embeddings/",       // OLE payloads — warning already raised per-run
@@ -87,7 +88,6 @@ public static partial class WordBatchEmitter
         ("/word/commentsIds.xml",      "commentsIds",            "modern-comment durable-id metadata dropped on dump"),
         ("/word/commentsExtensible.xml","commentsExtensible",    "modern-comment extension metadata dropped on dump"),
         ("/word/webSettings.xml",      "webSettings",            "web-publishing settings dropped on dump"),
-        ("/word/fonts/",               "embeddedFont",           "embedded font binary (.odttf) dropped on dump"),
         ("/word/vbaProject.bin",       "vbaProject",             "VBA macro project dropped on dump"),
         ("/word/vbaData.xml",          "vbaData",                "VBA macro metadata dropped on dump"),
     };

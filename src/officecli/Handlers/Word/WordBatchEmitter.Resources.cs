@@ -492,27 +492,30 @@ public static partial class WordBatchEmitter
         // Skip when numbering is empty (just `<w:numbering/>` with no children).
         if (!xml.Contains("<w:abstractNum") && !xml.Contains("<w:num "))
             return;
-        xml = StripDanglingPicBullets(xml, out var picBulletsStripped);
+        // BUG-DUMP-R45-2: round-trip the picture-bullet image binaries (word/media/*)
+        // so the <w:numPicBullet> definition + its <v:imagedata r:id> + each level's
+        // <w:lvlPicBulletId> opt-in can STAY. Read the NumberingDefinitionsPart's
+        // ImageParts keyed by the rel id the VML references; for each ref the
+        // numbering XML still carries, emit a companion `embed-binary` op so the
+        // apply side rebuilds the ImagePart with the SAME r:id (RawEmbedBinary).
+        // Only fall back to StripDanglingPicBullets when NO image binary can be
+        // carried (orphaned rel) — then the level falls back to its <w:lvlText>
+        // glyph. A doc with numbering but no pic bullets is unchanged.
+        var picBins = word.GetNumberingImageParts();
+        var carriedPicRelIds = picBins
+            .Where(b => xml.Contains($"r:id=\"{b.RelId}\"", StringComparison.Ordinal))
+            .ToList();
+        if (carriedPicRelIds.Count == 0)
+        {
+            // No image binary to back the numPicBullet refs — strip to stay valid.
+            xml = StripDanglingPicBullets(xml, out var picBulletsStripped);
+            if (picBulletsStripped)
+                warnings?.Add(new DocxUnsupportedWarning(
+                    Element: "numbering.numPicBullet",
+                    Path: "/numbering",
+                    Reason: "picture list bullet (w:numPicBullet / w:lvlPicBulletId) dropped because its image binary could not be read; affected levels fall back to their w:lvlText glyph"));
+        }
         xml = ReorderLvlChildren(xml);
-        // BUG-DUMP-R31-3: picture-bullet list templates reference an image part
-        // (word/media/*) through numbering.xml.rels; the dump round-trips the
-        // numbering XML wholesale via raw-set but carries neither the numbering
-        // part's rels nor the media binary, so the r:id in the numPicBullet's VML
-        // dangles on replay. StripDanglingPicBullets removes the <w:numPicBullet>
-        // definitions and each level's <w:lvlPicBulletId> opt-in to keep the
-        // rebuilt part valid (the level falls back to its own <w:lvlText> glyph).
-        // Previously this loss was SILENT — emit a deterministic warning so the
-        // dropped picture bullet (and its image) is visible, matching the
-        // theme-blip / external-rel warning convention. Full picture-bullet
-        // image-part round-trip (carry the media + recreate numbering.xml.rels
-        // with the VML's r:id) is a separate feature: no batch primitive exists
-        // to attach a binary part + relationship to the numbering part, so it is
-        // intentionally out of scope here.
-        if (picBulletsStripped)
-            warnings?.Add(new DocxUnsupportedWarning(
-                Element: "numbering.numPicBullet",
-                Path: "/numbering",
-                Reason: "picture list bullet (w:numPicBullet / w:lvlPicBulletId + its image part) dropped — numbering picture-bullet image round-trip is not supported; affected levels fall back to their w:lvlText glyph"));
 
         items.Add(new BatchItem
         {
@@ -522,6 +525,22 @@ public static partial class WordBatchEmitter
             Action = "replace",
             Xml = xml
         });
+
+        // Companion binary ops AFTER the XML replace, so the NumberingDefinitionsPart
+        // (created lazily by the replace) exists when RawEmbedBinary attaches each
+        // ImagePart. Skip refs the (possibly stripped) XML no longer carries.
+        foreach (var (relId, bytes, contentType) in carriedPicRelIds)
+        {
+            if (!xml.Contains($"r:id=\"{relId}\"", StringComparison.Ordinal)) continue;
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/numbering",
+                Xpath = relId,
+                Action = "embed-binary",
+                Xml = $"data:{contentType};base64,{Convert.ToBase64String(bytes)}",
+            });
+        }
     }
 
     // BUG-DUMP-R42-3: round-trip word/fontTable.xml. The part declares font
@@ -551,12 +570,26 @@ public static partial class WordBatchEmitter
         if (string.IsNullOrEmpty(xml) || !xml.StartsWith("<") || !xml.Contains("<w:font"))
             return; // empty <w:fonts/> — nothing rendering-relevant to carry
 
-        xml = StripDanglingEmbeddedFontRefs(xml, out var embedStripped);
+        // BUG-DUMP-R45-1: round-trip the embedded font binaries (word/fonts/*.odttf)
+        // so the <w:embed*> refs can stay. Read the FontParts keyed by the rel id
+        // the embed elements reference; for each ref we can carry, emit a companion
+        // `embed-binary` op so the apply side rebuilds the FontPart with the SAME
+        // r:id (RawEmbedBinary). The .odttf bytes round-trip raw — the obfuscation
+        // key (w:fontKey) already rides in the verbatim fontTable XML. Only fall
+        // back to stripping refs whose binary could not be read (orphaned rel), so
+        // the rebuilt part never carries a dangling embed ref. A fontTable that
+        // declares NO embeds (faces only) emits nothing extra.
+        var fontBins = word.GetEmbeddedFontParts();
+        var carriedFontRelIds = new HashSet<string>(
+            fontBins.Select(b => b.RelId), StringComparer.OrdinalIgnoreCase);
+
+        // Strip ONLY the embed refs we cannot back with a binary; keep the rest.
+        xml = StripUncarriedEmbeddedFontRefs(xml, carriedFontRelIds, out var embedStripped);
         if (embedStripped)
             warnings?.Add(new DocxUnsupportedWarning(
                 Element: "fontTable.embeddedFont",
                 Path: "/fontTable",
-                Reason: "embedded font binary reference (w:embedRegular/Bold/Italic/BoldItalic r:id → font/*.odttf) dropped — embedded-font round-trip is not supported; the font-face declarations and altName substitutions are preserved"));
+                Reason: "an embedded font binary reference (w:embedRegular/Bold/Italic/BoldItalic) was dropped because its font binary could not be read; the font-face declarations and altName substitutions are preserved"));
 
         items.Add(new BatchItem
         {
@@ -566,27 +599,42 @@ public static partial class WordBatchEmitter
             Action = "replace",
             Xml = xml
         });
+
+        // Companion binary ops AFTER the XML replace, so the FontTablePart (created
+        // lazily by the replace) exists when RawEmbedBinary attaches each FontPart.
+        // Skip any ref the (possibly stripped) XML no longer carries.
+        foreach (var (relId, bytes, contentType) in fontBins)
+        {
+            if (!xml.Contains($"r:id=\"{relId}\"", StringComparison.Ordinal)) continue;
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = "/fontTable",
+                Xpath = relId,
+                Action = "embed-binary",
+                Xml = $"data:{contentType};base64,{Convert.ToBase64String(bytes)}",
+            });
+        }
     }
 
-    // BUG-DUMP-R42-3: strip <w:embedRegular>/<w:embedBold>/<w:embedItalic>/
-    // <w:embedBoldItalic> elements (each carries an r:id pointing at a
-    // font/*.odttf binary that the dump does not round-trip). Removing them
-    // keeps the rebuilt fontTable rel-clean while preserving the face +
-    // altName declarations. Regex-level (tolerant of attribute order /
-    // self-closing forms) — no XML parser, matching the StripDangling* family.
-    private static string StripDanglingEmbeddedFontRefs(string xml, out bool stripped)
+    // BUG-DUMP-R45-1: strip ONLY the <w:embed*> elements whose r:id is NOT in the
+    // carried set (binary unreadable), keeping every ref we round-trip. Regex-level
+    // (tolerant of attribute order / self-closing forms), matching the StripDangling*
+    // family. When carriedRelIds covers all embeds this is a no-op.
+    private static string StripUncarriedEmbeddedFontRefs(
+        string xml, HashSet<string> carriedRelIds, out bool stripped)
     {
         var before = xml;
-        // Self-closing or paired forms of each embed element.
         xml = System.Text.RegularExpressions.Regex.Replace(
             xml,
             @"<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*?/>",
-            string.Empty);
-        xml = System.Text.RegularExpressions.Regex.Replace(
-            xml,
-            @"<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*?>.*?</w:embed(?:Regular|Bold|Italic|BoldItalic)>",
-            string.Empty,
-            System.Text.RegularExpressions.RegexOptions.Singleline);
+            m =>
+            {
+                var idm = System.Text.RegularExpressions.Regex.Match(m.Value, @"r:id=""([^""]+)""");
+                return idm.Success && carriedRelIds.Contains(idm.Groups[1].Value)
+                    ? m.Value
+                    : string.Empty;
+            });
         stripped = !string.Equals(before, xml, StringComparison.Ordinal);
         return xml;
     }

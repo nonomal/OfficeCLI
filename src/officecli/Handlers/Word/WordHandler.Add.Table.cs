@@ -696,8 +696,16 @@ public partial class WordHandler
         TableRowProperties? newRowProps = null;
         if (properties.TryGetValue("height", out var rowHeight))
         {
+            // BUG-DUMP-R25-1: bare `height` = AUTO row-sizing (no @w:hRule).
+            // Explicit rule via height.atleast / height.exact below.
             newRowProps ??= newRow.AppendChild(new TableRowProperties());
-            newRowProps.AppendChild(new TableRowHeight { Val = ParseTwips(rowHeight), HeightType = HeightRuleValues.AtLeast });
+            newRowProps.AppendChild(new TableRowHeight { Val = ParseTwips(rowHeight) });
+        }
+        if (properties.TryGetValue("height.atleast", out var rowHeightAtLeast))
+        {
+            newRowProps ??= newRow.AppendChild(new TableRowProperties());
+            newRowProps.GetFirstChild<TableRowHeight>()?.Remove();
+            newRowProps.AppendChild(new TableRowHeight { Val = ParseTwips(rowHeightAtLeast), HeightType = HeightRuleValues.AtLeast });
         }
         if (properties.TryGetValue("height.exact", out var rowHeightExact))
         {

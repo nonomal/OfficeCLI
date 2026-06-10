@@ -4471,16 +4471,22 @@ public partial class WordHandler
         var rh = trPr.GetFirstChild<TableRowHeight>();
         if (rh?.Val?.Value != null)
         {
-            // CONSISTENCY(unit-qualified-readback): docx stores row height
-            // in twips (1440 twips = 1 inch = 2.54 cm); emit as "{n}cm" to
-            // match the input vocabulary (Set accepts "2cm") and the other
-            // docx length readbacks (pageWidth/pageHeight). Prior code
-            // emitted pt and broke `set height=2cm` → `get height=56.7pt`
-            // round-trip.
-            var heightCm = rh.Val.Value * 2.54 / 1440.0;
-            node.Format["height"] = $"{heightCm.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}cm";
+            // BUG-DUMP-R25-1: emit row height as RAW TWIPS ("{n}dxa") not
+            // 2-decimal cm. cm round-tripping drifted the val (302→300,
+            // 734→731, …) because Round(twips*2.54/1440) loses precision.
+            // dxa is the same exact-twip convention already used for
+            // colWidths/width readback (ParseTwips strips the "dxa" suffix
+            // with no scaling). Set still accepts "2cm" on the input side.
+            node.Format["height"] = rh.Val.Value + "dxa";
+            // BUG-DUMP-R25-1: round-trip the height rule faithfully. docx
+            // CT_Height @w:hRule defaults to "auto" when absent — Word treats
+            // an absent hRule as auto row-sizing. Only emit height.rule when
+            // the source actually carried an explicit exact/atLeast; emitting
+            // it for auto would let Add/Set inject a spurious atLeast.
             if (rh.HeightType?.Value == HeightRuleValues.Exact)
                 node.Format["height.rule"] = "exact";
+            else if (rh.HeightType?.Value == HeightRuleValues.AtLeast)
+                node.Format["height.rule"] = "atLeast";
         }
         if (trPr.GetFirstChild<TableHeader>() != null)
             node.Format["header"] = true;

@@ -632,20 +632,24 @@ public static partial class WordBatchEmitter
     private static Dictionary<string, string> ExtractRowOnlyProps(Dictionary<string, object?> raw)
     {
         var filtered = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        bool heightExact = false;
-        if (raw.TryGetValue("height.rule", out var ruleObj) &&
-            string.Equals(ruleObj?.ToString(), "exact", StringComparison.OrdinalIgnoreCase))
-        {
-            heightExact = true;
-        }
+        // BUG-DUMP-R25-1: translate the readback's height + height.rule into the
+        // rule-specific apply key. Absent height.rule = AUTO row-sizing → bare
+        // `height` (no @w:hRule injected). Exact/atLeast map to the explicit
+        // keys so the source rule round-trips faithfully.
+        string? heightRule = null;
+        if (raw.TryGetValue("height.rule", out var ruleObj))
+            heightRule = ruleObj?.ToString();
         foreach (var (key, val) in raw)
         {
             if (!RowOnlyKeys.Contains(key)) continue;
-            // height + height.rule=exact → SetElementTableRow expects key
-            // `height.exact`. Translate so dump output applies cleanly.
-            if (heightExact && string.Equals(key, "height", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(key, "height", StringComparison.OrdinalIgnoreCase))
             {
-                filtered["height.exact"] = val;
+                if (string.Equals(heightRule, "exact", StringComparison.OrdinalIgnoreCase))
+                    filtered["height.exact"] = val;
+                else if (string.Equals(heightRule, "atLeast", StringComparison.OrdinalIgnoreCase))
+                    filtered["height.atleast"] = val;
+                else
+                    filtered["height"] = val;
             }
             else
             {

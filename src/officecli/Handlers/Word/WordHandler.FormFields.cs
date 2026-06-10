@@ -104,13 +104,20 @@ public partial class WordHandler
             node.Format["type"] = "dropdown";
             var items = dropDown.Elements<ListEntryFormField>().Select(li => li.Val?.Value ?? "").ToList();
             if (items.Count > 0) node.Format["items"] = string.Join(",", items);
-            var defaultIdx = dropDown.GetFirstChild<DropDownListSelection>()?.Val?.Value ?? 0;
-            node.Format["default"] = (int)defaultIdx;
-            // Current selection
+            // BUG-DUMP-R27-3: <w:result> is the CURRENT selection, <w:default>
+            // is the default entry — surface them distinctly (the old code
+            // stored the selection under `default`, masking the real default
+            // and losing the selection on round-trip).
+            var resultIdx = dropDown.GetFirstChild<DropDownListSelection>()?.Val?.Value;
+            if (resultIdx != null) node.Format["result"] = (int)resultIdx;
+            var ddDefaultIdx = dropDown.GetFirstChild<DefaultDropDownListItemIndex>()?.Val?.Value;
+            if (ddDefaultIdx != null) node.Format["default"] = (int)ddDefaultIdx;
+            // Current display text follows the selection (w:result), else default.
+            var selIdx = resultIdx ?? ddDefaultIdx ?? 0;
             var resultText = string.Join("", ff.Field.ResultRuns.SelectMany(r => r.Elements<Text>()).Select(t => t.Text));
             node.Text = resultText;
-            if (string.IsNullOrEmpty(resultText) && defaultIdx < items.Count)
-                node.Text = items[(int)defaultIdx];
+            if (string.IsNullOrEmpty(resultText) && selIdx < items.Count)
+                node.Text = items[(int)selIdx];
         }
 
         // Editable status based on protection
@@ -393,17 +400,40 @@ public partial class WordHandler
             case "dropdown" or "drop":
             {
                 var ddl = new DropDownListFormField();
+                // BUG-DUMP-R27-3: <w:ddList> schema order is result, default,
+                // listEntry* — the current selection (<w:result>) and default
+                // (<w:default>) precede the entries. Append them first so the
+                // dropdown's selected value survives dump→batch round-trip
+                // (was dropped entirely: neither element was ever written).
+                int? resultIdx = null;
+                if (ciProps.TryGetValue("result", out var resStr)
+                    && int.TryParse(resStr, out var resIdx))
+                {
+                    ddl.AppendChild(new DropDownListSelection { Val = resIdx });
+                    resultIdx = resIdx;
+                }
+                if (ciProps.TryGetValue("default", out var ddDefStr)
+                    && int.TryParse(ddDefStr, out var ddDefIdx))
+                    ddl.AppendChild(new DefaultDropDownListItemIndex { Val = ddDefIdx });
+                var entries = new List<string>();
                 if (ciProps.TryGetValue("items", out var items))
                 {
                     foreach (var item in items.Split(','))
-                        ddl.AppendChild(new ListEntryFormField { Val = item.Trim() });
+                    {
+                        var trimmed = item.Trim();
+                        entries.Add(trimmed);
+                        ddl.AppendChild(new ListEntryFormField { Val = trimmed });
+                    }
                 }
                 ffData.AppendChild(ddl);
-                // Default to first item if no text specified
-                if (string.IsNullOrEmpty(text) && ciProps.TryGetValue("items", out var itemsList))
+                // Initial display text: the selected entry when a result index
+                // was given, otherwise the first item (legacy default).
+                if (string.IsNullOrEmpty(text))
                 {
-                    var firstItem = itemsList.Split(',').FirstOrDefault()?.Trim();
-                    if (firstItem != null) text = firstItem;
+                    if (resultIdx is int ri && ri >= 0 && ri < entries.Count)
+                        text = entries[ri];
+                    else if (entries.Count > 0)
+                        text = entries[0];
                 }
                 break;
             }

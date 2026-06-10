@@ -2187,9 +2187,20 @@ public partial class WordHandler
                             .Select(li => li.Val?.Value ?? "").ToList();
                         if (items.Count > 0)
                             node.Format["ffItems"] = string.Join(",", items);
+                        // BUG-DUMP-R27-3: <w:ddList> carries TWO distinct indices —
+                        // <w:result> (DropDownListSelection) is the CURRENT
+                        // selection, <w:default> (DefaultDropDownListItemIndex) is the
+                        // default entry. The old readback stored the SELECTION
+                        // under `ffDefault` (conflating the two) and never read
+                        // the real default, so on emit neither <w:result> nor
+                        // <w:default> was re-applied — the dropdown reverted to
+                        // the first entry. Surface them as separate keys.
                         var dSel = dd.GetFirstChild<DropDownListSelection>()?.Val?.Value;
                         if (dSel != null)
-                            node.Format["ffDefault"] = (int)dSel;
+                            node.Format["ffResult"] = (int)dSel;
+                        var dDef = dd.GetFirstChild<DefaultDropDownListItemIndex>()?.Val?.Value;
+                        if (dDef != null)
+                            node.Format["ffDefault"] = (int)dDef;
                     }
                 }
             }

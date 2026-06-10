@@ -651,6 +651,10 @@ public static partial class WordBatchEmitter
                         else if (child.Format.TryGetValue("endPara", out var ep)
                             && ep != null && ep.ToString() is { Length: > 0 } eps && eps != "0")
                             bmProps["endPara"] = eps;
+                        // BUG-DUMP-R32-4: forward a table-column-range bookmark's
+                        // colFirst/colLast so AddBookmark re-stamps them instead
+                        // of downgrading to a plain point bookmark.
+                        ForwardBookmarkColRange(child.Format, bmProps);
                         items.Add(new BatchItem
                         {
                             Command = "add",

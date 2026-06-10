@@ -370,6 +370,21 @@ public partial class WordHandler
         var bookmarkStart = new BookmarkStart { Id = bkId, Name = bkName };
         var bookmarkEnd = new BookmarkEnd { Id = bkId };
 
+        // BUG-DUMP-R32-4: a table-column-range bookmark carries
+        // w:colFirst/w:colLast (a rectangular column-span over table columns).
+        // BookmarkStartToNode now surfaces them; re-stamp here so dump→batch
+        // keeps the bookmark as a column-range bookmark instead of downgrading
+        // it to a plain point bookmark. Accept either casing (Get emits the
+        // canonical colFirst/colLast).
+        if ((properties.TryGetValue("colFirst", out var colFirstStr)
+                || properties.TryGetValue("colfirst", out colFirstStr))
+            && int.TryParse(colFirstStr, out var colFirstN))
+            bookmarkStart.ColumnFirst = colFirstN;
+        if ((properties.TryGetValue("colLast", out var colLastStr)
+                || properties.TryGetValue("collast", out colLastStr))
+            && int.TryParse(colLastStr, out var colLastN))
+            bookmarkStart.ColumnLast = colLastN;
+
         // BUG-DUMP10-04: optional endPara offset (>0) defers BookmarkEnd
         // placement to a later paragraph in the same body so multi-
         // paragraph bookmark spans round-trip through dump→batch. Default

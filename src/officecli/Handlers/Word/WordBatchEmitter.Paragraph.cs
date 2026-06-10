@@ -885,6 +885,9 @@ public static partial class WordBatchEmitter
         if (bmProps.Count == 0) return true; // skip unnamed/anonymous bookmarks
         if (run.Format.TryGetValue("_spanOpen", out var sp) && sp is bool bsp && bsp)
             bmProps["open"] = "true";
+        // BUG-DUMP-R32-4: forward colFirst/colLast for an inline
+        // table-column-range bookmark (mirrors the body-direct case).
+        ForwardBookmarkColRange(run.Format, bmProps);
         items.Add(new BatchItem
         {
             Command = "add",
@@ -893,6 +896,21 @@ public static partial class WordBatchEmitter
             Props = bmProps
         });
         return true;
+    }
+
+    // BUG-DUMP-R32-4: copy a bookmark node's colFirst/colLast (a rectangular
+    // table-column-range bookmark) into the `add bookmark` props so AddBookmark
+    // re-stamps w:colFirst/w:colLast. Shared by the body-direct and inline
+    // bookmark emit paths.
+    private static void ForwardBookmarkColRange(
+        Dictionary<string, object?> format, Dictionary<string, string> bmProps)
+    {
+        if (format.TryGetValue("colFirst", out var cf)
+            && cf?.ToString() is { Length: > 0 } cfs)
+            bmProps["colFirst"] = cfs;
+        if (format.TryGetValue("colLast", out var cl)
+            && cl?.ToString() is { Length: > 0 } cls)
+            bmProps["colLast"] = cls;
     }
 
     // BUG-DUMP-PERM: emit a ranged editing-permission marker (<w:permStart>/

@@ -1525,6 +1525,15 @@ public partial class WordHandler
                 }
             }
         }
+        // BUG-DUMP-R32-4: a table-column-range bookmark carries
+        // w:colFirst/w:colLast (a rectangular column-span bookmark over table
+        // columns). These were dropped on dump, downgrading the bookmark to a
+        // plain point bookmark. Surface them so AddBookmark re-stamps the attrs.
+        // Mirrors the permStart ColumnFirst/ColumnLast reads above.
+        if (bkStart.ColumnFirst?.Value != null)
+            node.Format["colFirst"] = bkStart.ColumnFirst.Value.ToString();
+        if (bkStart.ColumnLast?.Value != null)
+            node.Format["colLast"] = bkStart.ColumnLast.Value.ToString();
         var bkText = GetBookmarkText(bkStart);
         if (!string.IsNullOrEmpty(bkText))
             node.Text = bkText;

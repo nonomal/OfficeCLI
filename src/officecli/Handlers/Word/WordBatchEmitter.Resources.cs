@@ -1822,6 +1822,16 @@ public static partial class WordBatchEmitter
         var (hasPgSz, hasPgMar) = word.BodySectionPageGeometryPresence();
         if (!hasPgSz) props["pageSize"] = "none";
         if (!hasPgMar) props["pageMargin"] = "none";
+        // BUG-DUMP-R31-1: a childless <w:sectPr/> (no pgSz, no pgMar) is NOT the
+        // same as a missing sectPr — real Word renders the two at different page
+        // widths. The pageSize=none / pageMargin=none sentinels above would let
+        // the apply's drop-the-empty-sectPr path remove the element entirely,
+        // collapsing "empty sectPr present" into "no sectPr". Emit an explicit
+        // sectPr=present marker whenever the source body actually carries a
+        // sectPr element, so the apply keeps a bare <w:sectPr/> instead of
+        // dropping it. Absent on a truly sectPr-less source — there the drop
+        // path stays in force.
+        if (word.BodyHasSectionProperties()) props["sectPr"] = "present";
         // sectPrChange round-trip — fold the source's <w:sectPrChange>
         // format-revision marker (author/date) into the section `set /` op as
         // a revision.type=format + revision.author (+ .date) triplet, mirroring

@@ -3457,8 +3457,22 @@ public partial class WordHandler
             var inlineSectPr = pProps.GetFirstChild<SectionProperties>();
             if (inlineSectPr != null)
             {
+                // BUG-DUMP-R31-1: a mid-document <w:sectPr> may be CHILDLESS
+                // (no <w:type>, no pgSz/pgMar) — the source author deferred the
+                // break kind and page geometry to Word's defaults, exactly like
+                // an empty FINAL body sectPr. Emitting a fabricated
+                // sectionBreak="nextPage" here (and a default pgSz/pgMar on
+                // rebuild) injects a <w:type>/geometry the source never had.
+                // Surface the REAL <w:type> (null when absent) and flag a truly
+                // childless sectPr so the emitter omits `type` and the apply
+                // produces a bare <w:sectPr/>. A mid sectPr WITH real type or
+                // geometry keeps emitting those keys below.
                 var sectMark = inlineSectPr.GetFirstChild<SectionType>()?.Val?.InnerText;
                 node.Format["sectionBreak"] = sectMark ?? "nextPage";
+                if (sectMark != null)
+                    node.Format["sectionBreak.type"] = sectMark;
+                if (!inlineSectPr.HasChildren)
+                    node.Format["sectionBreak.empty"] = true;
 
                 // Per-section page layout when overridden on this break.
                 // Emit native OOXML twips (bare integers) rather than the

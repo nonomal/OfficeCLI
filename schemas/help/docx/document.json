@@ -502,6 +502,20 @@
       ],
       "enforcement": "report"
     },
+    "sectPr": {
+      "type": "enum",
+      "values": [
+        "present"
+      ],
+      "add": false,
+      "set": true,
+      "get": false,
+      "description": "dump→batch round-trip marker: forces the body's final section to emit a (possibly empty) <w:sectPr/> so an empty source sectPr is not dropped. Internal round-trip use; not an interactive edit.",
+      "examples": [
+        "--prop sectPr=present"
+      ],
+      "enforcement": "report"
+    },
     "pageHeight": {
       "type": "length",
       "add": false,

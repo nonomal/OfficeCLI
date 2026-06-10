@@ -633,6 +633,19 @@ public partial class WordHandler
                         BodySectionPropertiesForRemove()?.RemoveAllChildren<PageMargin>();
                     break;
 
+                // BUG-DUMP-R31-1: emitter signal that the source body carried a
+                // <w:sectPr> element (possibly childless). Materialize it so a
+                // bare <w:sectPr/> round-trips — a missing sectPr renders at a
+                // different page width than an empty one. EnsureSectionProperties
+                // creates the body sectPr if absent; no child is added, so an
+                // otherwise-empty source stays empty. Combined with pageSize=none /
+                // pageMargin=none, this also suppresses the drop-the-empty-sectPr
+                // path below (RemovedBothPageGeometry sees sectPr=present).
+                case "sectpr":
+                    if (string.Equals(value, "present", StringComparison.OrdinalIgnoreCase))
+                        EnsureBareSectionProperties();
+                    break;
+
                 case "pagewidth" or "width":
                 {
                     var twW = ParseTwips(value);
@@ -784,6 +797,20 @@ public partial class WordHandler
             if (bodySectPr != null && IsEmptyDefaultSectionProperties(bodySectPr))
                 bodySectPr.Remove();
         }
+        // BUG-DUMP-R31-1: the source carried a childless <w:sectPr/> (sectPr=
+        // present + both geometry-none sentinels). The drop path above is
+        // suppressed so the element survives, but the blank rebuild target still
+        // holds the template's default <w:docGrid w:type="default"/>. Strip that
+        // trivial default so the rebuilt sectPr is bare like the source — a bare
+        // <w:sectPr/> and a sectPr carrying a stray default docGrid resolve to
+        // the same page width, but a byte-faithful empty round-trip is cleaner
+        // and matches the source's IsEmptyDefaultSectionProperties shape.
+        else if (KeptEmptySectPr(properties))
+        {
+            var bodySectPr = _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+            if (bodySectPr != null && IsEmptyDefaultSectionProperties(bodySectPr))
+                bodySectPr.RemoveAllChildren<DocGrid>();
+        }
         }
         catch
         {
@@ -805,7 +832,7 @@ public partial class WordHandler
     /// </summary>
     private static bool RemovedBothPageGeometry(Dictionary<string, string> properties)
     {
-        bool pgSzNone = false, pgMarNone = false;
+        bool pgSzNone = false, pgMarNone = false, sectPrPresent = false;
         foreach (var (key, value) in properties)
         {
             switch (key.ToLowerInvariant())
@@ -816,9 +843,43 @@ public partial class WordHandler
                 case "pagemargin" when string.Equals(value, "none", StringComparison.OrdinalIgnoreCase):
                     pgMarNone = true;
                     break;
+                // BUG-DUMP-R31-1: the source body genuinely carried a <w:sectPr>
+                // (even childless). A bare sectPr must round-trip — its absence
+                // changes the rendered page width — so the drop-the-empty-sectPr
+                // path must NOT fire even though both geometry-none sentinels did.
+                case "sectpr" when string.Equals(value, "present", StringComparison.OrdinalIgnoreCase):
+                    sectPrPresent = true;
+                    break;
             }
         }
-        return pgSzNone && pgMarNone;
+        return pgSzNone && pgMarNone && !sectPrPresent;
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R31-1: True when this `set /` carried BOTH geometry-none
+    /// sentinels AND the sectPr=present marker — the source had a childless
+    /// &lt;w:sectPr/&gt;. The element must be KEPT (not dropped) but trimmed of
+    /// the blank template's default docGrid so it round-trips bare.
+    /// </summary>
+    private static bool KeptEmptySectPr(Dictionary<string, string> properties)
+    {
+        bool pgSzNone = false, pgMarNone = false, sectPrPresent = false;
+        foreach (var (key, value) in properties)
+        {
+            switch (key.ToLowerInvariant())
+            {
+                case "pagesize" when string.Equals(value, "none", StringComparison.OrdinalIgnoreCase):
+                    pgSzNone = true;
+                    break;
+                case "pagemargin" when string.Equals(value, "none", StringComparison.OrdinalIgnoreCase):
+                    pgMarNone = true;
+                    break;
+                case "sectpr" when string.Equals(value, "present", StringComparison.OrdinalIgnoreCase):
+                    sectPrPresent = true;
+                    break;
+            }
+        }
+        return pgSzNone && pgMarNone && sectPrPresent;
     }
 
     /// <summary>
@@ -866,6 +927,18 @@ public partial class WordHandler
         return (sectPr.GetFirstChild<PageSize>() != null,
                 sectPr.GetFirstChild<PageMargin>() != null);
     }
+
+    /// <summary>
+    /// BUG-DUMP-R31-1: True when the source body carries a &lt;w:sectPr&gt;
+    /// element at all (even a childless one). The pageSize=none / pageMargin=none
+    /// sentinels alone can't distinguish "source had NO sectPr" from "source had
+    /// an EMPTY &lt;w:sectPr/&gt;" — and the two render at DIFFERENT page widths
+    /// in real Word (a bare sectPr resolves to one default geometry, a missing
+    /// sectPr to another). The emitter uses this to decide whether the drop-the-
+    /// empty-sectPr path may fire (only when the source truly had none).
+    /// </summary>
+    internal bool BodyHasSectionProperties()
+        => _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>() != null;
 
     /// <summary>
     /// Raw body-sectPr page geometry in native OOXML twips, keyed by the same
@@ -918,6 +991,26 @@ public partial class WordHandler
     /// </summary>
     private SectionProperties? BodySectionPropertiesForRemove()
         => _doc.MainDocumentPart?.Document?.Body?.GetFirstChild<SectionProperties>();
+
+    /// <summary>
+    /// BUG-DUMP-R31-1: ensure the body has a &lt;w:sectPr&gt; element WITHOUT
+    /// stamping the default A4 pgSz the way EnsureSectionProperties does. Used by
+    /// the sectPr=present round-trip signal: an empty source sectPr must stay
+    /// empty (pgSz/pgMar were stripped by the pageSize=none/pageMargin=none
+    /// sentinels), and re-stamping A4 here would re-introduce the geometry the
+    /// sentinels just removed.
+    /// </summary>
+    private SectionProperties EnsureBareSectionProperties()
+    {
+        var body = _doc.MainDocumentPart!.Document!.Body!;
+        var sectPr = body.GetFirstChild<SectionProperties>();
+        if (sectPr == null)
+        {
+            sectPr = new SectionProperties();
+            body.AppendChild(sectPr);
+        }
+        return sectPr;
+    }
 
     private SectionProperties EnsureSectionProperties()
     {

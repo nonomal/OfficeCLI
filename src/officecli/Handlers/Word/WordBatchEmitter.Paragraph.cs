@@ -526,15 +526,25 @@ public static partial class WordBatchEmitter
             !pNode.Format.TryGetValue("sectionBreak", out var breakKind) || breakKind == null)
             return false;
         {
-            var sectProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["type"] = breakKind.ToString() ?? "nextPage"
-            };
+            // BUG-DUMP-R31-1: a childless mid-document <w:sectPr/> must round-trip
+            // bare — no fabricated <w:type>, no default pgSz/pgMar. Navigation
+            // emits sectionBreak.type ONLY when the source carried a real
+            // <w:type>, and sectionBreak.empty=true when the sectPr was truly
+            // childless. Emit `type` only when the source had one; forward the
+            // `empty` flag so AddSection produces a bare sectPr instead of
+            // stamping the body section's geometry.
+            bool sourceHadType = pNode.Format.ContainsKey("sectionBreak.type");
+            var sectProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (sourceHadType)
+                sectProps["type"] = breakKind.ToString() ?? "nextPage";
             foreach (var (k, v) in pNode.Format)
             {
                 if (!k.StartsWith("sectionBreak.", StringComparison.OrdinalIgnoreCase)) continue;
                 if (v == null) continue;
                 var keyTail = k["sectionBreak.".Length..];
+                // `sectionBreak.type` already drove the `type` key above; don't
+                // also emit a stray `type` (it's the same value) — skip the alias.
+                if (string.Equals(keyTail, "type", StringComparison.OrdinalIgnoreCase)) continue;
                 var s = v switch { bool b => b ? "true" : "false", _ => v.ToString() ?? "" };
                 if (s.Length > 0) sectProps[keyTail] = s;
             }

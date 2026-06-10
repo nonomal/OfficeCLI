@@ -81,6 +81,15 @@ public partial class WordHandler
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
 
+        // BUG-DUMP-R31-1: a childless mid-document <w:sectPr/> round-trip. The
+        // dump emits `empty=true` (with no `type` and no geometry keys) when the
+        // source's inline sectPr had NO children — the author deferred the break
+        // kind and page geometry to Word's defaults, exactly like an empty FINAL
+        // body sectPr. In that case build a bare sectPr: no fabricated
+        // <w:type>, no default pgSz/pgMar. A mid sectPr WITH a real type or
+        // geometry forwards those keys and takes the normal path below.
+        bool bareSection = properties.TryGetValue("empty", out var emptyFlag) && IsTruthy(emptyFlag);
+
         // Section break: adds SectionProperties to the last paragraph before the break point
         var breakType = properties.GetValueOrDefault("type", "nextPage").ToLowerInvariant();
         var sectType = breakType switch
@@ -105,7 +114,12 @@ public partial class WordHandler
         // schema-aware inserts produced argv-order-dependent invalid OOXML
         // when e.g. `columns` (rank 11) was appended before `lineNumbers`
         // (rank 9).
-        InsertSectPrChildInOrder(sectPr, new SectionType { Val = sectType });
+        // BUG-DUMP-R31-1: skip the SectionType insert for a bare round-tripped
+        // section — the source had no <w:type> and fabricating one (the OOXML
+        // default is nextPage, so omitting it is equivalent) breaks faithful
+        // round-trip. A non-bare section always stamps the type.
+        if (!bareSection)
+            InsertSectPrChildInOrder(sectPr, new SectionType { Val = sectType });
 
         // Ensure body-level sectPr has pgSz/pgMar (fix for docs created by older versions)
         var bodySectPr = body.GetFirstChild<SectionProperties>();
@@ -119,6 +133,16 @@ public partial class WordHandler
             bodySectPr.InsertBefore(new PageMargin { Top = 1440, Right = 1800U, Bottom = 1440, Left = 1800U },
                 bodySectPr.GetFirstChild<DocGrid>());
         }
+
+        // BUG-DUMP-R31-1: a bare round-tripped section carries no page geometry.
+        // The source's childless sectPr had neither pgSz nor pgMar, so stamping
+        // the body section's (or A4 default) geometry would inject child elements
+        // the source never had — exactly the mid-doc fabrication this fixes.
+        // Skip straight to attaching the empty sectPr; the explicit-override
+        // blocks below still don't fire (a bare section forwards no override
+        // keys), so the rebuilt <w:sectPr/> stays childless.
+        if (bareSection)
+            return AttachSectionBreakParagraph(body, parentPath, index, sectPara, sectPProps, sectPr, properties);
 
         // Copy page size/margins from document section, or use A4 defaults.
         // BUG-DUMP-SECT-ORIENT: do NOT inherit the body section's w:orient. The
@@ -456,6 +480,19 @@ public partial class WordHandler
             LastAddUnsupportedProps.Add(key);
         }
 
+        return AttachSectionBreakParagraph(body, parentPath, index, sectPara, sectPProps, sectPr, properties);
+    }
+
+    // Attach a section-break carrier paragraph (its sectPr already populated) at
+    // the requested index and return its /section[N] path. Factored out so the
+    // BUG-DUMP-R31-1 bare-section short-circuit can reuse the exact attach+path
+    // logic without re-running the geometry/override blocks.
+    private string AttachSectionBreakParagraph(
+        Body body, string parentPath, int? index,
+        Paragraph sectPara, ParagraphProperties sectPProps, SectionProperties sectPr,
+        Dictionary<string, string> properties)
+    {
+        var parent = body; // section breaks always land in the body
         sectPProps.AppendChild(sectPr);
         sectPara.AppendChild(sectPProps);
         InsertAtIndexOrAppend(parent, sectPara, index);

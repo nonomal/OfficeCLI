@@ -1976,6 +1976,15 @@ public partial class WordHandler
                     // generic-fallback default so it isn't flagged unsupported.
                     break;
                 case "height":
+                    // BUG-DUMP-R25-1: bare `height` is AUTO row-sizing — no
+                    // @w:hRule (CT_Height default). Previously injected AtLeast,
+                    // which the dump round-trip then spuriously re-emitted on
+                    // auto-height source rows. Explicit rules use height.atleast
+                    // / height.exact.
+                    trPr.GetFirstChild<TableRowHeight>()?.Remove();
+                    trPr.AppendChild(new TableRowHeight { Val = ParseTwips(value) });
+                    break;
+                case "height.atleast":
                     trPr.GetFirstChild<TableRowHeight>()?.Remove();
                     trPr.AppendChild(new TableRowHeight { Val = ParseTwips(value), HeightType = HeightRuleValues.AtLeast });
                     break;

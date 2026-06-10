@@ -727,11 +727,40 @@ public partial class WordHandler
             url = $"#{hyperlink.Anchor.Value}";
         var urlSafe = url != null && IsSafeLinkUrl(url);
         if (urlSafe)
-            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}>");
+        {
+            // CSS gotcha: an underline drawn by the ancestor <a> element cannot
+            // be removed by a descendant span's text-decoration:none. When every
+            // run in the hyperlink has explicit w:u val="none", suppress the <a>
+            // default underline on the <a> element itself. (A default hyperlink
+            // with no explicit underline state stays underlined.)
+            var aStyle = HyperlinkUnderlineExplicitlyNone(hyperlink, para)
+                ? " style=\"text-decoration:none\"" : "";
+            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}{aStyle}>");
+        }
         foreach (var descendant in hyperlink.Descendants<Run>())
             RenderRunHtml(sb, descendant, para);
         if (urlSafe)
             sb.Append("</a>");
+    }
+
+    /// <summary>
+    /// True when the hyperlink has at least one text-bearing run and every such
+    /// run resolves to an explicit w:u val="none". Used to suppress the ancestor
+    /// &lt;a&gt; element's default underline (a descendant span cannot do it).
+    /// </summary>
+    private bool HyperlinkUnderlineExplicitlyNone(Hyperlink hyperlink, Paragraph para)
+    {
+        bool sawTextRun = false;
+        foreach (var run in hyperlink.Descendants<Run>())
+        {
+            var hasText = run.ChildElements.Any(c => c is Text t && !string.IsNullOrEmpty(t.Text));
+            if (!hasText) continue;
+            sawTextRun = true;
+            var rPr = ResolveEffectiveRunProperties(run, para);
+            if (rPr.Underline?.Val == null || rPr.Underline.Val.InnerText != "none")
+                return false;
+        }
+        return sawTextRun;
     }
 
     private void RenderFootnoteChildren(StringBuilder sb, OpenXmlElement note)

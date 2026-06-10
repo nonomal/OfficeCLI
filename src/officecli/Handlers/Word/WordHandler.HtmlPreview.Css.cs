@@ -1532,6 +1532,14 @@ public partial class WordHandler
                     && IsHexColor(ulColor))
                     parts.Add($"text-decoration-color:#{ulColor}");
             }
+            else
+            {
+                // Explicit w:u val="none" must suppress the inherited underline.
+                // Inside a hyperlink the run is wrapped in an <a>, whose UA
+                // default underline persists unless the span overrides it, so
+                // emit text-decoration:none to match real Word (no underline).
+                parts.Add("text-decoration:none");
+            }
         }
 
         // Strikethrough (single or double)
@@ -1540,13 +1548,16 @@ public partial class WordHandler
         if (hasSingleStrike || hasDoubleStrike)
         {
             var existing = parts.FirstOrDefault(p => p.StartsWith("text-decoration:"));
-            if (existing != null)
+            if (existing != null && existing != "text-decoration:none")
             {
                 parts.Remove(existing);
                 parts.Add(existing + " line-through");
             }
             else
             {
+                // "text-decoration:none" (explicit underline off) must not be
+                // concatenated into "none line-through" (invalid); replace it.
+                if (existing == "text-decoration:none") parts.Remove(existing);
                 parts.Add("text-decoration:line-through");
             }
             // Double-strike renders via text-decoration-style: double (CSS3, broad support)

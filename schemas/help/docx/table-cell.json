@@ -22,15 +22,18 @@
   "extends": "_shared/table-cell",
   "properties": {
     "width": {
-      "type": "int",
-      "description": "cell width in twips (Dxa).",
+      "type": "string",
+      "description": "cell preferred width (w:tcW). Accepts a bare twips integer or unit-qualified 'Ndxa' (Dxa), 'N%' (percent of table width), 'auto' (auto-fit, no preferred width), or 'nil' (no preferred width — distinct from a zero-twip explicit width). Get echoes the same unit-qualified form so the type round-trips losslessly.",
       "add": true,
       "set": true,
       "get": true,
       "examples": [
-        "--prop width=2500"
+        "--prop width=2500",
+        "--prop width=25%",
+        "--prop width=auto",
+        "--prop width=nil"
       ],
-      "readback": "twips",
+      "readback": "'Ndxa' | 'N%' | 'auto' | 'nil' | '0dxa'",
       "enforcement": "report"
     },
     "skipGridSync": {

@@ -1146,9 +1146,24 @@ public partial class WordHandler
                     Type = TableWidthUnitValues.Pct
                 };
             }
+            // BUG-DUMP-R42-6: round-trip nil/auto cell-width types (mirror the
+            // Set.Element.cs width branch). nil = "no preferred width"; without
+            // this an AddCell with width=nil/auto coerced to a bogus dxa value.
+            else if (string.Equals(cellWidth, "nil", StringComparison.OrdinalIgnoreCase))
+            {
+                tcw = new TableCellWidth { Width = "0", Type = TableWidthUnitValues.Nil };
+            }
+            else if (string.Equals(cellWidth, "auto", StringComparison.OrdinalIgnoreCase))
+            {
+                tcw = new TableCellWidth { Width = "0", Type = TableWidthUnitValues.Auto };
+            }
             else
             {
-                tcw = new TableCellWidth { Width = cellWidth, Type = TableWidthUnitValues.Dxa };
+                // Strip a trailing "dxa" suffix (the form Get emits) so the bare
+                // twips path works for dump→batch round-trips.
+                var dxaVal = cellWidth.EndsWith("dxa", StringComparison.OrdinalIgnoreCase)
+                    ? cellWidth[..^3] : cellWidth;
+                tcw = new TableCellWidth { Width = dxaVal, Type = TableWidthUnitValues.Dxa };
             }
             newCell.PrependChild(new TableCellProperties(tcw));
         }

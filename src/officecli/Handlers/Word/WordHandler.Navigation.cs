@@ -5143,11 +5143,19 @@ public partial class WordHandler
             if (SafeWidth(tcPr.TableCellWidth?.Width) is int cwRaw)
             {
                 var cwType = tcPr.TableCellWidth!.Type?.Value;
-                if (cwType == TableWidthUnitValues.Pct)
+                // BUG-DUMP-R42-6: type=nil ("no preferred width") is a DISTINCT
+                // value from "0dxa" (1-twip explicit). Previously both nil and
+                // a zero @w:w collapsed to "0dxa", so a nil cell width round-
+                // tripped to <w:tcW w:w="1" w:type="dxa"/> — changing the width
+                // semantics. Route through FormatTableWidth so nil/auto surface
+                // as their bare type names; only a true dxa zero stays "0dxa".
+                if (cwType == TableWidthUnitValues.Nil)
+                    node.Format["width"] = "nil";
+                else if (cwType == TableWidthUnitValues.Pct)
                     node.Format["width"] = (cwRaw / 50) + "%";
                 else if (cwType == TableWidthUnitValues.Auto)
                     node.Format["width"] = "auto";
-                else if (cwType == TableWidthUnitValues.Nil || cwRaw == 0)
+                else if (cwRaw == 0)
                     node.Format["width"] = "0dxa";
                 else
                     node.Format["width"] = cwRaw.ToString(System.Globalization.CultureInfo.InvariantCulture) + "dxa";

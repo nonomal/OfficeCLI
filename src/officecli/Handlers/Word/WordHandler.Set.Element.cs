@@ -1485,6 +1485,14 @@ public partial class WordHandler
                     {
                         tcPr.TableCellWidth = new TableCellWidth { Width = "0", Type = TableWidthUnitValues.Auto };
                     }
+                    // BUG-DUMP-R42-6: type=nil ("no preferred width") is a distinct
+                    // CT_TblWidth value the reader now surfaces as "nil". Apply it
+                    // faithfully as <w:tcW w:w="0" w:type="nil"/> instead of letting
+                    // the dxa branch below reject the zero width (or coerce to 1).
+                    else if (string.Equals(value, "nil", StringComparison.OrdinalIgnoreCase))
+                    {
+                        tcPr.TableCellWidth = new TableCellWidth { Width = "0", Type = TableWidthUnitValues.Nil };
+                    }
                     else
                     {
                         // BUG-R4-05: accept unit-qualified widths (cm/in/pt/dxa) in

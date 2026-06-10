@@ -162,6 +162,18 @@ public partial class WordHandler
             // else: no grid info — browser auto-fits to content
         }
 
+        // tblCellSpacing (w:tblCellSpacing w:w=twips w:type=dxa): Word draws each
+        // cell as a separate box with gaps between them. The global table CSS uses
+        // border-collapse:collapse (no gaps); override to separate + border-spacing
+        // only for tables that actually declare cell spacing.
+        var tblCellSpacing = tblPr?.TableCellSpacing;
+        if (tblCellSpacing?.Type?.InnerText is null or "dxa"
+            && int.TryParse(tblCellSpacing?.Width?.Value, out var csTwips) && csTwips > 0)
+        {
+            tableStyles.Add("border-collapse:separate");
+            tableStyles.Add($"border-spacing:{csTwips / 20.0:0.##}pt");
+        }
+
         var tableClass = tableBordersNone ? "borderless" : "";
         var tableStyleAttr = tableStyles.Count > 0 ? $" style=\"{string.Join(";", tableStyles)}\"" : "";
         var dataPathAttr = !string.IsNullOrEmpty(dataPath) ? $" data-path=\"{dataPath}\"" : "";

@@ -1173,6 +1173,28 @@ public partial class PowerPointHandler
                 if (firstRunULn.Width?.HasValue == true)
                     node.Format["underline.width"] = EmuConverter.FormatLineWidth(firstRunULn.Width.Value);
             }
+            // BUG-PPTX-R2-03: mirror the run-level <a:ln> (text outline / glyph
+            // stroke) reader at shape level — same pattern as uFill/uLn above.
+            // Without this, `Add/Set shape textOutline=…` round-trips at the run
+            // scope only and Get on the shape drops the key, so the Add path
+            // (which forwards textOutline through effectKeys) looks broken.
+            var firstRunOutline = firstRun.RunProperties.GetFirstChild<Drawing.Outline>();
+            if (firstRunOutline != null)
+            {
+                string? toWidth = firstRunOutline.Width?.HasValue == true
+                    ? EmuConverter.FormatLineWidth(firstRunOutline.Width.Value) : null;
+                string? toColor = ReadColorFromFill(firstRunOutline.GetFirstChild<Drawing.SolidFill>());
+                if (toWidth != null) node.Format["textOutline.width"] = toWidth;
+                if (toColor != null) node.Format["textOutline.color"] = toColor;
+                if (toWidth != null && toColor != null)
+                    node.Format["textOutline"] = $"{toWidth}:{toColor}";
+                else if (toWidth != null)
+                    node.Format["textOutline"] = toWidth;
+                else if (toColor != null)
+                    node.Format["textOutline"] = toColor;
+                else
+                    node.Format["textOutline"] = "true";
+            }
             if (firstRun.RunProperties.Strike?.HasValue == true)
             {
                 // Emit explicit "none" too, so a round-trip Add(strike=none) → Get
@@ -1246,6 +1268,11 @@ public partial class PowerPointHandler
                     node.Format["bold"] = endRPrShape.Bold.Value;
                 if (endRPrShape.Italic?.HasValue == true)
                     node.Format["italic"] = endRPrShape.Italic.Value;
+                // BUG3: cap readback on runless shapes — mirror the run-present
+                // path at line ~1139 which uses Capital.InnerText ("all"/"small").
+                var epCapAttr = endRPrShape.GetAttributes().FirstOrDefault(a => a.LocalName == "cap");
+                if (epCapAttr.Value != null && epCapAttr.Value != "none")
+                    node.Format["cap"] = epCapAttr.Value;
                 var epColor = ReadColorFromFill(endRPrShape.GetFirstChild<Drawing.SolidFill>());
                 if (epColor != null) node.Format["color"] = epColor;
             }

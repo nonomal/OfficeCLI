@@ -830,7 +830,13 @@ public partial class PowerPointHandler
                       // first run instead of dropping them on the <p:sp> element.
                       "lang", "lang.latin", "altLang", "altlang", "spc", "kern", "cap",
                       "kumimoji", "normalizeH", "normalizeh", "noProof", "noproof",
-                      "dirty", "smtClean", "smtclean", "smtId", "smtid", "err" };
+                      "dirty", "smtClean", "smtclean", "smtId", "smtid", "err",
+                      // BUG1: text direction — Set handles in SetRunOrShapeProperties
+                      "textdirection", "textdir",
+                      // BUG2: text outline — Set handles all three key variants
+                      "textOutline", "textoutline",
+                      "textOutline.width", "textoutline.width",
+                      "textOutline.color", "textoutline.color" };
                 // CONSISTENCY(tracking-prop): explicit TryGetValue per known
                 // key instead of `.Where(...)` iteration. Foreach over the
                 // TrackingPropertyDictionary marks every entry as consumed

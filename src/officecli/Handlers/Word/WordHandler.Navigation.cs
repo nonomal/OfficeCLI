@@ -2987,6 +2987,22 @@ public partial class WordHandler
             node.Format["dropDown.lastValue"] = ddlLast;
         if (combo?.LastValue?.Value is { Length: > 0 } comboLast)
             node.Format["comboBox.lastValue"] = comboLast;
+
+        // BUG-DUMP-R25-5: <w:dataBinding> links the control to a customXml data
+        // store (xpath + storeItemID, plus the namespace prefixMappings the
+        // xpath uses). Dropping it degrades a bound control into a static one.
+        // Surface the three attrs so AddSdt can rebuild the element. Mirrors
+        // how the date/placeholder sdtPr children are surfaced above.
+        var dataBinding = sdtProps.GetFirstChild<DataBinding>();
+        if (dataBinding != null)
+        {
+            if (dataBinding.XPath?.Value is { Length: > 0 } xp)
+                node.Format["dataBinding.xpath"] = xp;
+            if (dataBinding.StoreItemId?.Value is { Length: > 0 } sid)
+                node.Format["dataBinding.storeItemID"] = sid;
+            if (dataBinding.PrefixMappings?.Value is { Length: > 0 } pm)
+                node.Format["dataBinding.prefixMappings"] = pm;
+        }
     }
 
     private DocumentNode OfficeMathToNode(M.OfficeMath inlineMath, DocumentNode node)

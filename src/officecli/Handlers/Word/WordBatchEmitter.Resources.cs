@@ -1296,6 +1296,10 @@ public static partial class WordBatchEmitter
         "placeholder", "placeholderText",
         "date.fullDate", "date.calendar", "date.lid", "date.storeMappedDataAs",
         "comboBox.lastValue", "dropDown.lastValue",
+        // BUG-DUMP-R25-5: customXml data-store binding (xpath / storeItemID /
+        // prefixMappings). Without these the control degrades to static on
+        // round-trip. AddSdt rebuilds <w:dataBinding> from the three keys.
+        "dataBinding.xpath", "dataBinding.storeItemID", "dataBinding.prefixMappings",
     };
 
     private static void EmitSdtTyped(WordHandler word, string sourcePath, string parentPath,

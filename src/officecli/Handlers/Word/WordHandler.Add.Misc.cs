@@ -1813,6 +1813,23 @@ public partial class WordHandler
         if (IsTruthy(ciProps.GetValueOrDefault("placeholder", "")))
             InsertSchemaOrdered(new ShowingPlaceholder());
 
+        // BUG-DUMP-R25-5: rebuild <w:dataBinding> (customXml store link). In
+        // CT_SdtPr dataBinding ranks before the type-content element, so the
+        // schema-ordered insert (before the type element) is correct. xpath +
+        // storeItemID are the load-bearing attrs; prefixMappings is optional
+        // (present only when the xpath uses namespace prefixes).
+        var dbXPath = ciProps.GetValueOrDefault("dataBinding.xpath", "");
+        var dbStoreId = ciProps.GetValueOrDefault("dataBinding.storeItemID", "");
+        if (!string.IsNullOrEmpty(dbXPath) || !string.IsNullOrEmpty(dbStoreId))
+        {
+            var db = new DataBinding();
+            if (!string.IsNullOrEmpty(dbXPath)) db.XPath = dbXPath;
+            if (!string.IsNullOrEmpty(dbStoreId)) db.StoreItemId = dbStoreId;
+            var dbPrefix = ciProps.GetValueOrDefault("dataBinding.prefixMappings", "");
+            if (!string.IsNullOrEmpty(dbPrefix)) db.PrefixMappings = dbPrefix;
+            InsertSchemaOrdered(db);
+        }
+
         // Date-picker selected value + locale/calendar/store-as.
         if (typeElement is SdtContentDate date)
         {

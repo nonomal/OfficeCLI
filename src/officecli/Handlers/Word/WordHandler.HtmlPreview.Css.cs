@@ -425,8 +425,10 @@ public partial class WordHandler
         {
             // contextualSpacing: when enabled and adjacent paragraph has the same style,
             // spaceBefore/spaceAfter between them is suppressed (set to zero).
-            var hasContextualSpacing = pProps.ContextualSpacing != null
-                || ResolveContextualSpacingFromStyle(styleId);
+            // w:contextualSpacing is an on/off toggle: present-with-no-val means ON,
+            // but w:val="0"/"false"/"off" means explicitly OFF (do not suppress).
+            var hasContextualSpacing = IsContextualSpacingOn(pProps.ContextualSpacing)
+                ?? ResolveContextualSpacingFromStyle(styleId);
             var prevPara = para.PreviousSibling<Paragraph>();
             var nextPara = para.NextSibling<Paragraph>();
             var prevStyleId = prevPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
@@ -619,8 +621,8 @@ public partial class WordHandler
             // siblings even when the resolved spacing comes from BuiltInStyleDefaults
             // (typical for ListParagraph: built-in After=10pt, but contextualSpacing
             // on the style should collapse it to 0 between adjacent bullets).
-            var hasContextualSpacing = pProps.ContextualSpacing != null
-                || ResolveContextualSpacingFromStyle(styleId);
+            var hasContextualSpacing = IsContextualSpacingOn(pProps.ContextualSpacing)
+                ?? ResolveContextualSpacingFromStyle(styleId);
             var prevPara = para.PreviousSibling<Paragraph>();
             var nextPara = para.NextSibling<Paragraph>();
             var prevStyleId = prevPara?.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
@@ -1047,13 +1049,26 @@ public partial class WordHandler
             var style = styles.Elements<Style>()
                 .FirstOrDefault(s => s.StyleId?.Value == currentStyleId);
             if (style == null) break;
-            if (style.StyleParagraphProperties?.ContextualSpacing != null) return true;
+            var styleCs = IsContextualSpacingOn(style.StyleParagraphProperties?.ContextualSpacing);
+            if (styleCs != null) return styleCs.Value;
             currentStyleId = style.BasedOn?.Val?.Value;
         }
 
         // Fallback: docDefaults pPrDefault.
-        return styles.DocDefaults?.ParagraphPropertiesDefault
-            ?.ParagraphPropertiesBaseStyle?.ContextualSpacing != null;
+        return IsContextualSpacingOn(styles.DocDefaults?.ParagraphPropertiesDefault
+            ?.ParagraphPropertiesBaseStyle?.ContextualSpacing) ?? false;
+    }
+
+    /// <summary>
+    /// Evaluate a w:contextualSpacing on/off toggle. Returns null when the element
+    /// is absent (caller should fall back to the style chain); true when present
+    /// and on (no val, or val=1/true/on); false when present with val=0/false/off.
+    /// </summary>
+    private static bool? IsContextualSpacingOn(ContextualSpacing? cs)
+    {
+        if (cs == null) return null;
+        var v = cs.Val;
+        return v == null || v.Value;
     }
 
     /// <summary>

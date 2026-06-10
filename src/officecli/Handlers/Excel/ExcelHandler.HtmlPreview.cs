@@ -1300,11 +1300,14 @@ public partial class ExcelHandler
                         System.Globalization.CultureInfo.InvariantCulture, out var explicitMin))
                     minVal = explicitMin;
                 else
-                    // R17a: Excel anchors bars at 0 ONLY when all values are
-                    // non-negative. With negatives present, the axis floor is the
-                    // actual data minimum so negative magnitudes get proportional
-                    // (left-extending) bars instead of clamping to 0% width.
-                    minVal = Math.Min(0, dataMin);
+                    // Excel's automatic data-bar scaling anchors the LOW end at
+                    // the data minimum (not 0): the smallest value gets a tiny sliver
+                    // and the largest gets a full bar, linear in (v-min)/(max-min).
+                    // The earlier "anchor at 0" model over-inflated small values
+                    // (e.g. 20 of 20..100 rendered 26% instead of a few %).
+                    // When negatives are present the floor is still the data minimum,
+                    // and the zero-axis split (below) draws left/right bars from 0.
+                    minVal = dataMin;
 
                 if (cfvos.Count >= 2 && cfvos[1].Type?.Value == ConditionalFormatValueObjectValues.Number
                     && double.TryParse(cfvos[1].Val?.Value, System.Globalization.NumberStyles.Any,
@@ -1315,9 +1318,13 @@ public partial class ExcelHandler
 
                 if (maxVal <= minVal) maxVal = minVal + 1;
 
-                // Read bar length bounds (Excel defaults: min=10%, max=90%)
-                var minLength = dataBar.MinLength?.Value ?? 10U;
-                var maxLength = dataBar.MaxLength?.Value ?? 90U;
+                // Read bar length bounds. When the data bar carries no explicit
+                // min/max length, the smallest value should show only a sliver and
+                // the largest should fill the cell (matching real Excel automatic
+                // data bars), so default to a tiny floor and a full-width cap rather
+                // than the old 10%/90% band that inflated the minimum.
+                var minLength = dataBar.MinLength?.Value ?? 3U;
+                var maxLength = dataBar.MaxLength?.Value ?? 100U;
                 var showValue = dataBar.ShowValue?.Value ?? true;
 
                 // R17a: when the range straddles zero, draw a zero-axis and split
@@ -1688,6 +1695,27 @@ public partial class ExcelHandler
             return false;
         }
 
+        if (ruleType == ConditionalFormatValues.ContainsBlanks
+            || ruleType == ConditionalFormatValues.NotContainsBlanks)
+        {
+            // A cell is "blank" when it does not exist, has no value, or its
+            // displayed text is empty/whitespace (matching Excel's LEN(TRIM(...))=0).
+            var disp = cell != null ? GetCellDisplayValue(cell) : "";
+            bool isBlank = string.IsNullOrWhiteSpace(disp);
+            return ruleType == ConditionalFormatValues.ContainsBlanks ? isBlank : !isBlank;
+        }
+
+        if (ruleType == ConditionalFormatValues.ContainsErrors
+            || ruleType == ConditionalFormatValues.NotContainsErrors)
+        {
+            // A cell "contains an error" when its data type is error, or its
+            // displayed/evaluated value is one of Excel's error literals.
+            bool isError = cell?.DataType?.Value == CellValues.Error;
+            if (!isError && cell != null)
+                isError = IsExcelErrorText(GetFormattedCellValue(cell, null, evaluator));
+            return ruleType == ConditionalFormatValues.ContainsErrors ? isError : !isError;
+        }
+
         if (ruleType == ConditionalFormatValues.DuplicateValues || ruleType == ConditionalFormatValues.UniqueValues)
         {
             // Color cells whose value appears more than once (duplicateValues)
@@ -1707,6 +1735,14 @@ public partial class ExcelHandler
         }
 
         return false;
+    }
+
+    /// <summary>True when the text is one of Excel's seven error literals.</summary>
+    private static bool IsExcelErrorText(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return text is "#DIV/0!" or "#N/A" or "#VALUE!" or "#REF!"
+            or "#NAME?" or "#NULL!" or "#NUM!";
     }
 
     /// <summary>Collect the numeric values of every cell in a CF rule's sqref range.</summary>

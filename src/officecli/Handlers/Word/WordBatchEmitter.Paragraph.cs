@@ -239,7 +239,21 @@ public static partial class WordBatchEmitter
         // StripRunCharacterPropsFromParagraph — for multi-run paragraphs the
         // firstRun hoist would re-apply formatting to every sibling on
         // replay, so strip run-level keys before emit.
-        StripRunCharacterPropsFromParagraph(props);
+        //
+        // BUG-DUMP-R42-4: but a RUN-LESS paragraph that nonetheless reaches this
+        // path (e.g. it carries a bookmark marker, which ShouldCollapseSingleRun
+        // keeps off the collapse path so TryEmitBookmarkRun replays the marker)
+        // has NO source run to hoist from — Navigation's firstRun-fallback read
+        // those bare size/size.cs/bold.cs/font.* keys straight off the paragraph
+        // MARK rPr (the ¶ glyph's formatting), not off a run. Stripping them here
+        // drops the markRPr entirely, leaving `add p {}` and collapsing a
+        // cover-page paragraph's large-size ¶ on rebuild. Only strip when a real
+        // text/format-bearing run exists (the genuine hoist source); a run-less
+        // paragraph keeps its bare markRPr keys, same as the non-bookmark empty
+        // paragraph that rides the collapse path with full markRPr.
+        bool hasFormatBearingRun = runs.Any(c => c.Type == "run" || c.Type == "r");
+        if (hasFormatBearingRun)
+            StripRunCharacterPropsFromParagraph(props);
         if (autoPresent)
         {
             if (props.Count > 0)

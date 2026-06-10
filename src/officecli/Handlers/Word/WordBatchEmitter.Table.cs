@@ -8,6 +8,62 @@ namespace OfficeCli.Handlers;
 public static partial class WordBatchEmitter
 {
 
+    // BUG-DUMP-R27-6: enumerate a table cell's DIRECT block children (top-level
+    // <w:p>, <w:tbl>, <w:sdt>, <w:customXml>) in document order from its raw
+    // XML. A depth-tracked scan keeps paragraphs/tables nested inside a child
+    // (a nested table's cells, a customXml's inner blocks) from being counted
+    // as cell-level blocks. The first element open is the <w:tc> wrapper itself
+    // (depth 0); its direct children are at depth 1. <w:tcPr> is skipped (it is
+    // cell properties, not block content). Mirrors EnumerateNoteDirectChildren.
+    // Needed because cellNode.Children (Navigation) surfaces only p/tbl/sdt and
+    // OMITS customXml, so a cell whose content is wrapped in a block customXml
+    // had its inner text silently dropped on dump (the body path flattens +
+    // warns; the cell path did neither).
+    private static List<string> EnumerateCellDirectChildren(string? cellXml)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrEmpty(cellXml)) return result;
+        int depth = -1; // becomes 0 when the <w:tc> wrapper opens
+        bool seenWrapper = false;
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(
+                     cellXml!, @"<(/?)w:([A-Za-z]+)\b[^>]*?(/?)>"))
+        {
+            var closing = m.Groups[1].Value == "/";
+            var name = m.Groups[2].Value;
+            var selfClose = m.Groups[3].Value == "/";
+            if (!seenWrapper)
+            {
+                if (!closing) { seenWrapper = true; depth = 0; }
+                continue;
+            }
+            if (closing) { depth--; continue; }
+            if (depth == 0 && (name == "p" || name == "tbl" || name == "sdt" || name == "customXml"))
+                result.Add(name);
+            if (!selfClose) depth++;
+        }
+        return result;
+    }
+
+    // BUG-DUMP-R27-6: return the Nth (1-based) cellNode child matching either of
+    // two accepted Type spellings ("p"/"paragraph", "table", "sdt"), so the
+    // document-ordered customXml plan can recover the corresponding navigation
+    // node by ordinal. Returns null when out of range (defensive).
+    private static DocumentNode? NthChildOfType(List<DocumentNode> children,
+                                                string t1, string t2, int ordinal)
+    {
+        int seen = 0;
+        foreach (var ch in children)
+        {
+            if (ch.Type == t1 || ch.Type == t2)
+            {
+                seen++;
+                if (seen == ordinal) return ch;
+            }
+        }
+        return null;
+    }
+
     private static void EmitTable(WordHandler word, string sourcePath, int targetIndex,
                                   List<BatchItem> items, BodyEmitContext? ctx = null,
                                   string? parentTablePath = null,
@@ -391,6 +447,21 @@ public static partial class WordBatchEmitter
                 int nestedTblIdx = 0;
                 bool firstParaSeen = false;
 
+                // BUG-DUMP-R27-6: a block-level <w:customXml> wrapper that is a
+                // DIRECT cell child is omitted from cellNode.Children (Navigation
+                // surfaces only p/tbl/sdt for cells), so its inner paragraph text
+                // was silently dropped — and, unlike the body path, no warning
+                // fired. Detect direct customXml children from the cell's raw XML;
+                // when present, drive the cell emit off a document-ordered plan
+                // (EnumerateCellDirectChildren) that interleaves the customXml's
+                // FLATTENED inner paragraphs with the normal p/tbl/sdt children,
+                // matching the body's flatten+warn contract (inner text survives,
+                // the custom-XML binding loss is reported loudly). The fast path
+                // below stays unchanged when no customXml is present.
+                var cellSourcePath = cells[c].Path;
+                var cellDirectKinds = EnumerateCellDirectChildren(word.RawElementXml(cellSourcePath));
+                bool cellHasCustomXml = cellDirectKinds.Contains("customXml");
+
                 // BUG-DUMP-NESTED-TBL-TRAILING: OOXML requires every cell to
                 // end with a paragraph (not a table). When a cell would
                 // otherwise end with a table, the SDK auto-inserts a trailing
@@ -411,6 +482,7 @@ public static partial class WordBatchEmitter
                     break;
                 }
 
+                if (!cellHasCustomXml)
                 for (int k = 0; k < cellChildren.Count; k++)
                 {
                     var cc = cellChildren[k];
@@ -475,6 +547,96 @@ public static partial class WordBatchEmitter
                         var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
                         EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
                                     cellHasContent: firstParaSeen, items, ctx);
+                    }
+                }
+
+                // BUG-DUMP-R27-6: document-ordered cell walk used ONLY when the
+                // cell carries a direct <w:customXml> child (the fast path above
+                // — cellNode.Children — omits customXml entirely). Drive emission
+                // off the raw-XML child order so a customXml interleaves correctly
+                // with surrounding p/tbl/sdt children; p/tbl/sdt map by ordinal to
+                // the cellNode.Children entries, customXml is flattened (its inner
+                // paragraphs emit as cell paragraphs) and a deterministic warning
+                // is recorded (matching the body customXmlPr arm in EmitBody).
+                if (cellHasCustomXml)
+                {
+                    int planParaIdx = 0, planTblIdx = 0, planSdtIdx = 0, planCxIdx = 0;
+                    foreach (var kind in cellDirectKinds)
+                    {
+                        if (kind == "p")
+                        {
+                            planParaIdx++;
+                            var ccNode = NthChildOfType(cellChildren, "p", "paragraph", planParaIdx);
+                            if (ccNode == null) continue;
+                            cellParaIdx++;
+                            if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
+                            EmitParagraph(word, ccNode.Path, cellTargetPath, cellParaIdx, items,
+                                          autoPresent: !firstParaSeen, ctx);
+                            firstParaSeen = true;
+                        }
+                        else if (kind == "tbl")
+                        {
+                            planTblIdx++;
+                            var ccNode = NthChildOfType(cellChildren, "table", "table", planTblIdx);
+                            if (ccNode == null) continue;
+                            nestedTblIdx++;
+                            EmitTable(word, ccNode.Path, nestedTblIdx, items, ctx,
+                                      parentTablePath: cellTargetPath, depth: depth + 1);
+                        }
+                        else if (kind == "sdt" && ctx != null)
+                        {
+                            planSdtIdx++;
+                            var ccNode = NthChildOfType(cellChildren, "sdt", "sdt", planSdtIdx);
+                            if (ccNode == null) continue;
+                            var rawPart = containerPath == "/body" ? "/document" : containerPath;
+                            var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
+                            EmitCellSdt(word, ccNode.Path, cellTargetPath, cellXPath, rawPart,
+                                        cellHasContent: firstParaSeen, items, ctx);
+                        }
+                        else if (kind == "customXml")
+                        {
+                            planCxIdx++;
+                            var cxPath = $"{cellSourcePath}/customXml[{planCxIdx}]";
+                            // Warn first (loss of the element/uri/placeholder/attr
+                            // binding) — mirrors the body customXmlPr arm.
+                            if (ctx != null)
+                            {
+                                string? cxEl = null;
+                                try
+                                {
+                                    var cxNode = word.Get(cxPath);
+                                    if (cxNode.Format.TryGetValue("element", out var ev) && ev != null)
+                                        cxEl = ev.ToString();
+                                }
+                                catch { /* best-effort descriptor */ }
+                                var descr = string.IsNullOrEmpty(cxEl) ? "" : $" (element=\"{cxEl}\")";
+                                ctx.Warnings.Add(new DocxUnsupportedWarning(
+                                    Element: "customXml",
+                                    Path: cxPath,
+                                    Reason: $"block-level customXml wrapper{descr} in a table cell (custom-XML data binding: element/uri/placeholder/attr) dropped on dump→batch round-trip; the wrapped content's text survives but the binding does not"));
+                            }
+                            // Flatten the customXml's inner paragraphs into the
+                            // cell, preserving their text (the body path does the
+                            // same via Navigation's WalkBodyChild recursion). Inner
+                            // tables/SDTs inside a cell customXml are out of scope
+                            // this round — paragraphs cover the text-survival
+                            // contract the warning advertises.
+                            int innerP = 0;
+                            while (true)
+                            {
+                                innerP++;
+                                var innerPath = $"{cxPath}/p[{innerP}]";
+                                DocumentNode? innerNode = null;
+                                try { innerNode = word.Get(innerPath); }
+                                catch { break; }
+                                if (innerNode == null) break;
+                                cellParaIdx++;
+                                if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
+                                EmitParagraph(word, innerPath, cellTargetPath, cellParaIdx, items,
+                                              autoPresent: !firstParaSeen, ctx);
+                                firstParaSeen = true;
+                            }
+                        }
                     }
                 }
 

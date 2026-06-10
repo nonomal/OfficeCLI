@@ -712,6 +712,34 @@ public static partial class WordBatchEmitter
                         });
                     }
                     break;
+                case "customXmlPr":
+                    // BUG-DUMP-R27-6: a block-level <w:customXml> wrapper
+                    // (uri/element + <w:customXmlPr>: placeholder + bound
+                    // <w:attr>) is flattened by Navigation's WalkBodyChild
+                    // (BUG-DUMP7-04/8-01) so its INNER paragraphs/tables surface
+                    // as direct body children and their CONTENT round-trips —
+                    // but the wrapper itself surfaces only as this customXmlPr
+                    // marker node, which the EmitBody default arm dropped
+                    // SILENTLY (unlike altChunk, which warns). The wrapper's
+                    // uri/element/placeholder/attr bindings are lost on replay.
+                    // Emit a deterministic warning (matching the altChunk /
+                    // external-rel convention) so the loss is LOUD. Verbatim
+                    // round-trip of the wrapper is out of scope: it would require
+                    // un-flattening the customXml block in Navigation (a
+                    // load-bearing invariant relied on across body customXml
+                    // docs) rather than a one-feature special case.
+                    {
+                        var uri = child.Format.TryGetValue("uri", out var cxUri) ? cxUri?.ToString() : null;
+                        var elem = child.Format.TryGetValue("element", out var cxEl) ? cxEl?.ToString() : null;
+                        var descr = (uri != null || elem != null)
+                            ? $" (element=\"{elem}\" uri=\"{uri}\")"
+                            : "";
+                        ctx.Warnings.Add(new DocxUnsupportedWarning(
+                            Element: "customXml",
+                            Path: child.Path,
+                            Reason: $"block-level customXml wrapper{descr} (custom-XML data binding: element/uri/placeholder/attr) dropped on dump→batch round-trip; the wrapped content's text survives but the binding does not"));
+                    }
+                    break;
                 case "altChunk":
                     // <w:altChunk r:id="…"/> embeds an alternate-format payload
                     // (HTML, RTF, plain text, …) by relationship into the body.

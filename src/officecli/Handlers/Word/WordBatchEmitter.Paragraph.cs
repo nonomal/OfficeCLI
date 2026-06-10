@@ -1726,6 +1726,30 @@ public static partial class WordBatchEmitter
             picProps.Remove("contentType");
             picProps.Remove("fileSize");
             picProps["src"] = dataUri;
+            // BUG-DUMP-R28-1: the picture node's width/height come from
+            // CreateImageNode formatted as 1-decimal CENTIMETRES (EMU /
+            // EmuPerCmF, "F1"). Replaying that cm string through ParseEmu snaps
+            // cx/cy back to a 360000-EMU (0.1cm) grid, shifting every inline
+            // drawing by up to ~17800 EMU. The cumulative drift over many
+            // drawings moves where page breaks land — the whole document's
+            // text reflows vertically. Emit the EXACT cx/cy straight from
+            // <wp:extent> as "<emu>emu" so ParseEmu reconstructs the original
+            // value byte-for-byte (mirrors the textbox path, which already
+            // emits raw EMU). AddPicture applies the same parsed EMU to both
+            // <wp:extent> and the matching <a:ext> in <a:xfrm>. Covers inline
+            // drawings in /body AND inside table cells (same emit path).
+            var picXml = word.GetElementXml(run.Path);
+            if (!string.IsNullOrEmpty(picXml))
+            {
+                var extMatch = System.Text.RegularExpressions.Regex.Match(
+                    picXml,
+                    @"wp:extent\b[^>]*\bcx=""(\d+)""[^>]*\bcy=""(\d+)""");
+                if (extMatch.Success)
+                {
+                    picProps["width"] = extMatch.Groups[1].Value + "emu";
+                    picProps["height"] = extMatch.Groups[2].Value + "emu";
+                }
+            }
             items.Add(new BatchItem
             {
                 Command = "add",

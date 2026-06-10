@@ -1537,6 +1537,40 @@ internal static partial class ChartHelper
     }
 
     /// <summary>
+    /// BUG-DUMP-R35-1: replace (or insert) an axis's <c:txPr> at the schema-
+    /// correct position. CT_CatAx / CT_ValAx / CT_DateAx tail: …, spPr?, txPr?,
+    /// crossAx, crosses?/crossesAt?, crossBetween?, …, extLst?. txPr therefore
+    /// follows spPr and precedes crossAx and every cross*/label* element.
+    /// AppendChild lands it after crossAx and Word silently ignores the
+    /// out-of-order txPr — so the per-axis font never applies. Any existing
+    /// txPr (typed C.TextProperties OR the plain post-reload form) is removed
+    /// first so a verbatim replace is idempotent.
+    /// </summary>
+    internal static void SetAxisTxPr(OpenXmlCompositeElement axis, OpenXmlElement txPr)
+    {
+        foreach (var existing in axis.ChildElements
+            .Where(e => e.LocalName == "txPr").ToList())
+            existing.Remove();
+        string[] insertBeforeNames =
+        [
+            "crossAx", "crosses", "crossesAt", "crossBetween",
+            "majorUnit", "minorUnit", "dispUnits",
+            "auto", "lblAlgn", "lblOffset", "tickLblSkip", "tickMarkSkip",
+            "noMultiLvlLbl", "baseTimeUnit", "majorTimeUnit", "minorTimeUnit",
+            "extLst"
+        ];
+        foreach (var sibling in axis.ChildElements)
+        {
+            if (insertBeforeNames.Contains(sibling.LocalName))
+            {
+                axis.InsertBefore(txPr, sibling);
+                return;
+            }
+        }
+        axis.AppendChild(txPr);
+    }
+
+    /// <summary>
     /// Insert a child into the CT_Chart element at the correct schema position.
     /// Schema: title?, autoTitleDeleted?, pivotFmts?, view3D?, floor?, sideWall?,
     /// backWall?, plotArea, legend?, plotVisOnly?, dispBlanksAs?, showDLblsOverMax?, extLst?.

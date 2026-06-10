@@ -2712,6 +2712,54 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // BUG-DUMP-R35-1: inject the Reader's verbatim per-axis <c:txPr>
+                // and title <a:pPr> fragments. value is the captured OuterXml;
+                // parse it back into the typed SDK element and splice it in at
+                // the schema-correct position (axis txPr: after spPr, before
+                // crossAx; title pPr: replaces the rich paragraph's pPr). The
+                // fragments carry their own a:/c: namespace declarations, so the
+                // SDK string constructor round-trips them losslessly.
+                case "valax.txpr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var valAx = chart.GetFirstChild<C.PlotArea>()?.GetFirstChild<C.ValueAxis>();
+                    if (valAx == null) { unsupported.Add(key); break; }
+                    SetAxisTxPr(valAx, new C.TextProperties(value));
+                    break;
+                }
+                case "catax.txpr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    var catAx = (OpenXmlCompositeElement?)plotArea2?.GetFirstChild<C.CategoryAxis>()
+                        ?? plotArea2?.GetFirstChild<C.DateAxis>();
+                    if (catAx == null) { unsupported.Add(key); break; }
+                    SetAxisTxPr(catAx, new C.TextProperties(value));
+                    break;
+                }
+                case "title.ppr":
+                {
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    // The title font lives in c:title/c:tx/c:rich/a:p/a:pPr.
+                    // Replace the builder's default pPr with the captured one so
+                    // the source's defRPr colour / typeface / paragraph
+                    // alignment are restored. The run-level a:rPr (which renders
+                    // and is patched by the title.* fan-out) is left untouched.
+                    var ctitle = chart.GetFirstChild<C.Title>();
+                    var richPara = ctitle?.GetFirstChild<C.ChartText>()
+                        ?.GetFirstChild<C.RichText>()
+                        ?.GetFirstChild<Drawing.Paragraph>();
+                    if (richPara == null) { unsupported.Add(key); break; }
+                    var newPPr = new Drawing.ParagraphProperties(value);
+                    var oldPPr = richPara.GetFirstChild<Drawing.ParagraphProperties>();
+                    // CT_TextParagraph: pPr is always the first child (before
+                    // a:r / a:endParaRPr), so replace-in-place / prepend.
+                    if (oldPPr != null) oldPPr.InsertAfterSelf(newPPr);
+                    else richPara.PrependChild(newPPr);
+                    oldPPr?.Remove();
+                    break;
+                }
+
                 // ==================== Advanced Features ====================
 
                 case "referenceline" or "refline" or "targetline":

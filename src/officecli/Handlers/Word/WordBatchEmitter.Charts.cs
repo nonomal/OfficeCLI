@@ -49,6 +49,18 @@ public static partial class WordBatchEmitter
                 .ToList())
                 props.Remove(k);
 
+        // BUG-DUMP-R35-1: the verbatim per-axis text fragments (catAx.txPr /
+        // valAx.txPr) supersede the single `axisFont` key, which read only the
+        // VALUE axis and on rebuild applied that one font to BOTH axes —
+        // clobbering the category axis's distinct font. Drop `axisFont` once a
+        // verbatim axis txPr is present so the two fragments aren't fighting one
+        // chart-level font. (title.pPr is purely ADDITIVE — it restores the
+        // title's defRPr colour/typeface/alignment that the run-level title.*
+        // keys never carried — so no title key is dropped.) Plain charts emit
+        // none of these, so this is a no-op for them.
+        if (props.ContainsKey("catAx.txPr") || props.ContainsKey("valAx.txPr"))
+            props.Remove("axisFont");
+
         // Build data="Name:v1,v2;..." from series children, plus the per-series
         // dotted props AddChart honors (series{N}.color, series{N}.dataLabels).
         // N is 1-based over the EMITTED (non-reference-line) series, matching how

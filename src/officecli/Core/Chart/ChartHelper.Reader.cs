@@ -193,6 +193,28 @@ internal static partial class ChartHelper
                 if (titleRp.Language?.HasValue == true && !string.IsNullOrEmpty(titleRp.Language.Value))
                     node.Format["title.lang"] = titleRp.Language.Value!;
             }
+
+            // BUG-DUMP-R35-1: the title font lives both on the run-level <a:rPr>
+            // (which renders, captured above) AND on the paragraph-level
+            // <a:pPr><a:defRPr> (algn + color + typeface). BuildChartTitle only
+            // emits a bare defRPr (sz/bold), so the source's defRPr colour /
+            // typeface / paragraph alignment were dropped on rebuild — a
+            // render-neutral but real XML-fidelity gap. Capture the title's
+            // <a:pPr> verbatim and inject it back, replacing the builder's
+            // default. Only when the defRPr carries explicit styling (an
+            // alignment attr alone is also worth round-tripping).
+            var titlePPr = titleEl.Descendants<Drawing.ParagraphProperties>().FirstOrDefault();
+            if (titlePPr != null)
+            {
+                var titleDefRp = titlePPr.GetFirstChild<Drawing.DefaultRunProperties>();
+                bool defRpMeaningful = titleDefRp != null && (
+                    titleDefRp.ChildElements.Any(c => c.LocalName is "solidFill"
+                        or "latin" or "ea" or "cs")
+                    || titleDefRp.GetAttributes().Any(a => a.LocalName is "i" or "u"));
+                bool hasAlgn = titlePPr.GetAttributes().Any(a => a.LocalName == "algn");
+                if (defRpMeaningful || hasAlgn)
+                    node.Format["title.pPr"] = titlePPr.OuterXml;
+            }
         }
 
         var legend = chart.GetFirstChild<C.Legend>();
@@ -380,6 +402,21 @@ internal static partial class ChartHelper
             var axisFontStr = ReadFontSpec(valAxisTp);
             if (axisFontStr != null) node.Format["axisFont"] = axisFontStr;
         }
+
+        // BUG-DUMP-R35-1: PER-AXIS text properties. The single `axisFont` key
+        // above reads only the VALUE axis txPr; on rebuild that one font was
+        // applied to BOTH axes, clobbering the category axis's distinct font
+        // (e.g. catAx 10pt/666666 became valAx 9pt/999999). Capture each axis's
+        // <c:txPr> verbatim (by local name, tolerant of the SDK post-reload
+        // form) so per-axis fonts round-trip. The verbatim keys supersede the
+        // lossy `axisFont` on replay (the emitter drops it). The category axis
+        // may be a CategoryAxis or a DateAxis depending on catAxisType.
+        var catAxisForTxPr = (OpenXmlElement?)plotArea.GetFirstChild<C.CategoryAxis>()
+            ?? plotArea.GetFirstChild<C.DateAxis>();
+        var catAxTxPrXml = GetTxPrChildXml(catAxisForTxPr);
+        if (catAxTxPrXml != null) node.Format["catAx.txPr"] = catAxTxPrXml;
+        var valAxTxPrXml = GetTxPrChildXml(valAxisForGrid);
+        if (valAxTxPrXml != null) node.Format["valAx.txPr"] = valAxTxPrXml;
 
         // Secondary axis — emit the 1-based series indices bound to the
         // secondary axis so dump→replay round-trips. The Setter expects
@@ -1274,6 +1311,37 @@ internal static partial class ChartHelper
             c.LocalName is "ln" or "solidFill" or "gradFill" or "pattFill"
                 or "blipFill" or "noFill" or "effectLst" or "effectDag");
         return meaningful ? spPr.OuterXml : null;
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R35-1: return the verbatim OuterXml of an element's <c:txPr>
+    /// child when it carries meaningful text styling — a <a:defRPr> with a
+    /// size / bold / fill / latin/ea/cs font, or a bodyPr rotation. The txPr is
+    /// located by LOCAL NAME so it survives the SDK's post-reload form (same
+    /// rationale as GetSpPrChildXml). Used to round-trip PER-AXIS fonts: the
+    /// single legacy `axisFont` key reads only the value axis, so the category
+    /// axis's distinct font was clobbered by the value axis's on rebuild.
+    /// Returns null for an empty/styling-free txPr so plain charts emit nothing.
+    /// </summary>
+    private static string? GetTxPrChildXml(OpenXmlElement? parent)
+    {
+        if (parent == null) return null;
+        var txPr = parent.ChildElements
+            .FirstOrDefault(e => e.LocalName == "txPr"
+                && e.NamespaceUri == "http://schemas.openxmlformats.org/drawingml/2006/chart");
+        if (txPr == null) return null;
+        // Meaningful when any defRPr carries explicit styling, or the bodyPr
+        // sets a rotation/vert (rotation already round-trips via
+        // xaxis/yaxis.labelRotation, but capturing the whole txPr verbatim is
+        // harmless and keeps the font + rotation as one fragment).
+        var defRPr = txPr.Descendants()
+            .FirstOrDefault(e => e.LocalName == "defRPr");
+        bool meaningfulFont = defRPr != null && (
+            defRPr.GetAttributes().Any(a => a.LocalName is "sz" or "b" or "i" or "u")
+            || defRPr.ChildElements.Any(c => c.LocalName is "solidFill" or "latin"
+                or "ea" or "cs" or "highlight"));
+        if (meaningfulFont) return txPr.OuterXml;
+        return null;
     }
 
     /// <summary>

@@ -603,6 +603,12 @@ internal static partial class ChartHelper
         // position inside CT_ValAx / CT_CatAx / CT_PlotArea. (plotarea.sppr
         // also matches the "plotarea." deferred prefix; listed for symmetry.)
         "valax.sppr", "catax.sppr", "plotarea.sppr",
+        // BUG-DUMP-R35-1: verbatim per-axis text properties + title paragraph
+        // properties, injected post-build at the schema-correct position inside
+        // CT_CatAx / CT_ValAx (txPr after spPr, before crossAx) and the title's
+        // c:tx/c:rich paragraph (a:pPr). (title.ppr also matches the "title."
+        // deferred prefix; listed for symmetry.)
+        "valax.txpr", "catax.txpr", "title.ppr",
         // R24 — dotted subkeys mirroring Reader emit.
         "valaxisline.color", "valaxisline.width", "valaxisline.dash",
         "cataxisline.color", "cataxisline.width", "cataxisline.dash",

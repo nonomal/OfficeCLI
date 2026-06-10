@@ -791,6 +791,42 @@ internal static partial class ChartHelper
                 InsertSeriesChildInOrder(ser, new C.InvertIfNegative { Val = ParseHelpers.IsTruthy(value) });
                 return true;
 
+            // BUG-DUMP-R33-1: inject the Reader's verbatim styling fragments.
+            // value is the captured OuterXml; parse it back into the typed SDK
+            // element and splice it in at the schema-correct position. The
+            // fragments carry their own a:/c: namespace declarations (the
+            // Reader takes OuterXml from live elements), so the SDK
+            // string-constructor round-trips them losslessly. Existing
+            // same-name children are removed first so a Set-after-Set (or the
+            // ApplySeriesColor that the column/bar Builder runs before deferred
+            // props apply) doesn't leave a duplicate.
+            case "sppr":
+            {
+                if (string.IsNullOrWhiteSpace(value)) return true;
+                ser.RemoveAllChildren<C.ChartShapeProperties>();
+                InsertSeriesChildInOrder(ser, new C.ChartShapeProperties(value));
+                return true;
+            }
+
+            case "dpt":
+            {
+                if (string.IsNullOrWhiteSpace(value)) return true;
+                ser.RemoveAllChildren<C.DataPoint>();
+                // \x1e (record separator) joins the per-point fragments on the
+                // Reader side; never appears inside XML, so the split is safe.
+                foreach (var frag in value.Split('\x1e', StringSplitOptions.RemoveEmptyEntries))
+                    InsertSeriesChildInOrder(ser, new C.DataPoint(frag));
+                return true;
+            }
+
+            case "dlbls":
+            {
+                if (string.IsNullOrWhiteSpace(value)) return true;
+                ser.RemoveAllChildren<C.DataLabels>();
+                InsertSeriesChildInOrder(ser, new C.DataLabels(value));
+                return true;
+            }
+
             case "errbars" or "errorbars":
                 ser.RemoveAllChildren<C.ErrorBars>();
                 if (!value.Equals("none", StringComparison.OrdinalIgnoreCase)
@@ -1331,6 +1367,14 @@ internal static partial class ChartHelper
     {
         string[] insertBeforeNames = child.LocalName switch
         {
+            // BUG-DUMP-R33-1: verbatim spPr / dPt injection. CT_*Ser order:
+            // idx, order, tx, spPr, invertIfNegative, pictureOptions, dPt*,
+            // dLbls, trendline, errBars, cat, val, … spPr precedes every
+            // styling/data sibling; dPt sits after spPr/invertIfNeg/pictureOpts
+            // and before dLbls and the data tail. Appending either at the end
+            // makes Word silently ignore it (and the validator rejects it).
+            "spPr" => ["invertIfNegative", "pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "marker", "shape", "smooth", "extLst"],
+            "dPt" => ["dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             "invertIfNegative" => ["pictureOptions", "dPt", "dLbls", "trendline", "errBars", "cat", "val", "xVal", "yVal", "bubbleSize", "bubble3D", "shape", "smooth", "extLst"],
             // CT_PieSer / CT_DoughnutSer: idx, order, tx?, spPr?, explosion?, dPt*, dLbls?, cat?, val?
             "explosion" => ["dPt", "dLbls", "cat", "val", "extLst"],

@@ -896,6 +896,46 @@ internal static partial class ChartHelper
                     if (!string.IsNullOrEmpty(nameRefF)) seriesNode.Format["nameRef"] = nameRefF;
                 }
 
+                // BUG-DUMP-R33-1: capture per-series styling sub-elements as
+                // VERBATIM OuterXml so dump→batch round-trips the full visual
+                // fidelity (series <c:spPr> outline/shadow, every <c:dPt>
+                // per-data-point override, and the rich <c:dLbls> num-format +
+                // font). The granular attribute readback below (color, gradient,
+                // outlineColor, shadow, point{N}.color, labelFont.*) only covers
+                // a subset and silently flattens the rest. These three fragments
+                // reference theme colours (round-tripped via the theme part) and
+                // carry NO external relationships, so verbatim XML is safe. When
+                // a verbatim key is present the emitter suppresses the matching
+                // granular keys for that series so they don't double-apply.
+                if (serEl != null)
+                {
+                    var rawSpPr = serEl.GetFirstChild<C.ChartShapeProperties>();
+                    if (rawSpPr != null && HasMeaningfulStyling(rawSpPr))
+                        seriesNode.Format["spPr"] = rawSpPr.OuterXml;
+
+                    var rawDpts = serEl.Elements<C.DataPoint>()
+                        .Where(dp => dp.GetFirstChild<C.ChartShapeProperties>() != null
+                            || dp.GetFirstChild<C.Marker>() != null
+                            || dp.GetFirstChild<C.Explosion>() != null)
+                        .Select(dp => dp.OuterXml)
+                        .ToList();
+                    if (rawDpts.Count > 0)
+                        // \x1e (record separator) joins the dPt fragments; it can
+                        // never appear inside XML, so a literal split is safe.
+                        seriesNode.Format["dPt"] = string.Join("\x1e", rawDpts);
+
+                    var rawDLbls = serEl.GetFirstChild<C.DataLabels>();
+                    // Only round-trip dLbls verbatim when it carries rich styling
+                    // (numFmt / spPr / txPr). A bare show-flag-only <c:dLbls> is
+                    // already reconstructed by the existing dataLabels= readback,
+                    // and replaying it verbatim would just duplicate that work.
+                    if (rawDLbls != null
+                        && (rawDLbls.GetFirstChild<C.NumberingFormat>() != null
+                            || rawDLbls.GetFirstChild<C.ChartShapeProperties>() != null
+                            || rawDLbls.GetFirstChild<C.TextProperties>() != null))
+                        seriesNode.Format["dLbls"] = rawDLbls.OuterXml;
+                }
+
                 var serSpPr = serEl?.GetFirstChild<C.ChartShapeProperties>();
                 // NoFill round-trip: when ApplySeriesColor wrote <a:noFill/>
                 // (color=none), Reader previously skipped emit and dump→replay
@@ -1170,6 +1210,23 @@ internal static partial class ChartHelper
         {
             node.ChildCount = seriesCount;
         }
+    }
+
+    /// <summary>
+    /// BUG-DUMP-R33-1: a series <c:spPr> is worth capturing verbatim only when
+    /// it carries styling the granular <c:ser> readback can't fully reproduce —
+    /// an outline (<a:ln>), an effect list (<a:outerShdw>/glow/…), or a gradient
+    /// fill. A bare <c:spPr> holding just a <a:solidFill> (the common
+    /// per-series colour) is already round-tripped by the `color` key, so
+    /// emitting verbatim XML there would add noise and risk double-applying the
+    /// fill. Keeping the verbatim path scoped to "rich" spPr means synthetic
+    /// charts built by `add chart color=...` see no behavioural change.
+    /// </summary>
+    private static bool HasMeaningfulStyling(C.ChartShapeProperties spPr)
+    {
+        return spPr.GetFirstChild<Drawing.Outline>() != null
+            || spPr.GetFirstChild<Drawing.EffectList>() != null
+            || spPr.GetFirstChild<Drawing.GradientFill>() != null;
     }
 
     /// <summary>

@@ -705,6 +705,10 @@ internal static partial class ChartHelper
     private static readonly HashSet<string> DeferredSeriesSubkeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "gradient", "gradientfill",
+        // BUG-DUMP-R33-1: verbatim styling fragments captured by the Reader
+        // (series <c:spPr>, the per-data-point <c:dPt> list, and the rich
+        // <c:dLbls>) are injected post-build by HandleSeriesDottedProperty.
+        "sppr", "dpt", "dlbls",
         "smooth", "trendline", "marker", "markersize", "markercolor",
         "invertifneg", "invertifnegative",
         "errbars", "errorbars",

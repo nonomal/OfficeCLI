@@ -45,10 +45,32 @@ public static partial class WordBatchEmitter
             seriesParts.Add($"{name}:{vals}");
             seriesIdx++;
 
+            // BUG-DUMP-R33-1: when the Reader captured the series' styling
+            // sub-elements verbatim, forward them as `series{N}.spPr/dPt/dLbls`
+            // and SUPPRESS the granular keys they subsume. The verbatim XML is
+            // authoritative — re-applying the lossy granular color/gradient/
+            // outlineColor/shadow on top would either double-fill or fight the
+            // captured spPr; the per-point color key is fully replaced by the
+            // verbatim dPt list. Without this gate the round-trip kept dropping
+            // <a:ln>/<a:outerShdw>/<c:dPt>/rich <c:dLbls>.
+            bool hasVerbatimSpPr = s.Format.TryGetValue("spPr", out var spObj) && spObj is string sp && sp.Length > 0;
+            bool hasVerbatimDpt = s.Format.TryGetValue("dPt", out var dpObj) && dpObj is string dp && dp.Length > 0;
+            bool hasVerbatimDLbls = s.Format.TryGetValue("dLbls", out var dlbObj) && dlbObj is string dlb && dlb.Length > 0;
+            if (hasVerbatimSpPr)
+            {
+                props[$"series{seriesIdx}.spPr"] = (string)spObj!;
+                emittedPerSeriesFill = true;
+            }
+            if (hasVerbatimDpt)
+                props[$"series{seriesIdx}.dPt"] = (string)dpObj!;
+            if (hasVerbatimDLbls)
+                props[$"series{seriesIdx}.dLbls"] = (string)dlbObj!;
+
             // Per-series explicit fill color (srgbClr / "none"). Reader only sets
             // this key when the series carries an explicit <c:spPr> fill, so its
-            // presence is meaningful — forward it verbatim.
-            if (s.Format.TryGetValue("color", out var cObj) && cObj != null)
+            // presence is meaningful — forward it verbatim. Skip when a verbatim
+            // spPr already carries the fill (it is the source of truth).
+            if (!hasVerbatimSpPr && s.Format.TryGetValue("color", out var cObj) && cObj != null)
             {
                 var c = cObj.ToString() ?? "";
                 if (c.Length > 0) { props[$"series{seriesIdx}.color"] = c; emittedPerSeriesFill = true; }
@@ -56,7 +78,7 @@ public static partial class WordBatchEmitter
             // Per-series gradient fill (e.g. "5B9BD5-2E75B6:90:s0"). Distinct
             // from a chart-level `gradient=` which applies one gradient to ALL
             // series — here each series can carry its own (Q1 blue / Q2 orange).
-            else if (s.Format.TryGetValue("gradient", out var gObj) && gObj != null)
+            else if (!hasVerbatimSpPr && s.Format.TryGetValue("gradient", out var gObj) && gObj != null)
             {
                 var g = gObj.ToString() ?? "";
                 if (g.Length > 0) { props[$"series{seriesIdx}.gradient"] = g; emittedPerSeriesFill = true; }
@@ -66,7 +88,10 @@ public static partial class WordBatchEmitter
             // union across series and emit the chart-level datalabels.show* keys
             // below. (Common case: a single-series chart showing values, or all
             // series sharing the same labels.)
-            if (s.Format.TryGetValue("dataLabels", out var dObj) && dObj != null)
+            // BUG-DUMP-R33-1: skip when a verbatim dLbls was captured — its XML
+            // already carries the show flags, so funnelling them into the
+            // chart-level union would write a second, conflicting <c:dLbls>.
+            if (!hasVerbatimDLbls && s.Format.TryGetValue("dataLabels", out var dObj) && dObj != null)
             {
                 foreach (var flag in (dObj.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                     dataLabelFlags.Add(flag);

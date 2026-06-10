@@ -128,8 +128,27 @@ public partial class PowerPointHandler
 
         // Border/outline — parse for later; solid goes to CSS, non-solid to SVG
         var outline = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>();
+        // Gradient outline (<a:ln>/<a:gradFill>): a solid border can't represent
+        // the gradient, so render the stops + direction via CSS border-image with
+        // a linear-gradient — reusing the same stop/angle conversion the shape
+        // FILL gradient uses (GradientToCss). Takes precedence over the solid /
+        // SVG-dashed paths. Without this the gradient line color resolves to null
+        // in ParseOutline and degrades to solid #000000.
+        var outlineGradFill = outline?.GetFirstChild<Drawing.GradientFill>();
         var parsedOutline = outline != null ? ParseOutline(outline, themeColors) : null;
-        if (parsedOutline != null && parsedOutline.Value.dashType == "solid")
+        if (outlineGradFill != null)
+        {
+            var lineW = outline!.Width?.HasValue == true
+                ? outline.Width.Value / EmuConverter.EmuPerPointF : 1.0;
+            if (lineW < 0.5) lineW = 0.5;
+            var gradCss = GradientToCss(outlineGradFill, themeColors);
+            // border-image needs a non-zero transparent border to paint into.
+            styles.Add($"border:{lineW:0.##}pt solid transparent");
+            styles.Add($"border-image:{gradCss} 1");
+            // Suppress the solid-CSS and SVG-overlay outline paths below.
+            parsedOutline = null;
+        }
+        else if (parsedOutline != null && parsedOutline.Value.dashType == "solid")
         {
             styles.Add($"border:{parsedOutline.Value.widthPt:0.##}pt solid {parsedOutline.Value.color}");
         }

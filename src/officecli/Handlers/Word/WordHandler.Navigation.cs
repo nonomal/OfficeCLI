@@ -4910,6 +4910,35 @@ public partial class WordHandler
             if (trPrChange.Date?.Value is DateTime trDate)
                 node.Format["trPrChange.date"] = trDate.ToString("o");
         }
+        // BUG-DUMP-R40-6: row-level tracked-change marker. <w:trPr><w:ins>/<w:del>
+        // marks the whole row as inserted/deleted with track-changes on (CT_TrPr,
+        // distinct from the run-level InsertedRun/DeletedRun wrapper). Previously
+        // unread, so the marker vanished on dump→batch and the inserted/deleted
+        // row lost its revision attribution. Surface via the same canonical
+        // revision.* creation keys the run reader uses (revision.type=ins|del +
+        // author/date/id) so the row emitter can re-emit <w:trPr><w:ins>/<w:del>.
+        var rowIns = trPr.GetFirstChild<Inserted>();
+        var rowDel = rowIns == null ? trPr.GetFirstChild<Deleted>() : null;
+        if (rowIns != null)
+        {
+            node.Format["revision.type"] = "ins";
+            if (!string.IsNullOrEmpty(rowIns.Author?.Value))
+                node.Format["revision.author"] = rowIns.Author!.Value!;
+            if (rowIns.Date?.Value is DateTime rowInsDate)
+                node.Format["revision.date"] = rowInsDate.ToString("o");
+            if (rowIns.Id?.Value is { } rowInsId)
+                node.Format["revision.id"] = rowInsId.ToString();
+        }
+        else if (rowDel != null)
+        {
+            node.Format["revision.type"] = "del";
+            if (!string.IsNullOrEmpty(rowDel.Author?.Value))
+                node.Format["revision.author"] = rowDel.Author!.Value!;
+            if (rowDel.Date?.Value is DateTime rowDelDate)
+                node.Format["revision.date"] = rowDelDate.ToString("o");
+            if (rowDel.Id?.Value is { } rowDelId)
+                node.Format["revision.id"] = rowDelId.ToString();
+        }
         var rh = trPr.GetFirstChild<TableRowHeight>();
         if (rh?.Val?.Value != null)
         {

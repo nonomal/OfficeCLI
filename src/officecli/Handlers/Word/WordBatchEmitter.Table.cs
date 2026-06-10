@@ -378,7 +378,14 @@ public static partial class WordBatchEmitter
             // tail case, same lesser-evil as the tblPrChange edge case).
             var rowProps = ExtractRowOnlyProps(rowNode.Format);
             bool rowHadRevision = FoldRevisionIntoProps(rowNode.Format, "trPrChange", rowProps);
-            if (rowProps.Count > 0 || rowHadRevision)
+            // BUG-DUMP-R40-6: row-level tracked-change marker (<w:trPr><w:ins>/
+            // <w:del>). The row reader stamps revision.type=ins|del +
+            // revision.author/.date/.id directly on rowNode.Format (not under a
+            // *PrChange prefix). Fold those creation keys into the row's `set tr`
+            // step so SetElementTableRow → BeginTrackChangeIfRequested re-creates
+            // the marker. Distinct from the trPrChange (format-change) fold above.
+            bool rowHadInsDel = FoldRowRevisionInsDel(rowNode.Format, rowProps);
+            if (rowProps.Count > 0 || rowHadRevision || rowHadInsDel)
             {
                 items.Add(new BatchItem
                 {
@@ -859,6 +866,29 @@ public static partial class WordBatchEmitter
         props["revision.author"] = author;
         var date = TryStringFormat(format, $"{prefix}.date");
         if (date != null) props["revision.date"] = date;
+        return true;
+    }
+
+    /// <summary>BUG-DUMP-R40-6: fold a row-level ins/del tracked-change marker
+    /// (read from <c>revision.type=ins|del</c> + <c>revision.author/.date/.id</c>
+    /// stamped directly on the row node) into the row's `set tr` prop bag so
+    /// SetElementTableRow re-creates <c>&lt;w:trPr&gt;&lt;w:ins&gt;/&lt;w:del&gt;</c>.
+    /// Returns true when an ins/del marker was folded in. No-op (returns false)
+    /// for any other revision.type — the trPrChange format-change fold owns
+    /// those.</summary>
+    private static bool FoldRowRevisionInsDel(
+        Dictionary<string, object?> format,
+        Dictionary<string, string> props)
+    {
+        var type = TryStringFormat(format, "revision.type");
+        if (type is not ("ins" or "del")) return false;
+        props["revision.type"] = type!;
+        var author = TryStringFormat(format, "revision.author");
+        if (author != null) props["revision.author"] = author;
+        var date = TryStringFormat(format, "revision.date");
+        if (date != null) props["revision.date"] = date;
+        var id = TryStringFormat(format, "revision.id");
+        if (id != null) props["revision.id"] = id;
         return true;
     }
 

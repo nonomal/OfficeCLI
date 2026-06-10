@@ -252,6 +252,41 @@ public partial class WordHandler
             return (stripped, wrapRun);
         }
 
+        // BUG-DUMP-R40-6: TableRow host + ins/del — write the row-level
+        // tracked-change marker <w:trPr><w:ins>/<w:del> (CT_TrPr). This is a
+        // real OOXML concept (a whole row inserted/deleted with track-changes
+        // on); AddRow already creates the <w:ins> form, but the dump→batch
+        // round-trip seeds rows via `add table` then re-applies row props with
+        // `set tr[N]`, so the marker must also be creatable on a pre-existing
+        // row. Mirrors the run-wrap branch: the wrap itself is the action.
+        // moveFrom/moveTo have no row-level equivalent in CT_TrPr and stay
+        // rejected by the non-Run guard below.
+        if (element is TableRow rowWrap && kind is "ins" or "del")
+        {
+            var trPr = rowWrap.GetFirstChild<TableRowProperties>()
+                       ?? rowWrap.PrependChild(new TableRowProperties());
+            // A row already carrying a row-level ins/del marker would stack a
+            // second one — reject, same shape as the run-wrapper guard.
+            if (trPr.GetFirstChild<Inserted>() != null || trPr.GetFirstChild<Deleted>() != null)
+                throw new InvalidOperationException(
+                    "row already has a row-level track-change marker (<w:trPr><w:ins>/<w:del>); "
+                    + "accept/reject the existing revision first");
+            Action wrapRow = kind == "ins"
+                ? () =>
+                {
+                    var pr = rowWrap.GetFirstChild<TableRowProperties>()
+                             ?? rowWrap.PrependChild(new TableRowProperties());
+                    pr.AppendChild(new Inserted { Author = author, Date = date, Id = idStr });
+                }
+                : () =>
+                {
+                    var pr = rowWrap.GetFirstChild<TableRowProperties>()
+                             ?? rowWrap.PrependChild(new TableRowProperties());
+                    pr.AppendChild(new Deleted { Author = author, Date = date, Id = idStr });
+                };
+            return (stripped, wrapRow);
+        }
+
         // Non-Run host + ins/del/moveFrom/moveTo: reject explicitly
         // rather than silently degrading to *PrChange (which would
         // record the change as a *format* revision, not the requested

@@ -318,6 +318,11 @@ public partial class ExcelHandler
         // gets a dropdown indicator, matching Excel's filter-button affordance.
         var autoFilterCells = BuildAutoFilterHeaderCells(ws, worksheetPart);
 
+        // Table (ListObject) built-in style banding: header fill + alternating
+        // row stripes derived from the workbook theme. Explicit cell fills win,
+        // so this is applied only where the cell has no fill of its own.
+        var tableStyleMap = BuildTableStyleMap(worksheetPart);
+
         // Collect column widths
         var colWidths = GetColumnWidths(ws);
 
@@ -581,7 +586,7 @@ public partial class ExcelHandler
         var ctx = new SheetRenderContext(sheetName, sheetIdx, cellMap, maxRow, maxCol,
             rowHeights, hiddenRows, hiddenCols, mergeMap, frozenRows, frozenCols,
             frozenLeftOffsets, frozenTopOffsets, cfMap, dataBarMap, iconSetMap, sparklineMap,
-            autoFilterCells, stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt, colWidths);
+            tableStyleMap, autoFilterCells, stylesheet, evaluator, defaultColWidthPt, defaultRowHeightPt, colWidths);
         RenderTbody(sb, ctx);
         sb.AppendLine("</table>");
 
@@ -670,6 +675,7 @@ public partial class ExcelHandler
         Dictionary<string, string> DataBarMap,
         Dictionary<string, string> IconSetMap,
         Dictionary<string, string> SparklineMap,
+        Dictionary<string, string> TableStyleMap,
         HashSet<string> AutoFilterCells,
         Stylesheet? Stylesheet,
         Core.FormulaEvaluator? Evaluator,
@@ -753,7 +759,7 @@ public partial class ExcelHandler
                 // member. The anchor's own right/bottom edges are interior to the merge.
                 var rightMember = ctx.CellMap.TryGetValue((r, c + mergeInfo.ColSpan - 1), out var rmc) ? rmc : null;
                 var bottomMember = ctx.CellMap.TryGetValue((r + mergeInfo.RowSpan - 1, c), out var bmc) ? bmc : null;
-                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap, mergePerimeter: true, rightBorderCell: rightMember, bottomBorderCell: bottomMember);
+                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap, ctx.TableStyleMap, mergePerimeter: true, rightBorderCell: rightMember, bottomBorderCell: bottomMember);
                 var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
                 var richHtml = cell != null ? TryBuildRichTextHtml(cell) : null;
                 var adjColSpan = mergeInfo.ColSpan;
@@ -780,7 +786,7 @@ public partial class ExcelHandler
             else
             {
                 var cell = ctx.CellMap.TryGetValue((r, c), out var nc) ? nc : null;
-                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap);
+                var style = GetCellStyleCss(cell, ctx.Stylesheet, ctx.FrozenRows, ctx.FrozenCols, r, c, ctx.FrozenLeftOffsets, ctx.FrozenTopOffsets, ctx.CfMap, ctx.DataBarMap, ctx.IconSetMap, ctx.TableStyleMap);
                 var value = cell != null ? GetFormattedCellValue(cell, ctx.Stylesheet, ctx.Evaluator) : "";
                 var richHtml = cell != null ? TryBuildRichTextHtml(cell) : null;
                 var hlinkHtml = TryBuildHyperlinkFormulaHtml(cell, value);
@@ -1889,6 +1895,106 @@ public partial class ExcelHandler
         return cells;
     }
 
+    /// <summary>
+    /// Build a cellRef → background-CSS map for every table (ListObject) carrying a
+    /// built-in <c>&lt;tableStyleInfo&gt;</c>. Built-in table styles aren't stored in
+    /// styles.xml — their colors derive from the workbook theme. We resolve a base
+    /// accent from the style-name family and paint:
+    ///   header row  = accent solid
+    ///   band rows   = accent @ light tint on odd data rows (when showRowStripes)
+    /// Explicit cell fills win at the apply site (GetCellStyleCss), so a styled cell
+    /// is never overwritten by the band.
+    /// </summary>
+    private Dictionary<string, string> BuildTableStyleMap(WorksheetPart worksheetPart)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var tdp in worksheetPart.TableDefinitionParts)
+        {
+            var table = tdp.Table;
+            var tsi = table?.TableStyleInfo;
+            var styleName = tsi?.Name?.Value;
+            if (table?.Reference?.Value == null || string.IsNullOrEmpty(styleName)) continue;
+
+            var (headerHex, bandHex) = ResolveTableStyleColors(styleName);
+            if (headerHex == null) continue;
+
+            // Parse the table region A1:D7
+            var range = table.Reference.Value!.Replace("$", "");
+            var sides = range.Split(':');
+            var (startColName, startRow) = ParseCellReference(sides[0]);
+            int startCol = ColumnNameToIndex(startColName);
+            int endRow = startRow, endCol = startCol;
+            if (sides.Length > 1)
+            {
+                var (endColName, er) = ParseCellReference(sides[1]);
+                endCol = ColumnNameToIndex(endColName);
+                endRow = er;
+            }
+
+            int headerRows = (int)(table.HeaderRowCount?.Value ?? 1);
+            int totalsRows = (int)(table.TotalsRowCount?.Value ?? 0);
+            bool rowStripes = tsi?.ShowRowStripes?.Value == true;
+
+            int firstDataRow = startRow + headerRows;
+            int lastDataRow = endRow - totalsRows;
+
+            for (int r = startRow; r <= endRow; r++)
+            {
+                string? css = null;
+                if (r < firstDataRow)              // header band
+                    css = $"background:{headerHex};color:#FFFFFF;font-weight:bold";
+                else if (r > lastDataRow)          // totals band
+                    css = $"background:{bandHex}";
+                else if (rowStripes)
+                {
+                    // Stripe odd data rows (1st data row = unstriped/white) to match
+                    // Excel's first-row-light convention for Medium styles.
+                    int dataIdx = r - firstDataRow;
+                    if (dataIdx % 2 == 1) css = $"background:{bandHex}";
+                }
+                if (css == null) continue;
+                for (int c = startCol; c <= endCol; c++)
+                    map[$"{IndexToColumnName(c)}{r}"] = css;
+            }
+        }
+
+        return map;
+    }
+
+    /// <summary>
+    /// Map a built-in table-style name (e.g. TableStyleMedium9) to a header fill and
+    /// a band fill, sourced from the workbook theme accent palette. Light/Medium/Dark
+    /// families share the accent-cycling mapping Excel uses (MediumN → accent((N-2)%6)),
+    /// with band = accent at a light tint. Dark family inverts header text handled at
+    /// the call site. Returns (null, null) for unrecognized names.
+    /// </summary>
+    private (string? header, string? band) ResolveTableStyleColors(string styleName)
+    {
+        var m = Regex.Match(styleName, @"TableStyle(Light|Medium|Dark)(\d+)", RegexOptions.IgnoreCase);
+        if (!m.Success) return (null, null);
+
+        int n = int.TryParse(m.Groups[2].Value, out var parsed) ? parsed : 1;
+        var theme = GetExcelThemeColors();
+
+        // Excel groups the colored families in blocks of 7: one neutral (gray) +
+        // six accents. Style index 1 is the neutral; 2..7 map to accent1..accent6;
+        // 8 neutral again; 9..14 accent1..accent6; etc. (n-1)%7 gives the slot:
+        // slot 0 = neutral, slots 1..6 = accent1..accent6. So Medium9 → accent1 (blue),
+        // matching native Excel.
+        int slot = ((Math.Max(n, 1) - 1) % 7 + 7) % 7; // 0..6
+        string accentHex;
+        if (slot == 0)
+            accentHex = "808080"; // neutral gray family
+        else if (!theme.TryGetValue($"accent{slot}", out accentHex!))
+            accentHex = "4472C4";
+
+        // header = solid accent; band = accent tinted ~80% toward white (light blue).
+        var header = $"#{accentHex}";
+        var band = Core.ColorMath.ApplyTransforms(accentHex, tint: 20000); // ≈ 20% accent / 80% white
+        return (header, band);
+    }
+
     // Used extent of populated cells (capped by the html render caps). The CF
     // passes only need cells that actually render; expanding a full-column or
     // full-sheet sqref past the data would cost ~1M+ cells and hang the render.
@@ -1948,6 +2054,7 @@ public partial class ExcelHandler
         Dictionary<int, double>? frozenLeftOffsets = null, Dictionary<int, double>? frozenTopOffsets = null,
         Dictionary<string, string>? cfMap = null, Dictionary<string, string>? dataBarMap = null,
         Dictionary<string, string>? iconSetMap = null,
+        Dictionary<string, string>? tableStyleMap = null,
         bool mergePerimeter = false, Cell? rightBorderCell = null, Cell? bottomBorderCell = null)
     {
         var styles = new List<string>();
@@ -1986,6 +2093,10 @@ public partial class ExcelHandler
             {
                 styles.Add("position:relative");
             }
+            // Table built-in style banding (no explicit cell fill to override here).
+            if (tableStyleMap != null && tableStyleMap.TryGetValue(cfRefEarly, out var tblCssEarly)
+                && !styles.Any(s => s.StartsWith("background")))
+                styles.Add(tblCssEarly);
             // Frozen rows need opaque background so scrolling content doesn't show through
             // Use actual cell fill if available; fallback to white for cells with no explicit fill
             if (isFrozenRow && !styles.Any(s => s.StartsWith("background")))
@@ -2027,8 +2138,16 @@ public partial class ExcelHandler
             }
         }
 
-        // Conditional formatting overrides (background, color)
         var cfCellRef = $"{IndexToColumnName(col)}{row}";
+
+        // Table built-in style banding: header + alternating row fills derived
+        // from the theme. Explicit cell fills win, so apply only when the cell
+        // contributed no background of its own. CF (below) still overrides this.
+        if (tableStyleMap != null && tableStyleMap.TryGetValue(cfCellRef, out var tblCss)
+            && !styles.Any(s => s.StartsWith("background")))
+            styles.Add(tblCss);
+
+        // Conditional formatting overrides (background, color)
         if (cfMap != null && cfMap.TryGetValue(cfCellRef, out var cfCss))
         {
             // CF overrides existing background/color — remove conflicting base styles

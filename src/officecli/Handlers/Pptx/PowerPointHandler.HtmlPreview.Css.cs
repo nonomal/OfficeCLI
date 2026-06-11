@@ -500,11 +500,10 @@ public partial class PowerPointHandler
         var radiusPt = glow.Radius?.HasValue == true ? glow.Radius.Value / EmuConverter.EmuPerPointF : 5;
 
         var rgb = glow.GetFirstChild<Drawing.RgbColorModelHex>()?.Val?.Value;
-        string color;
+        (int r, int g, int b)? rgbTuple = null;
         if (rgb != null)
         {
-            var (r, g, b) = ColorMath.HexToRgb(rgb);
-            color = $"rgba({r},{g},{b},{opacity:0.##})";
+            rgbTuple = ColorMath.HexToRgb(rgb);
         }
         else
         {
@@ -512,26 +511,38 @@ public partial class PowerPointHandler
             var resolved = schemeColor != null && themeColors.TryGetValue(schemeColor, out var sc) ? sc : null;
             if (resolved != null)
             {
-                var (r, g, b) = ColorMath.HexToRgb(resolved);
-                color = $"rgba({r},{g},{b},{opacity:0.##})";
+                rgbTuple = ColorMath.HexToRgb(resolved);
             }
             else
             {
                 // No color specified — use theme accent1 or transparent
                 var acc1 = themeColors.TryGetValue("accent1", out var a1) ? a1 : null;
                 if (acc1 != null)
-                {
-                    var (r, g, b) = ColorMath.HexToRgb(acc1);
-                    color = $"rgba({r},{g},{b},{opacity:0.##})";
-                }
-                else
-                {
-                    color = $"rgba(0,0,0,0)"; // transparent — no glow visible
-                }
+                    rgbTuple = ColorMath.HexToRgb(acc1);
             }
         }
 
-        return $"filter:drop-shadow(0 0 {radiusPt:0.##}pt {color})";
+        if (rgbTuple == null)
+            return ""; // no resolvable color — emit nothing rather than an invisible shadow
+
+        var (gr, gg, gb) = rgbTuple.Value;
+
+        // A single low-alpha drop-shadow is barely visible on a white slide.
+        // Real PowerPoint paints a dense saturated halo, so stack several
+        // drop-shadow layers at progressively wider radii. Each layer composites
+        // over the previous, building up the colored halo to a visible density
+        // matching native. Per-layer alpha is boosted relative to the OOXML alpha
+        // (clamped) since drop-shadow blur disperses the color heavily.
+        double layerAlpha = Math.Min(0.9, Math.Max(0.45, opacity + 0.35));
+        string col = $"rgba({gr},{gg},{gb},{layerAlpha:0.##})";
+        var layers = new[]
+        {
+            $"drop-shadow(0 0 {radiusPt * 0.4:0.##}pt {col})",
+            $"drop-shadow(0 0 {radiusPt:0.##}pt {col})",
+            $"drop-shadow(0 0 {radiusPt:0.##}pt {col})",
+            $"drop-shadow(0 0 {radiusPt * 1.6:0.##}pt {col})",
+        };
+        return $"filter:{string.Join(" ", layers)}";
     }
 
     // ==================== CSS Helper: Reflection ====================

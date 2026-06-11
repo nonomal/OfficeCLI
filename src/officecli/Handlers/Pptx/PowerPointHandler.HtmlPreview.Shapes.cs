@@ -434,12 +434,43 @@ public partial class PowerPointHandler
                 }
             }
 
+            // Vertical text: <a:bodyPr vert="vert|vert270|eaVert|wordArtVert|mongolianVert"/>
+            // rotates the text flow into a column. Map to CSS writing-mode so HTML
+            // preview lays text out vertically like PowerPoint instead of as a
+            // normal horizontal line.
+            //   vert       — top-to-bottom, glyphs rotated 90° CW   → vertical-rl
+            //   eaVert     — East-Asian top-to-bottom (upright)     → vertical-rl + text-orientation:upright
+            //   vert270    — bottom-to-top, glyphs rotated 90° CCW  → vertical-rl + rotate(180deg)
+            //   mongolianVert — left-to-right columns               → vertical-lr (best-effort)
+            //   wordArtVert   — stacked upright                     → vertical-rl + upright (best-effort)
+            string vertStyle = "";
+            var vertVal = bodyPr?.Vertical?.HasValue == true ? bodyPr.Vertical.InnerText : null;
+            switch (vertVal)
+            {
+                case "vert":
+                    vertStyle = "writing-mode:vertical-rl;";
+                    break;
+                case "eaVert":
+                    vertStyle = "writing-mode:vertical-rl;text-orientation:upright;";
+                    break;
+                case "vert270":
+                    vertStyle = "writing-mode:vertical-rl;transform:rotate(180deg);";
+                    break;
+                case "mongolianVert":
+                    vertStyle = "writing-mode:vertical-lr;text-orientation:upright;";
+                    break;
+                case "wordArtVert":
+                case "wordArtVertRtl":
+                    vertStyle = "writing-mode:vertical-rl;text-orientation:upright;";
+                    break;
+            }
+
             // wrap=none: suppress the .shape inherited `white-space:pre-wrap`
             // on the inner text container so the line extends horizontally
             // rather than wrapping inside the shape's width box.
             var wrapNoneStyle = wrapNone ? "white-space:nowrap;overflow:visible;" : "";
-            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle)
-                ? $" style=\"{flipStyle}{rtlColStyle}{wrapNoneStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
+            var textStyle = !string.IsNullOrEmpty(flipStyle) || !string.IsNullOrEmpty(clipPathCss) || !string.IsNullOrEmpty(rtlColStyle) || !string.IsNullOrEmpty(wrapNoneStyle) || !string.IsNullOrEmpty(vertStyle)
+                ? $" style=\"{flipStyle}{rtlColStyle}{vertStyle}{wrapNoneStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             sb.Append($"<div class=\"shape-text valign-{valign}\"{textStyle}>");
 

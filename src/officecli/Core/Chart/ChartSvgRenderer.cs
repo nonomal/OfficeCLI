@@ -1434,6 +1434,129 @@ internal partial class ChartSvgRenderer
         }
     }
 
+    /// <summary>
+    /// Scatter (XY) chart. DrawingML scatterChart stores each point as an
+    /// xVal/yVal pair (NOT cat/val), so BOTH axes are numeric value axes — the
+    /// X axis must reflect the actual numeric X domain, not a 0..n category
+    /// index. Reusing the line renderer (category-indexed X with cat labels)
+    /// mislabels the X axis (e.g. all "0" or evenly-spaced indices) whenever the
+    /// X data isn't a 1..n sequence. This dedicated path maps points through the
+    /// real X domain and emits nice numeric X tick labels, matching Excel.
+    /// </summary>
+    public void RenderScatterChartSvg(StringBuilder sb, PlotArea plotArea,
+        List<(string name, double[] values)> series, List<string> colors,
+        int ox, int oy, int pw, int ph, List<string>? markerShapes, List<int>? markerSizes,
+        List<double>? lineWidths, List<string>? lineDashes, bool markersOnly,
+        bool showDataLabels, double? axisMin, double? axisMax, double? majorUnit, string? valNumFmt)
+    {
+        var scatterSeries = plotArea.Descendants<OpenXmlCompositeElement>()
+            .Where(e => e.LocalName == "ser" && e.Parent?.LocalName == "scatterChart").ToList();
+
+        var allX = new List<double>(); var allY = new List<double>();
+        var seriesData = new List<(double[] x, double[] y)>();
+        for (int s = 0; s < scatterSeries.Count; s++)
+        {
+            var ser = scatterSeries[s];
+            var xVals = ChartHelper.ReadNumericData(ser.Elements<OpenXmlCompositeElement>().FirstOrDefault(e => e.LocalName == "xVal")) ?? [];
+            var yVals = ChartHelper.ReadNumericData(ser.Elements<OpenXmlCompositeElement>().FirstOrDefault(e => e.LocalName == "yVal")) ?? [];
+            seriesData.Add((xVals, yVals));
+            allX.AddRange(xVals); allY.AddRange(yVals);
+        }
+        // Fallback: no scatter ser found (or no cached X) — synthesize an index
+        // X domain from the Y series so the chart still renders.
+        if (seriesData.Count == 0 || allX.Count == 0)
+        {
+            seriesData.Clear(); allX.Clear(); allY.Clear();
+            foreach (var s in series)
+            {
+                var xVals = Enumerable.Range(0, s.values.Length).Select(i => (double)i).ToArray();
+                seriesData.Add((xVals, s.values));
+                allX.AddRange(xVals); allY.AddRange(s.values);
+            }
+        }
+        if (allY.Count == 0) return;
+
+        var dataMinX = allX.Min(); var dataMaxX = allX.Max();
+        // Nice X domain: 0-based when all X are non-negative (Excel default),
+        // else span the actual min..max. ooxml axis min/max override.
+        double minX = axisMin ?? Math.Min(0, dataMinX);
+        double maxX = axisMax ?? dataMaxX;
+        if (maxX <= minX) maxX = minX + 1;
+        double minY = Math.Min(0, allY.Min()); double maxY = allY.Max();
+        if (maxY <= minY) maxY = minY + 1;
+        var (niceMaxY, tickStepY, nTicksY) = ComputeNiceAxis(maxY);
+        if (minY >= 0) { minY = 0; maxY = niceMaxY; }
+
+        // X tick count: honor majorUnit if given, else 4 nice divisions.
+        int xTicks = 4;
+        double xStep = (maxX - minX) / xTicks;
+        if (majorUnit.HasValue && majorUnit.Value > 0)
+        {
+            xStep = majorUnit.Value;
+            xTicks = Math.Max(1, (int)Math.Round((maxX - minX) / xStep));
+        }
+
+        double MapX(double v) => ox + ((v - minX) / (maxX - minX)) * pw;
+        double MapY(double v) => oy + ph - ((v - minY) / (maxY - minY)) * ph;
+
+        // Gridlines (horizontal, on the Y value axis)
+        if (ShowValGridlines)
+            for (int t = 0; t <= nTicksY; t++)
+            {
+                var gy = MapY(minY + tickStepY * t);
+                sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
+            }
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+        sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
+
+        for (int s = 0; s < seriesData.Count; s++)
+        {
+            var (xVals, yVals) = seriesData[s];
+            var count = Math.Min(xVals.Length, yVals.Length);
+            if (count == 0) continue;
+            var color = colors[s % colors.Count];
+            var pts = new List<(double x, double y, double xv, double yv)>();
+            for (int i = 0; i < count; i++)
+                pts.Add((MapX(xVals[i]), MapY(yVals[i]), xVals[i], yVals[i]));
+
+            // Connecting line — drawn for lineMarker/smoothMarker scatter styles,
+            // suppressed when scatterStyle is marker/none (markersOnly).
+            if (!markersOnly && pts.Count >= 2)
+            {
+                var lw = lineWidths != null && s < lineWidths.Count ? lineWidths[s] : 2;
+                var dashName = lineDashes != null && s < lineDashes.Count ? lineDashes[s] : "solid";
+                var dashAttr = dashName != "solid" ? $" stroke-dasharray=\"{RefLineDashArray(dashName)}\"" : "";
+                var pointStr = string.Join(" ", pts.Select(p => $"{p.x:0.#},{p.y:0.#}"));
+                sb.AppendLine($"        <polyline points=\"{pointStr}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{lw:0.#}\"{dashAttr}/>");
+            }
+
+            var shape = markerShapes != null && s < markerShapes.Count ? markerShapes[s] : "circle";
+            var mSize = markerSizes != null && s < markerSizes.Count ? markerSizes[s] * 0.6 : 3;
+            foreach (var p in pts)
+            {
+                sb.AppendLine($"        {RenderMarkerSvg(shape, p.x, p.y, mSize, color)}");
+                if (showDataLabels)
+                {
+                    var vlabel = p.yv % 1 == 0 ? $"{(int)p.yv}" : $"{p.yv:0.#}";
+                    sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
+                }
+            }
+        }
+
+        // Numeric X axis labels (the actual fix: real X domain, not category index)
+        for (int t = 0; t <= xTicks; t++)
+        {
+            var val = minX + xStep * t;
+            sb.AppendLine($"        <text x=\"{MapX(val):0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
+        }
+        // Numeric Y axis labels
+        for (int t = 0; t <= nTicksY; t++)
+        {
+            var val = minY + tickStepY * t;
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{MapY(val):0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{FormatAxisValue(val, valNumFmt)}</text>");
+        }
+    }
+
     public void RenderComboChartSvg(StringBuilder sb, PlotArea plotArea,
         List<(string name, double[] values)> seriesList, string[] categories, List<string> colors,
         int ox, int oy, int pw, int ph)
@@ -2612,6 +2735,16 @@ internal partial class ChartSvgRenderer
         else if (chartType == "stock")
         {
             RenderStockChartSvg(sb, info.PlotArea!, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH);
+        }
+        else if (chartType == "scatter" && info.PlotArea != null)
+        {
+            // Scatter is an XY chart: both axes are numeric value axes. Route to
+            // the dedicated renderer so X tick labels reflect the real X domain
+            // (xVal) instead of the line renderer's 0..n category index.
+            RenderScatterChartSvg(sb, info.PlotArea, info.Series, info.Colors, marginLeft, marginTop, plotW, plotH,
+                info.MarkerShapes, info.MarkerSizes, info.LineWidths, info.LineDashes,
+                info.ScatterMarkersOnly, info.ShowDataLabels,
+                info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt);
         }
         else if (chartType.Contains("line") || chartType == "scatter")
         {

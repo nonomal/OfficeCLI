@@ -1331,7 +1331,7 @@ internal partial class ChartSvgRenderer
             {
                 var serColor = colors[s % colors.Count];
                 var isFilled = radarStyle == "filled";
-                var fillAttr = isFilled ? $"fill=\"{serColor}\" fill-opacity=\"0.2\"" : "fill=\"none\"";
+                var fillAttr = isFilled ? $"fill=\"{serColor}\" fill-opacity=\"0.7\"" : "fill=\"none\"";
                 sb.AppendLine($"        <polygon points=\"{string.Join(" ", points)}\" {fillAttr} stroke=\"{serColor}\" stroke-width=\"2\"/>");
                 // Markers for marker and standard styles (standard gets small dots, marker gets circles)
                 var showMarkers = radarStyle != "filled";

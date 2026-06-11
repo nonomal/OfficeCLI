@@ -525,6 +525,20 @@ internal static class FormulaParser
                 return baseText;
             }
 
+            case "eqArr": // BUG-DUMP-R49-2: equation array — stacked equations
+            {
+                // m:eqArr holds one m:e child per row. Without a case it fell
+                // through to the default below, which concatenated every row's
+                // text directly (e.g. "a=1b=2"). Emit \begin{aligned}…\end{aligned}
+                // — the existing aligned-environment parser reconstructs a
+                // vertical stack — so the rows survive as a structured equation
+                // instead of running together as one line.
+                var eqRows = element.ChildElements
+                    .Where(e => e.LocalName == "e")
+                    .Select(e => ArgToLatex(e).Trim());
+                return $"\\begin{{aligned}}{string.Join(" \\\\ ", eqRows)}\\end{{aligned}}";
+            }
+
             default:
                 // Recurse into unknown containers
                 return string.Concat(element.ChildElements.Select(ToLatexByName));
@@ -653,6 +667,14 @@ internal static class FormulaParser
                 var rowStrings = matrixRows.Select(mr =>
                     string.Join(", ", mr.ChildElements.Where(e => e.LocalName == "e").Select(ArgToReadable)));
                 return "[" + string.Join("; ", rowStrings) + "]";
+            }
+
+            case "eqArr": // BUG-DUMP-R49-2: equation array — rows joined by semicolons
+            {
+                var eqRows = element.ChildElements
+                    .Where(e => e.LocalName == "e")
+                    .Select(ArgToReadable);
+                return string.Join("; ", eqRows);
             }
 
             default:

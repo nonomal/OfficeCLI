@@ -197,6 +197,18 @@
       "readback": "OOXML positionV/align keyword",
       "enforcement": "report"
     },
+    "link": {
+      "type": "string",
+      "add": true,
+      "set": false,
+      "get": true,
+      "description": "click-hyperlink target for the image, making it clickable (<a:hlinkClick> on pic:cNvPr). An absolute URL or relative target round-trips as a TargetMode=External relationship; a '#anchor' or bare bookmark name round-trips as an internal anchor.",
+      "examples": [
+        "--prop src=logo.png --prop link=https://example.com"
+      ],
+      "readback": "resolved external URL, or internal anchor name",
+      "enforcement": "report"
+    },
     "width": {
       "type": "length",
       "description": "width — cm length (extent.Cy/Cx in EMU formatted to cm).",

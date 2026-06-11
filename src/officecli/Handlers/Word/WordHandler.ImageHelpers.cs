@@ -238,7 +238,7 @@ public partial class WordHandler
         return parts.Count > 0 ? string.Join(", ", parts) : "unknown";
     }
 
-    private static DocumentNode CreateImageNode(Drawing drawing, Run run, string path)
+    private DocumentNode CreateImageNode(Drawing drawing, Run run, string path)
     {
         var docProps = drawing.Descendants<DW.DocProperties>().FirstOrDefault();
         var extent = drawing.Descendants<DW.Extent>().FirstOrDefault();
@@ -254,6 +254,32 @@ public partial class WordHandler
         if (extent?.Cx != null) node.Format["width"] = $"{extent.Cx.Value / EmuConverter.EmuPerCmF:F1}cm";
         if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / EmuConverter.EmuPerCmF:F1}cm";
         if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;
+
+        // BUG-DUMP-R51-1: a click-hyperlink on the image — <a:hlinkClick r:id="…">
+        // on the picture's <pic:cNvPr> (NonVisualDrawingProperties.HyperlinkOnClick),
+        // or the same on <wp:docPr> (DW.DocProperties.HyperlinkOnClick) — makes the
+        // image clickable (e.g. a logo linking to a URL). The dump never read it
+        // back, so a clickable image became a plain image. Resolve the r:id through
+        // the drawing's host part relationships to the external Target URL and
+        // surface it as Format["link"]; an internal anchor (w:anchor, no r:id) is
+        // surfaced as the bare anchor string. AddPicture re-creates the rel +
+        // hlinkClick from this key.
+        var picCNvPr = drawing.Descendants<PIC.NonVisualDrawingProperties>().FirstOrDefault();
+        var hlinkClick = picCNvPr?.HyperlinkOnClick ?? docProps?.HyperlinkOnClick;
+        if (hlinkClick != null)
+        {
+            var hlinkRelId = hlinkClick.Id?.Value;
+            if (!string.IsNullOrEmpty(hlinkRelId))
+            {
+                // The hlinkClick always targets through an r:id relationship.
+                // Resolve it against whichever part hosts this drawing's
+                // relationships (document / header / footer / footnotes / …); the
+                // Target is the external URL or, for an internal nav, "#anchor".
+                var rel = ResolveHyperlinkRelationship(drawing, hlinkRelId);
+                if (rel?.Uri != null)
+                    node.Format["link"] = rel.Uri.OriginalString;
+            }
+        }
 
         // Surface the backing image part rel id so `get --save <path>`
         // and other downstream consumers can locate the payload without

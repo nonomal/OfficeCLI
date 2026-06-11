@@ -6,6 +6,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using A = DocumentFormat.OpenXml.Drawing;
 using DW = DocumentFormat.OpenXml.Drawing.Wordprocessing;
+using PIC = DocumentFormat.OpenXml.Drawing.Pictures;
 using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
@@ -465,6 +466,58 @@ public partial class WordHandler
             && !string.IsNullOrWhiteSpace(spEffectsXml))
         {
             ApplySpPrEffects(imgRun, spEffectsXml);
+        }
+
+        // BUG-DUMP-R51-1: round-trip a click-hyperlink on the image. A clickable
+        // image (e.g. a logo linking to a URL) carries <a:hlinkClick r:id="…"> on
+        // its <pic:cNvPr> (and, for external targets, a TargetMode="External"
+        // relationship). The dump now surfaces the resolved URL as `link`; re-create
+        // the external rel on the drawing's host part and attach the hlinkClick so
+        // the image stays clickable instead of flattening to a plain image. A bare
+        // anchor (internal bookmark, no scheme/relative target) is stored as the
+        // hlinkClick @w:anchor attribute with no rel — mirrors the run-level
+        // <w:hyperlink w:anchor> path. Reuses AddHyperlinkRelationship, the same
+        // rel-creation helper the run-level hyperlink Add/Set paths use.
+        if (properties.TryGetValue("link", out var linkVal) && !string.IsNullOrEmpty(linkVal))
+        {
+            var picCNvPr = imgRun.Descendants<PIC.NonVisualDrawingProperties>().FirstOrDefault();
+            if (picCNvPr != null)
+            {
+                // <a:hlinkClick> always references its target through an r:id
+                // relationship (DrawingML has no bare @anchor like w:hyperlink).
+                // An absolute URI or relative target round-trips as a
+                // TargetMode=External rel; a fragment "#anchor" round-trips as an
+                // internal (isExternal=false) rel with Target="#anchor", matching
+                // the run-level hyperlink Add path's fragment handling.
+                bool isFragment = linkVal.StartsWith('#');
+                Uri? linkUri;
+                if (isFragment)
+                {
+                    linkUri = new Uri(linkVal, UriKind.Relative);
+                }
+                else if (Uri.TryCreate(linkVal, UriKind.Absolute, out linkUri))
+                {
+                    Core.HyperlinkUriValidator.RequireSafeScheme(linkVal, "link");
+                }
+                else
+                {
+                    Uri.TryCreate(linkVal, UriKind.Relative, out linkUri);
+                }
+                if (linkUri != null)
+                {
+                    var linkRelId = imgHostPart switch
+                    {
+                        MainDocumentPart mdp => mdp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        HeaderPart hp => hp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        FooterPart fp => fp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        FootnotesPart fnp => fnp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        EndnotesPart enp => enp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        WordprocessingCommentsPart cp => cp.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                        _ => mainPart.AddHyperlinkRelationship(linkUri, !isFragment).Id,
+                    };
+                    picCNvPr.HyperlinkOnClick = new A.HyperlinkOnClick { Id = linkRelId };
+                }
+            }
         }
 
         string resultPath;

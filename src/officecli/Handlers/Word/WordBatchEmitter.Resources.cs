@@ -1575,6 +1575,31 @@ public static partial class WordBatchEmitter
         {
             noteProps["style"] = noteStyle.ToString()!;
         }
+        // Forward the note's first-paragraph PARAGRAPH-level formatting. The
+        // `add footnote`/`add endnote` step only seeds p[1] with text + style +
+        // the ref-mark/run rPr; without this, a note paragraph's explicit line
+        // spacing (Arabic notes carry <w:spacing w:line="200" w:lineRule="exact">),
+        // direction, indent, and ¶-mark rPr were dropped — the note rendered
+        // taller, pulling body content down and shifting page breaks. Carry the
+        // paragraph-scoped keys (spacing/line/ind/jc/direction + the markRPr.*
+        // family); ApplyFootnoteEndnoteFormatKeys routes them through
+        // ApplyParagraphLevelProperty / the markRPr.* branch. Skip effective.*
+        // (style-resolved, not authored), the run-text keys MergeRunFormatProps
+        // already carries, and text/style handled above.
+        if (bodyParas.Count > 0)
+        {
+            foreach (var (k, v) in bodyParas[0].Format)
+            {
+                if (v == null) continue;
+                bool isParaKey = k.StartsWith("markRPr.", StringComparison.OrdinalIgnoreCase)
+                    || k is "lineSpacing" or "lineRule" or "spaceBefore" or "spaceAfter"
+                          or "spaceBeforeLines" or "spaceAfterLines" or "alignment" or "align"
+                          or "direction" or "leftIndent" or "rightIndent" or "firstLine"
+                          or "hanging" or "contextualSpacing" or "spaceBeforeAuto" or "spaceAfterAuto";
+                if (isParaKey && !noteProps.ContainsKey(k))
+                    noteProps[k] = v.ToString()!;
+            }
+        }
         // BUG-DUMP-R42-1: capture the ref-mark run's char-style link. Word's
         // note ref mark carries <w:rStyle w:val="FootnoteReference"/> (or
         // "EndnoteReference"), linking it to the style in styles.xml that

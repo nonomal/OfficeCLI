@@ -601,6 +601,18 @@ public partial class WordHandler
             // It is not a paragraph/run format key, so skip it here rather than
             // reporting it as unsupported.
             if (key.Equals("referenceStyle", StringComparison.OrdinalIgnoreCase)) continue;
+            // referenceRPr / referenceMarkRPr are consumed at note-creation time
+            // (AddFootnote/AddEndnote rebuild the reference runs from them).
+            if (key.Equals("referenceRPr", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("referenceMarkRPr", StringComparison.OrdinalIgnoreCase)) continue;
+            // Explicit paragraph-mark-only formatting (the dotted markRPr.* form
+            // the dump forwards from the note's first paragraph) writes ONLY to
+            // the ¶ mark, never to the content runs — mirrors ApplyCommentFormatKeys.
+            if (key.StartsWith("markRPr.", StringComparison.OrdinalIgnoreCase))
+            {
+                ApplyRunFormatting(markRPr, key.Substring("markRPr.".Length), value);
+                continue;
+            }
             if (ApplyParagraphLevelProperty(pProps, key, value)) continue;
             bool runApplied = false;
             foreach (var run in contentRuns)

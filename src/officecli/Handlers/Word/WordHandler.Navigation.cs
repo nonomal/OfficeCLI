@@ -2784,7 +2784,7 @@ public partial class WordHandler
                 // BUG-DUMP19-03: type=auto must round-trip as "auto", not
                 // collapse to a bare dxa integer (Width="0").
                 node.Format["width"] = wType == TableWidthUnitValues.Pct
-                    ? (twWidth / 50) + "%"
+                    ? FormatPctWidth(twWidth)
                     : wType == TableWidthUnitValues.Auto
                         ? "auto"
                         : twWidth.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -5218,9 +5218,16 @@ public partial class WordHandler
         var w = SafeWidth(rawWidth);
         if (w is not int twips) return null;
         if (type == TableWidthUnitValues.Pct)
-            return (twips / 50) + "%";
+            return FormatPctWidth(twips);
         return twips.ToString(System.Globalization.CultureInfo.InvariantCulture) + "dxa";
     }
+
+    // OOXML stores pct widths in fifths-of-a-percent (5000 = 100%), so the
+    // exact percentage always fits in two decimals. Integer division here
+    // (720/50 → "14%") shaved up to 0.98% off every column on round-trip,
+    // which re-wraps cell text and reflows whole pages.
+    private static string FormatPctWidth(int fiftieths) =>
+        (fiftieths / 50.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
 
     private static void ReadCellProps(TableCell cell, DocumentNode node)
     {
@@ -5354,7 +5361,7 @@ public partial class WordHandler
                 if (cwType == TableWidthUnitValues.Nil)
                     node.Format["width"] = "nil";
                 else if (cwType == TableWidthUnitValues.Pct)
-                    node.Format["width"] = (cwRaw / 50) + "%";
+                    node.Format["width"] = FormatPctWidth(cwRaw);
                 else if (cwType == TableWidthUnitValues.Auto)
                     node.Format["width"] = "auto";
                 else if (cwRaw == 0)

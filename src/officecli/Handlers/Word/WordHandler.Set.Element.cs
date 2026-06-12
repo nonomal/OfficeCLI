@@ -2264,7 +2264,9 @@ public partial class WordHandler
                 case "width":
                     if (value.EndsWith('%'))
                     {
-                        var pct = ParseHelpers.SafeParseInt(value.TrimEnd('%'), "width") * 50; // OOXML pct = percent * 50
+                        // OOXML pct = percent * 50; double parse keeps fractional
+                        // percentages (14.4%) exact, mirroring the cell-width branch.
+                        var pct = (int)Math.Round(ParseHelpers.SafeParseDouble(value.TrimEnd('%'), "width") * 50);
                         tblPr.TableWidth = new TableWidth { Width = pct.ToString(), Type = TableWidthUnitValues.Pct };
                     }
                     else

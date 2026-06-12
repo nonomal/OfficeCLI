@@ -352,7 +352,9 @@ public partial class WordHandler
                     }
                     else if (tv.EndsWith('%'))
                     {
-                        var pct = ParseHelpers.SafeParseInt(tv.TrimEnd('%'), "width") * 50;
+                        // Fractional percentages are exact in OOXML (pct unit =
+                        // 0.02%); mirror the cell-width branch's double parse.
+                        var pct = (int)Math.Round(ParseHelpers.SafeParseDouble(tv.TrimEnd('%'), "width") * 50);
                         tblProps.TableWidth = new TableWidth { Width = pct.ToString(), Type = TableWidthUnitValues.Pct };
                     }
                     else

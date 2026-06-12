@@ -395,14 +395,37 @@ public static partial class WordBatchEmitter
         // EmitDocDefaultsRaw's remove branch for a source lacking docDefaults.
         if (string.Equals(xml.Trim(), "(no theme)", StringComparison.Ordinal))
         {
-            items.Add(new BatchItem
+            // The "(no theme)" sentinel fires for TWO distinct source shapes:
+            // (a) the theme PART is genuinely absent — round-trip the absence
+            //     with a remove (BUG-DUMP-R37-5, below); and
+            // (b) the part EXISTS but is degenerate (0-byte / unreadable root —
+            //     ThemePart.Theme is null), which Word tolerates. Emitting the
+            //     remove here deleted the rebuilt doc's theme part outright;
+            //     fall through instead so the schema-complete default-theme
+            //     branch below emits a replace, mirroring what the source doc
+            //     effectively renders with.
+            // CONSISTENCY(empty-theme-default): same default-theme reuse as the
+            // no-themeElements branch below (BlankDocCreator.BuildDefaultTheme).
+            bool themePartExists = false;
+            try
             {
-                Command = "raw-set",
-                Part = "/theme",
-                Xpath = "/a:theme",
-                Action = "remove",
-            });
-            return;
+                themePartExists = word.EnumeratePartUris().Any(u =>
+                    u.StartsWith("/word/theme/", StringComparison.OrdinalIgnoreCase)
+                    && !u.EndsWith(".rels", StringComparison.OrdinalIgnoreCase));
+            }
+            catch { /* enumeration failed — treat as absent (prior behavior) */ }
+            if (!themePartExists)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = "/theme",
+                    Xpath = "/a:theme",
+                    Action = "remove",
+                });
+                return;
+            }
+            xml = ""; // degenerate part → schema-complete default theme below
         }
         xml = CanonicalizeRawXml(xml);
         // A bare <a:theme/> (or <a:theme name="Office Theme"/>) is schema-INVALID:

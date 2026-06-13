@@ -249,6 +249,7 @@ public partial class WordHandler : IDocumentHandler
                 EnsureAllParaIds();
                 EnsureDocPropIds();
                 EnsureSdtIds();
+                EnsureBookmarkIds();
             }
         }
         catch
@@ -1111,6 +1112,12 @@ public partial class WordHandler : IDocumentHandler
         // NextSdtId allocates max+1 for typed adds, but a raw-set can inject an
         // sdt carrying a colliding id. EnsureSdtIds otherwise runs only at open.
         EnsureSdtIds();
+        // CONSISTENCY(bookmark-global-uniqueness): same hazard for bookmark
+        // <w:id>. AddBookmark scans body bookmarkStarts for max+1, but a raw-set
+        // (verbatim <w:sdt> cover block) can inject a bookmark whose id collides
+        // with one a structured add already used. EnsureBookmarkIds otherwise
+        // runs only at open.
+        EnsureBookmarkIds();
         // BUG-R5-01: do not emit chatter from inside the handler — the CLI
         // wrappers (CommandBuilder.Raw raw-set + batch run raw-set) print
         // their own structured message. Writing here pollutes batch --json
@@ -1304,6 +1311,7 @@ public partial class WordHandler : IDocumentHandler
             EnsureAllParaIds();
             EnsureDocPropIds();
             EnsureSdtIds();
+            EnsureBookmarkIds();
         }
         catch { /* id normalization is best-effort; never block the flush */ }
     }

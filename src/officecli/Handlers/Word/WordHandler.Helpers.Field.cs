@@ -606,4 +606,70 @@ public partial class WordHandler
             sid.Val = newId;
         }
     }
+
+    /// <summary>
+    /// Ensure all bookmark ids (<c>w:bookmarkStart/@w:id</c> and the paired
+    /// <c>w:bookmarkEnd/@w:id</c>) are unique. Sibling of
+    /// <see cref="EnsureDocPropIds"/> / <see cref="EnsureSdtIds"/>.
+    /// AddBookmark allocates max+1 by scanning the body's existing
+    /// bookmarkStarts, but a raw-set (e.g. a verbatim &lt;w:sdt&gt; cover-page
+    /// block) can inject a bookmark whose id collides with one a structured
+    /// add already used — the source id-1 bookmark inside the SDT and a freshly
+    /// added id-1 bookmark both land on disk, which the validator rejects as a
+    /// duplicate w:id. Re-pair each start with its end (most-recent open start
+    /// wins, so ranges nest correctly) and renumber every duplicate pair as a
+    /// unit so the start and its end stay in sync. Bookmark cross-references
+    /// (REF / TOC / hyperlink anchors) key off the bookmark NAME, never the id,
+    /// so renumbering is invisible to them.
+    /// </summary>
+    private void EnsureBookmarkIds()
+    {
+        var mainPart = _doc.MainDocumentPart;
+        if (mainPart?.Document?.Body == null) return;
+
+        var roots = new List<OpenXmlElement> { mainPart.Document.Body };
+        foreach (var hp in mainPart.HeaderParts)
+            if (hp.Header != null) roots.Add(hp.Header);
+        foreach (var fp in mainPart.FooterParts)
+            if (fp.Footer != null) roots.Add(fp.Footer);
+
+        // Pair start→end in document order per part; collect pairs globally.
+        var pairs = new List<(BookmarkStart start, BookmarkEnd? end, int? id)>();
+        foreach (var root in roots)
+        {
+            var open = new Dictionary<string, Stack<BookmarkStart>>(StringComparer.Ordinal);
+            var endOf = new Dictionary<BookmarkStart, BookmarkEnd>();
+            var startsInOrder = new List<BookmarkStart>();
+            foreach (var bm in root.Descendants())
+            {
+                if (bm is BookmarkStart bs)
+                {
+                    startsInOrder.Add(bs);
+                    var key = bs.Id?.Value ?? "";
+                    if (!open.TryGetValue(key, out var st)) { st = new Stack<BookmarkStart>(); open[key] = st; }
+                    st.Push(bs);
+                }
+                else if (bm is BookmarkEnd be)
+                {
+                    var key = be.Id?.Value ?? "";
+                    if (open.TryGetValue(key, out var st) && st.Count > 0) endOf[st.Pop()] = be;
+                }
+            }
+            foreach (var bs in startsInOrder)
+                pairs.Add((bs, endOf.TryGetValue(bs, out var e) ? e : null,
+                           int.TryParse(bs.Id?.Value, out var pid) ? pid : (int?)null));
+        }
+
+        // Keep the first occurrence of each valid id; renumber later duplicates
+        // (and any missing/unparseable id) to the lowest free value.
+        var usedIds = new HashSet<int>();
+        foreach (var (start, end, id) in pairs)
+        {
+            if (id.HasValue && usedIds.Add(id.Value)) continue;
+            int newId = 1;
+            while (!usedIds.Add(newId)) newId++;
+            start.Id = newId.ToString();
+            if (end != null) end.Id = newId.ToString();
+        }
+    }
 }

@@ -4288,6 +4288,22 @@ public partial class WordHandler
             RunProperties? rp = paraRp as RunProperties ?? null;
             ParagraphMarkRunProperties? markRp = paraRp as ParagraphMarkRunProperties ?? null;
 
+            // BUG-R12C: an empty paragraph's ¶-mark rStyle. The dotted
+            // markRPr.* block above is suppressed when the paragraph has no
+            // runs, and it is the bare-key fallback (this block, markRp != null)
+            // that must carry the ¶-glyph formatting — but it never surfaced
+            // <w:rStyle>. The referenced character style's size sets the empty
+            // paragraph's line height; a title-page spacer styled BookTitle
+            // (16pt) collapsed to the default Normal height on dump→batch,
+            // shifting every block below it upward. Emit bare `rStyle` (a bare
+            // rStyle on a run-less paragraph routes to ParagraphMarkRunProperties
+            // only — see the dotted-block note above and Add.Text.cs).
+            if (markRp != null
+                && markRp.GetFirstChild<RunStyle>()?.Val?.Value is { } emptyParaMarkRStyle
+                && !node.Format.ContainsKey("rStyle")
+                && !node.Format.ContainsKey("markRPr.rStyle"))
+                node.Format["rStyle"] = emptyParaMarkRStyle;
+
             // CONSISTENCY(canonical-keys): mirror style Get (WordHandler.Query.cs:546-553) —
             // emit per-script font slots, no flat "font" alias. R6 BUG-1: previously only
             // emitted Ascii under "font" key, dropping eastAsia/hAnsi/cs slots.

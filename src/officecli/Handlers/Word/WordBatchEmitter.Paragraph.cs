@@ -1053,7 +1053,19 @@ public static partial class WordBatchEmitter
         }
         if (bmProps.Count == 0) return true; // skip unnamed/anonymous bookmarks
         if (run.Format.TryGetValue("_spanOpen", out var sp) && sp is bool bsp && bsp)
+        {
             bmProps["open"] = "true";
+            // BUG-DUMP-R47-5: forward the SOURCE bookmark id for a span-open
+            // start so a matching <w:bookmarkEnd> that round-trips verbatim via a
+            // raw-set (e.g. inside a TOC <w:sdt> block) still pairs with it.
+            // Without the id, AddBookmark allocates a fresh one and the start is
+            // left unpaired (the raw-set end keeps the source id). AddBookmark
+            // honors this id only on the open=true path; EnsureBookmarkIds dedupes
+            // any collision by renumbering the matched pair.
+            if (run.Format.TryGetValue("id", out var bmSrcId)
+                && bmSrcId?.ToString() is { Length: > 0 } bmSrcIdStr)
+                bmProps["id"] = bmSrcIdStr;
+        }
         // BUG-DUMP-R32-4: forward colFirst/colLast for an inline
         // table-column-range bookmark (mirrors the body-direct case).
         ForwardBookmarkColRange(run.Format, bmProps);

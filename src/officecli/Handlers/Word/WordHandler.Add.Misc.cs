@@ -397,7 +397,24 @@ public partial class WordHandler
 
         var existingIds = existingStarts
             .Select(b => int.TryParse(b.Id?.Value, out var id) ? id : 0);
-        var bkId = (existingIds.Any() ? existingIds.Max() + 1 : 1).ToString();
+        // BUG-DUMP-R47-5: a content-WRAPPING (open=true) bookmark whose matching
+        // <w:bookmarkEnd> is preserved verbatim by a raw-set (e.g. the end lives
+        // inside a TOC <w:sdt> block raw-set as one unit, while the start is a
+        // body-direct marker emitted via `add bookmark open=true`) must reuse
+        // the SOURCE id so the add-side start and the raw-set-side end pair up.
+        // Allocating a fresh max+1 here left the start unpaired (its end kept the
+        // source id) — producing a duplicate/orphan w:id the validator rejects
+        // and a broken bookmark range. EnsureBookmarkIds dedupes any residual
+        // collision (renumbering the matched start+end pair as a unit), so honoring
+        // the source id is safe. Only fires for the open=true path; zero-length
+        // bookmarks still allocate fresh (start+end are created together here).
+        string bkId;
+        if (IsTruthy(properties.GetValueOrDefault("open", ""))
+            && properties.TryGetValue("id", out var providedBkId)
+            && !string.IsNullOrEmpty(providedBkId))
+            bkId = providedBkId;
+        else
+            bkId = (existingIds.Any() ? existingIds.Max() + 1 : 1).ToString();
 
         var bookmarkStart = new BookmarkStart { Id = bkId, Name = bkName };
         var bookmarkEnd = new BookmarkEnd { Id = bkId };

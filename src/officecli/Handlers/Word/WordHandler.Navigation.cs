@@ -4373,12 +4373,17 @@ public partial class WordHandler
             var colorEl = rp?.Color ?? markRp?.GetFirstChild<Color>();
             if (colorEl != null && !node.Format.ContainsKey("color"))
             {
-                // Prefer theme color over Val when both set (Val often
-                // "auto" when ThemeColor is the authoritative source).
-                if (colorEl.ThemeColor?.HasValue == true)
-                    node.Format["color"] = colorEl.ThemeColor.InnerText;
-                else if (colorEl.Val?.Value != null)
-                    node.Format["color"] = ParseHelpers.FormatHexColor(colorEl.Val.Value);
+                // BUG-DUMP-R47-4: a single-run paragraph collapsed into `add p`
+                // must carry the run color's FULL theme linkage (hex val +
+                // themeColor + themeTint/themeShade) via the shared
+                // ';themeColor=…' tail — same as the un-collapsed run path
+                // (RunToNode StyleColorWithThemeTail) and the ¶-mark path. The
+                // old code emitted only the theme name, so a run color like
+                // <w:color w:val="548DD4" w:themeColor="text2" w:themeTint="99"/>
+                // rebuilt as val="auto" + themeColor with no tint — a visibly
+                // different (untinted) color on round-trip.
+                if (StyleColorWithThemeTail(colorEl) is { } pFirstRunColor)
+                    node.Format["color"] = pFirstRunColor;
             }
 
             var ulEl = rp?.Underline ?? markRp?.GetFirstChild<Underline>();

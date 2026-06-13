@@ -2763,6 +2763,33 @@ internal static partial class ChartHelper
                     if (oldPPr != null) oldPPr.InsertAfterSelf(newPPr);
                     else richPara.PrependChild(newPPr);
                     oldPPr?.Remove();
+                    // BuildChartTitle hard-codes the rendering run-level rPr to
+                    // 14pt bold. When the source carried its title size/bold ONLY
+                    // on the paragraph defRPr (no explicit run rPr — so the Reader
+                    // emits title.pPr but no title.size/title.bold), that hard-coded
+                    // run overrides the captured defRPr and the title rebuilds 14pt
+                    // bold instead of the source's size. Sync the run's FontSize/
+                    // Bold to the captured defRPr so the defRPr governs again. An
+                    // explicit title.size/title.bold (source DID carry a run rPr)
+                    // is applied by the title.* fan-out and is unaffected.
+                    var newDefRp = newPPr.GetFirstChild<Drawing.DefaultRunProperties>();
+                    var titleRunRp = richPara.GetFirstChild<Drawing.Run>()?.RunProperties;
+                    if (newDefRp != null && titleRunRp != null
+                        && !properties.ContainsKey("title.size") && !properties.ContainsKey("titlesize"))
+                    {
+                        if (newDefRp.FontSize?.HasValue == true)
+                            titleRunRp.FontSize = newDefRp.FontSize.Value;
+                        else
+                            titleRunRp.FontSize = null;
+                    }
+                    if (newDefRp != null && titleRunRp != null
+                        && !properties.ContainsKey("title.bold") && !properties.ContainsKey("titlebold"))
+                    {
+                        if (newDefRp.Bold?.HasValue == true)
+                            titleRunRp.Bold = newDefRp.Bold.Value;
+                        else
+                            titleRunRp.Bold = null;
+                    }
                     break;
                 }
 

@@ -1243,15 +1243,28 @@ public partial class WordHandler
         if (fieldVertAlign == null && properties.TryGetValue("subscript", out var fSub) && IsTruthy(fSub))
             fieldVertAlign = VerticalPositionValues.Subscript;
 
+        // Per-slot font keys (literal and theme-bound) shared with the run
+        // path; a footer PAGE field bound to minorHAnsi keeps its theme face.
+        var fieldFontSlotKeys = new[]
+        {
+            "font.latin", "font.ascii", "font.hAnsi",
+            "font.asciiTheme", "font.hAnsiTheme", "font.eaTheme", "font.csTheme",
+        };
+        bool hasFieldFontSlot = fieldFontSlotKeys.Any(k => properties.ContainsKey(k));
         RunProperties? fieldRProps = null;
         if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
             properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _) ||
-            fieldVertAlign != null)
+            hasFieldFontSlot || fieldVertAlign != null)
         {
             fieldRProps = new RunProperties();
             // CT_RPr schema order: rFonts → b → ... → color → sz
             if (properties.TryGetValue("font", out var ff))
                 fieldRProps.AppendChild(new RunFonts { Ascii = ff, HighAnsi = ff, EastAsia = ff });
+            foreach (var slotKey in fieldFontSlotKeys)
+            {
+                if (properties.TryGetValue(slotKey, out var slotVal))
+                    ApplyRunFormatting(fieldRProps, slotKey, slotVal);
+            }
             if (properties.TryGetValue("bold", out var fb) && IsTruthy(fb))
                 fieldRProps.AppendChild(new Bold());
             // BUG-R13B(BUG1): route field color through ApplyRunFormatting (same

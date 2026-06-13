@@ -17,6 +17,12 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> FieldResultFormatKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "bold", "italic", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
+        // Theme-bound slots: a header/footer PAGE field whose runs bind the
+        // theme face (minorHAnsi) must keep the binding, or the page number
+        // falls back to the docDefaults font and the footer line height
+        // changes — a borderline table row then flips pages and the whole
+        // document reflows.
+        "font.asciiTheme", "font.hAnsiTheme", "font.eaTheme", "font.csTheme",
         "underline", "strike",
         // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
         // subscript) — the common case is a cross-reference citation mark
@@ -34,6 +40,7 @@ public static partial class WordBatchEmitter
     private static readonly HashSet<string> FieldAddSupportedFormatKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "bold", "color", "size", "font", "font.latin", "font.ascii", "font.hAnsi",
+        "font.asciiTheme", "font.hAnsiTheme", "font.eaTheme", "font.csTheme",
         // BUG-DUMP-FIELDVALIGN: AddField applies vertAlign (superscript /
         // subscript) uniformly to every rebuilt field run, so these are
         // losslessly expressible through the typed `add field` path.

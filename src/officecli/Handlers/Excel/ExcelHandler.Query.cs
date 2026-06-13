@@ -53,6 +53,9 @@ public partial class ExcelHandler
                 if (depth > 0 && sheetData != null)
                 {
                     sheetNode.Children = GetSheetChildNodes(name, sheetData, depth, part);
+                    // Children omit value-less empty cells/rows (issue #149);
+                    // reflect the actual listed count, not the raw row count.
+                    sheetNode.ChildCount = sheetNode.Children.Count;
                 }
 
                 node.Children.Add(sheetNode);
@@ -399,6 +402,9 @@ public partial class ExcelHandler
             if (depth > 0)
             {
                 sheetNode.Children = GetSheetChildNodes(sheetNameFromPath, data, depth, worksheet);
+                // Children omit value-less empty cells/rows (issue #149);
+                // reflect the actual listed count, not the raw row count.
+                sheetNode.ChildCount = sheetNode.Children.Count;
             }
             return sheetNode;
         }

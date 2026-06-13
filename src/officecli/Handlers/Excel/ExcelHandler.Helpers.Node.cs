@@ -116,12 +116,28 @@ public partial class ExcelHandler
             var ridx = row.RowIndex?.Value ?? 0;
             if (ridx != 0 && !seenRowIndices.Add(ridx))
                 continue;
+
+            // Bulk enumeration omits value-less, formula-less empty cells —
+            // and rows that thereby become empty and carry no row-level
+            // formatting — so `get /` and `get /Sheet` stay bounded on sheets
+            // that declare millions of empty cells (issue #149). The load-time
+            // WorksheetBloatFilter already strips BARE empties (no style); a
+            // STYLED empty cell (<c s="1"/>) must stay in the DOM (Excel and
+            // LibreOffice keep it — its xf may hold real formatting), so the
+            // only consistent place to suppress it is here, at output. This
+            // makes bare vs styled empties behave identically in bulk listings.
+            // Targeted reads (`get /Sheet/A1`, Query.cs empty-cell path) still
+            // return the cell, so no formatting becomes unreachable.
+            var contentCells = row.Elements<Cell>().Where(CellHasContent).ToList();
+            if (contentCells.Count == 0 && !RowHasMeaningfulAttrs(row))
+                continue;
+
             var rowIdx = row.RowIndex?.Value ?? 0;
             var rowNode = new DocumentNode
             {
                 Path = $"/{sheetName}/row[{rowIdx}]",
                 Type = "row",
-                ChildCount = row.Elements<Cell>().Count()
+                ChildCount = contentCells.Count
             };
             // CONSISTENCY(unit-qualified-readback): pt-suffix row height
             // (Query.cs:433/1367 mirror). Stored value is already points.
@@ -132,7 +148,7 @@ public partial class ExcelHandler
 
             if (depth > 0)
             {
-                foreach (var cell in row.Elements<Cell>())
+                foreach (var cell in contentCells)
                 {
                     rowNode.Children.Add(CellToNode(sheetName, cell, worksheetPart, eval));
                 }
@@ -179,6 +195,37 @@ public partial class ExcelHandler
         }
 
         return children;
+    }
+
+    /// <summary>
+    /// A cell carries content when it has a formula, a non-empty value, or an
+    /// inline string. Style alone (<c>&lt;c s="1"/&gt;</c>) is NOT content —
+    /// such cells are omitted from bulk enumeration (see GetSheetChildNodes)
+    /// but stay in the DOM and remain reachable via a targeted get.
+    /// </summary>
+    private static bool CellHasContent(Cell cell)
+    {
+        if (cell.CellFormula != null) return true;
+        if (!string.IsNullOrEmpty(cell.CellValue?.Text)) return true;
+        if (cell.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.InlineString>() != null) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Mirrors WorksheetBloatFilter.ProcessRow's row-keep rule: a row is
+    /// meaningful (kept even with no content cells) when it carries any
+    /// attribute beyond <c>r</c>/<c>spans</c>, or any namespaced attribute
+    /// (height, hidden, style, outline, x14ac:dyDescent, …).
+    /// </summary>
+    private static bool RowHasMeaningfulAttrs(Row row)
+    {
+        foreach (var attr in row.GetAttributes())
+        {
+            if (!string.IsNullOrEmpty(attr.NamespaceUri)) return true;
+            if (attr.LocalName is "r" or "spans") continue;
+            return true;
+        }
+        return false;
     }
 
     private DocumentNode CellToNode(string sheetName, Cell cell, WorksheetPart? part = null, Core.FormulaEvaluator? evaluator = null)

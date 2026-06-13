@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCLI (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace OfficeCli;
@@ -60,7 +61,7 @@ public static class McpInstaller
                 UninstallLmStudio();
                 return true;
             case "claude" or "claude-code":
-                UninstallJson("claude", GetClaudeConfigPath(), "mcpServers");
+                UninstallClaude();
                 return true;
             case "cursor":
                 UninstallJson("cursor", GetCursorMcpPath(), "mcpServers");
@@ -121,12 +122,84 @@ public static class McpInstaller
     // "mcpServers"), NOT from ~/.claude/settings.json — settings.json has no
     // mcpServers key and Claude Code silently ignores it (the server never
     // appears in `claude mcp list`). This is the same file `claude mcp add -s
-    // user` writes to.
+    // user` writes to, which is why the status check reads it directly.
     private static string GetClaudeConfigPath() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json");
 
-    private static void InstallClaude() =>
+    // Prefer the official `claude` CLI: it owns ~/.claude.json's format and
+    // handles concurrent writes from a running Claude Code instance — unlike
+    // the static config files of the other targets, ~/.claude.json is live
+    // state we don't own. Fall back to a direct write only when `claude` isn't
+    // on PATH, so registration still works without the CLI installed.
+    private static void InstallClaude()
+    {
+        // Idempotent re-register: drop any stale entry first so re-running picks
+        // up the current binary path (`claude mcp add` errors if the name
+        // exists). A false return means `claude` isn't on PATH → fall back.
+        if (!TryClaudeCli(["mcp", "remove", "-s", "user", "officecli"], out _, out _, out _))
+        {
+            InstallJson("Claude Code", GetClaudeConfigPath(), "mcpServers");
+            return;
+        }
+
+        if (TryClaudeCli(["mcp", "add", "-s", "user", "officecli", "--", OfficecliPath, "mcp"],
+                out var stdout, out var stderr, out var code) && code == 0)
+        {
+            Console.WriteLine("Registered officecli MCP in Claude Code.");
+            Console.WriteLine("  Via: claude mcp add -s user (config: ~/.claude.json)");
+            return;
+        }
+
+        var msg = (string.IsNullOrWhiteSpace(stderr) ? stdout : stderr).Trim();
+        if (msg.Length > 0)
+            Console.Error.WriteLine($"  claude CLI present but `mcp add` failed: {msg}");
+        Console.Error.WriteLine("  Falling back to direct ~/.claude.json write.");
         InstallJson("Claude Code", GetClaudeConfigPath(), "mcpServers");
+    }
+
+    private static void UninstallClaude()
+    {
+        // `claude mcp remove` returns non-zero when no such server exists; in
+        // that case still sweep ~/.claude.json directly, covering entries an
+        // older officecli wrote without the CLI.
+        if (TryClaudeCli(["mcp", "remove", "-s", "user", "officecli"], out _, out _, out var code)
+            && code == 0)
+        {
+            Console.WriteLine("Removed officecli MCP from Claude Code.");
+            return;
+        }
+        UninstallJson("Claude Code", GetClaudeConfigPath(), "mcpServers");
+    }
+
+    /// <summary>Runs `claude` with the given args. Returns false only when the
+    /// process could not be started (claude not on PATH); true otherwise, with
+    /// the captured streams and exit code.</summary>
+    private static bool TryClaudeCli(string[] args, out string stdout, out string stderr, out int exitCode)
+    {
+        stdout = ""; stderr = ""; exitCode = -1;
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "claude",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (var a in args) psi.ArgumentList.Add(a);
+            using var p = Process.Start(psi);
+            if (p == null) return false;
+            stdout = p.StandardOutput.ReadToEnd();
+            stderr = p.StandardError.ReadToEnd();
+            p.WaitForExit();
+            exitCode = p.ExitCode;
+            return true;
+        }
+        catch
+        {
+            return false; // claude not found / not executable
+        }
+    }
 
     // ==================== Cursor ====================
 

@@ -571,18 +571,15 @@ public partial class PowerPointHandler
 
     private string AddChart(string parentPath, int? index, Dictionary<string, string> properties)
     {
-                var chartSlideMatch = Regex.Match(parentPath, @"^/slide\[(\d+)\]$");
-                if (!chartSlideMatch.Success)
-                    throw new ArgumentException("Charts must be added to a slide: /slide[N]");
-
-                var chartSlideIdx = int.Parse(chartSlideMatch.Groups[1].Value);
-                var chartSlideParts = GetSlideParts().ToList();
-                if (chartSlideIdx < 1 || chartSlideIdx > chartSlideParts.Count)
-                    throw new ArgumentException($"Slide {chartSlideIdx} not found (total: {chartSlideParts.Count})");
-
-                var chartSlidePart = chartSlideParts[chartSlideIdx - 1];
-                var chartShapeTree = GetSlide(chartSlidePart).CommonSlideData?.ShapeTree
-                    ?? throw new InvalidOperationException("Slide has no shape tree");
+                // Accept a slide (/slide[N]) or a nested-group parent
+                // (/slide[N]/group[K]/…) so dump-emitted grouped charts replay.
+                var chartParent = ResolveSlideOrGroupAddParent(parentPath)
+                    ?? throw new ArgumentException("Charts must be added to a slide: /slide[N]");
+                var chartSlideIdx = chartParent.slideIdx;
+                var chartSlidePart = chartParent.slidePart;
+                var chartShapeTree = chartParent.shapeTree;
+                var chartInsertContainer = chartParent.insertContainer;
+                var chartReturnPrefix = chartParent.returnPathPrefix;
 
                 // Parse chart data. Use TryGetValue(case-insensitive) instead
                 // of LINQ FirstOrDefault to play well with TrackingPropertyDictionary.
@@ -687,7 +684,7 @@ public partial class PowerPointHandler
 
                     var chartGfEx = BuildExtendedChartGraphicFrame(chartSlidePart, extChartPart,
                         chartId, chartName, chartX, chartY, chartCx, chartCy);
-                    InsertAtPosition(chartShapeTree, chartGfEx, index);
+                    InsertAtPosition(chartInsertContainer, chartGfEx, index);
                     if (properties.TryGetValue("zorder", out var cxZ)
                         || properties.TryGetValue("z-order", out cxZ)
                         || properties.TryGetValue("order", out cxZ))
@@ -695,9 +692,9 @@ public partial class PowerPointHandler
                     GetSlide(chartSlidePart).Save();
 
                     // Count all charts (both regular and extended)
-                    var totalCharts = chartShapeTree.Elements<GraphicFrame>()
+                    var totalCharts = chartInsertContainer.Elements<GraphicFrame>()
                         .Count(gf => gf.Descendants<C.ChartReference>().Any() || IsExtendedChartFrame(gf));
-                    return $"/slide[{chartSlideIdx}]/{BuildElementPathSegment("chart", chartGfEx, totalCharts)}";
+                    return $"{chartReturnPrefix}/{BuildElementPathSegment("chart", chartGfEx, totalCharts)}";
                 }
 
                 // Build chart content BEFORE adding part (invalid type throws, must not leave empty part)
@@ -734,16 +731,16 @@ public partial class PowerPointHandler
 
                 var chartGf = BuildChartGraphicFrame(chartSlidePart, chartPart, chartId, chartName,
                     chartX, chartY, chartCx, chartCy);
-                InsertAtPosition(chartShapeTree, chartGf, index);
+                InsertAtPosition(chartInsertContainer, chartGf, index);
                 if (properties.TryGetValue("zorder", out var stdZ)
                     || properties.TryGetValue("z-order", out stdZ)
                     || properties.TryGetValue("order", out stdZ))
                     ApplyZOrder(chartSlidePart, chartGf, stdZ);
                 GetSlide(chartSlidePart).Save();
 
-                var chartCount = chartShapeTree.Elements<GraphicFrame>()
+                var chartCount = chartInsertContainer.Elements<GraphicFrame>()
                     .Count(gf => gf.Descendants<C.ChartReference>().Any());
-                return $"/slide[{chartSlideIdx}]/{BuildElementPathSegment("chart", chartGf, chartCount)}";
+                return $"{chartReturnPrefix}/{BuildElementPathSegment("chart", chartGf, chartCount)}";
     }
 
 

@@ -1928,7 +1928,12 @@ public static partial class WordBatchEmitter
                 if (depth < 0) break; // </w:sdtContent>
                 continue;
             }
-            if (depth == 0 && (name == "p" || name == "tbl"))
+            // BUG-R16C: a nested block <w:sdt> directly inside the unwrapped
+            // sdtContent (e.g. a cover wrapper grouping data-bound title +
+            // subtitle controls) must be surfaced too — otherwise the unwrap
+            // emits only the sibling paragraphs/tables and the nested controls
+            // (and their text) vanish on dump.
+            if (depth == 0 && (name == "p" || name == "tbl" || name == "sdt"))
                 result.Add(name);
             if (!selfClose) depth++;
         }
@@ -2054,7 +2059,7 @@ public static partial class WordBatchEmitter
                 // inline section break (the landscape boundary that was
                 // vanishing). Bail to the text emit only when the SDT exposes
                 // no addressable block children at all.
-                int sdtParaOrdinal = 0, sdtTblOrdinal = 0;
+                int sdtParaOrdinal = 0, sdtTblOrdinal = 0, sdtNestedOrdinal = 0;
                 bool sdtEmittedAny = false;
                 foreach (var kind in EnumerateSdtContentDirectChildren(rawXml!))
                 {
@@ -2069,6 +2074,17 @@ public static partial class WordBatchEmitter
                     {
                         sdtTblOrdinal++;
                         EmitTable(word, $"{sourcePath}/tbl[{sdtTblOrdinal}]", sdtTblOrdinal, items, ctx);
+                        sdtEmittedAny = true;
+                    }
+                    else if (kind == "sdt")
+                    {
+                        // BUG-R16C: recurse into a nested block SDT so its content
+                        // (e.g. a data-bound cover title/subtitle) survives the
+                        // outer wrapper's unwrap. EmitSdt raw-sets the nested
+                        // control verbatim at body level (preserving its
+                        // dataBinding), so the bound text still renders.
+                        sdtNestedOrdinal++;
+                        EmitSdt(word, $"{sourcePath}/sdt[{sdtNestedOrdinal}]", items, ctx);
                         sdtEmittedAny = true;
                     }
                 }

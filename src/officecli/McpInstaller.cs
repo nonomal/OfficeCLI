@@ -11,8 +11,51 @@ namespace OfficeCli;
 /// </summary>
 public static class McpInstaller
 {
-    private static string OfficecliPath =>
-        Environment.ProcessPath ?? (OperatingSystem.IsWindows() ? "officecli.exe" : "officecli");
+    // Path to record as the MCP server command. Must stay valid across
+    // upgrades, so resolve to a STABLE location in priority order:
+    //   1. The canonical self-install path (~/.local/bin/officecli) — self-
+    //      install overwrites that file in place, so the path never changes.
+    //   2. `officecli` as found on PATH. For a package-manager install this is
+    //      the stable wrapper/symlink (e.g. /opt/homebrew/bin/officecli), which
+    //      `brew upgrade` repoints without changing the path. We must NOT use
+    //      Environment.ProcessPath here: it resolves the symlink to the
+    //      versioned target (…/Cellar/officecli/1.0.106/…) which rots on upgrade.
+    //   3. The running binary — last resort for a download/dev build that has
+    //      not been installed anywhere on PATH yet.
+    private static string OfficecliPath
+    {
+        get
+        {
+            var exe = OperatingSystem.IsWindows() ? "officecli.exe" : "officecli";
+
+            var installed = Core.Installer.InstalledBinaryPath;
+            if (File.Exists(installed))
+                return installed;
+
+            var onPath = ResolveOnPath(exe);
+            if (onPath != null)
+                return onPath;
+
+            return Environment.ProcessPath ?? exe;
+        }
+    }
+
+    /// <summary>First <paramref name="exe"/> found across PATH entries, or null.
+    /// Returns the PATH-relative location verbatim (a symlink is NOT resolved),
+    /// mirroring `which` — so package-manager wrappers stay version-stable.</summary>
+    private static string? ResolveOnPath(string exe)
+    {
+        var pathEnv = Environment.GetEnvironmentVariable("PATH");
+        if (string.IsNullOrEmpty(pathEnv)) return null;
+        foreach (var dir in pathEnv.Split(Path.PathSeparator))
+        {
+            if (string.IsNullOrEmpty(dir)) continue;
+            string candidate;
+            try { candidate = Path.Combine(dir, exe); } catch { continue; }
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
 
     /// <summary>Returns true if the target was recognized; false on unknown
     /// target (so the CLI can surface a non-zero exit code).</summary>

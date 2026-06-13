@@ -19,6 +19,13 @@ internal static class Installer
     private static readonly string TargetPath = Path.Combine(BinDir,
         OperatingSystem.IsWindows() ? "officecli.exe" : "officecli");
 
+    /// <summary>Canonical install location of the officecli binary
+    /// (<c>~/.local/bin/officecli</c> on Unix, <c>%LOCALAPPDATA%\OfficeCli</c>
+    /// on Windows). External registrations (MCP, etc.) should record this path
+    /// rather than <see cref="Environment.ProcessPath"/> so the command survives
+    /// upgrades — self-install overwrites this file in place.</summary>
+    internal static string InstalledBinaryPath => TargetPath;
+
     /// <summary>
     /// MCP targets and the skill aliases that overlap with them.
     /// If any of the skill aliases were installed, skip MCP for that target.

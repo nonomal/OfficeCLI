@@ -478,7 +478,12 @@ public partial class WordHandler
                     wrapDist = (wdT, wdB, wdL, wdR);
                 }
             }
-            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight, effectExtent, wrapDist);
+            // BUG-R24-WRAPPOLY: forward a captured custom wrapTight/wrapThrough
+            // polygon so the exact text-flow boundary round-trips (a source
+            // polygon hugging the image tighter than the default full square
+            // shifted wrapped/below text by several px).
+            var wrapPolygon = properties.GetValueOrDefault("wrap.polygon");
+            imgRun = CreateAnchorImageRun(relId, cxEmu, cyEmu, altText, wrapType, hPos, vPos, hRel, vRel, behind, imgDocPropId, pictureName, hAlign, vAlign, relHeight, effectExtent, wrapDist, wrapPolygon);
         }
         else
         {

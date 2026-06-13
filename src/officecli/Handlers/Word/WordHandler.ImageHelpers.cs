@@ -98,34 +98,73 @@ public partial class WordHandler
         return new Run(new Drawing(inline));
     }
 
+    // BUG-R24-WRAPPOLY: rebuild a wrapTight/wrapThrough polygon from the captured
+    // "edited;side;x,y x,y …" string (see ImageHelpers GET-side). Falls back to
+    // the default full-bounds square (0,0 → 21600,21600) when the prop is absent
+    // or malformed, so a typed `add picture wrap=tight` with no polygon behaves
+    // exactly as before.
+    private static DW.WrapPolygon BuildWrapPolygon(string? serialized)
+    {
+        DW.WrapPolygon Default() => new(
+            new DW.StartPoint { X = 0, Y = 0 },
+            new DW.LineTo { X = 21600, Y = 0 },
+            new DW.LineTo { X = 21600, Y = 21600 },
+            new DW.LineTo { X = 0, Y = 21600 },
+            new DW.LineTo { X = 0, Y = 0 }) { Edited = false };
+        if (string.IsNullOrWhiteSpace(serialized)) return Default();
+        var parts = serialized.Split(';');
+        if (parts.Length < 3) return Default();
+        var vertTokens = parts[2].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var pts = new List<(int X, int Y)>();
+        foreach (var t in vertTokens)
+        {
+            var xy = t.Split(',');
+            if (xy.Length == 2 && int.TryParse(xy[0], out var x) && int.TryParse(xy[1], out var y))
+                pts.Add((x, y));
+        }
+        if (pts.Count < 3) return Default();
+        var poly = new DW.WrapPolygon { Edited = parts[0] == "1" };
+        poly.AppendChild(new DW.StartPoint { X = pts[0].X, Y = pts[0].Y });
+        for (int i = 1; i < pts.Count; i++)
+            poly.AppendChild(new DW.LineTo { X = pts[i].X, Y = pts[i].Y });
+        return poly;
+    }
+
+    // Recover the wrapText side captured in the polygon prop's 2nd field; default
+    // bothSides (Word's default and the prior hardcoded value).
+    private static DW.WrapTextValues WrapSideFrom(string? serialized)
+    {
+        var side = serialized?.Split(';') is { Length: >= 2 } p ? p[1] : "bothSides";
+        return side switch
+        {
+            "left" => DW.WrapTextValues.Left,
+            "right" => DW.WrapTextValues.Right,
+            "largest" => DW.WrapTextValues.Largest,
+            _ => DW.WrapTextValues.BothSides,
+        };
+    }
+
     private static Run CreateAnchorImageRun(string relationshipId, long cx, long cy, string altText,
         string wrap, long hPos, long vPos,
         DW.HorizontalRelativePositionValues hRel, DW.VerticalRelativePositionValues vRel,
         bool behindText, uint docPropId, string? pictureName = null,
         string? hAlign = null, string? vAlign = null, uint relativeHeight = 1U,
         (long L, long T, long R, long B)? effectExtent = null,
-        (uint T, uint B, uint L, uint R)? wrapDist = null)
+        (uint T, uint B, uint L, uint R)? wrapDist = null,
+        string? wrapPolygon = null)
     {
         OpenXmlElement wrapElement = wrap.ToLowerInvariant() switch
         {
             "square" => new DW.WrapSquare { WrapText = DW.WrapTextValues.BothSides },
             // WrapText is REQUIRED on wrapTight/wrapThrough (same as wrapSquare);
             // omitting it produces schema-invalid XML that real Word refuses to
-            // open. Default to bothSides (matches Word's default wrap side).
-            "tight" => new DW.WrapTight(new DW.WrapPolygon(
-                new DW.StartPoint { X = 0, Y = 0 },
-                new DW.LineTo { X = 21600, Y = 0 },
-                new DW.LineTo { X = 21600, Y = 21600 },
-                new DW.LineTo { X = 0, Y = 21600 },
-                new DW.LineTo { X = 0, Y = 0 }
-            ) { Edited = false }) { WrapText = DW.WrapTextValues.BothSides },
-            "through" => new DW.WrapThrough(new DW.WrapPolygon(
-                new DW.StartPoint { X = 0, Y = 0 },
-                new DW.LineTo { X = 21600, Y = 0 },
-                new DW.LineTo { X = 21600, Y = 21600 },
-                new DW.LineTo { X = 0, Y = 21600 },
-                new DW.LineTo { X = 0, Y = 0 }
-            ) { Edited = false }) { WrapText = DW.WrapTextValues.BothSides },
+            // open. BUG-R24-WRAPPOLY: honor a captured source polygon (vertices +
+            // edited flag + wrap side) when present; the default full-bounds
+            // square otherwise extends the wrap boundary and shifts text.
+            "tight" => new DW.WrapTight(BuildWrapPolygon(wrapPolygon))
+                { WrapText = WrapSideFrom(wrapPolygon) },
+            "through" => new DW.WrapThrough(BuildWrapPolygon(wrapPolygon))
+                { WrapText = WrapSideFrom(wrapPolygon) },
             "topandbottom" or "topbottom" => new DW.WrapTopBottom(),
             "none" => new DW.WrapNone() as OpenXmlElement,
             _ => throw new ArgumentException($"Invalid wrap value: '{wrap}'. Valid values: none, square, tight, through, topandbottom.")
@@ -363,6 +402,33 @@ public partial class WordHandler
             node.Format["wrap"] = DetectWrapType(anchorEl);
             if (anchorEl.BehindDoc?.Value == true)
                 node.Format["behindText"] = true;
+            // BUG-R24-WRAPPOLY: a wrapTight / wrapThrough wrap carries a custom
+            // <wp:wrapPolygon> whose vertices define the exact text-flow boundary.
+            // The apply path (BuildAnchorWrap) hardcoded the default full-bounds
+            // polygon (0,0 21600,21600), so a source polygon that hugs the image
+            // tighter (e.g. y-max 20750 ≈ 96% height) was replaced by the full
+            // square — extending the wrap boundary ~4% of the image height and
+            // shifting wrapped/below text by several px (a header logo pushed the
+            // whole body down 5px). Capture the polygon verbatim (edited flag +
+            // wrapText side + "x,y x,y …" vertices) so the apply path can rebuild
+            // the exact boundary. Only present for tight/through.
+            var wrapPolyEl = anchorEl.GetFirstChild<DW.WrapTight>()?.WrapPolygon
+                          ?? anchorEl.GetFirstChild<DW.WrapThrough>()?.WrapPolygon;
+            if (wrapPolyEl != null)
+            {
+                var verts = new List<string>();
+                if (wrapPolyEl.StartPoint is { } sp)
+                    verts.Add($"{sp.X?.Value ?? 0},{sp.Y?.Value ?? 0}");
+                foreach (var lt in wrapPolyEl.Elements<DW.LineTo>())
+                    verts.Add($"{lt.X?.Value ?? 0},{lt.Y?.Value ?? 0}");
+                if (verts.Count > 0)
+                {
+                    var edited = wrapPolyEl.Edited?.Value == true ? "1" : "0";
+                    var side = (anchorEl.GetFirstChild<DW.WrapTight>()?.WrapText
+                             ?? anchorEl.GetFirstChild<DW.WrapThrough>()?.WrapText)?.InnerText ?? "bothSides";
+                    node.Format["wrap.polygon"] = $"{edited};{side};{string.Join(" ", verts)}";
+                }
+            }
             // BUG-DUMP-R26-1: capture the anchor's z-order (relativeHeight).
             // Distinct values (251664384, 251665408, …) sequence overlapping
             // floats front-to-back; dump never read it and the apply path

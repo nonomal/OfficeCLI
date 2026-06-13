@@ -147,6 +147,27 @@ public static partial class WordBatchEmitter
         // "element already has a pending tblPrChange" guard.
         tableProps.Remove("tblPrChange.author");
         tableProps.Remove("tblPrChange.date");
+        // BUG-R24-TBLLOOK: the table node surfaces BOTH the authoritative hex
+        // tblLook bitmask AND the decomposed boolean facets (firstRow / lastRow /
+        // … — emitted only for the facets that are ON, see Navigation BUG-R3-01).
+        // Forwarding both to AddTable produces a MIXED
+        // <w:tblLook w:val="04A0" w:firstRow="true" w:firstColumn="true" …/> that
+        // lists only the enabled facets and omits the disabled ones. Word DEFAULTS
+        // an omitted tblLook facet to ON, so a table whose source explicitly
+        // disabled lastRow (w:lastRow="0") had the last-row conditional style
+        // (e.g. a GridTable lastRow bold) wrongly applied on rebuild — the last
+        // row rendered bold and reflowed. The hex val encodes every facet
+        // authoritatively and Word reads it correctly on its own, so drop the
+        // redundant decomposed keys and let the bare val drive AddTable.
+        if (tableProps.ContainsKey("tblLook"))
+        {
+            tableProps.Remove("firstRow");
+            tableProps.Remove("lastRow");
+            tableProps.Remove("firstCol");
+            tableProps.Remove("lastCol");
+            tableProps.Remove("bandedRows");
+            tableProps.Remove("bandedCols");
+        }
         tableProps["rows"] = rows.Count.ToString();
         tableProps["cols"] = cols.ToString();
         // Source had no <w:tblGrid> or an empty one — cells (if any) carry

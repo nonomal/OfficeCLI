@@ -5361,7 +5361,22 @@ public partial class WordHandler
                 node.Format["revision.id"] = rowDelId.ToString();
         }
         var rh = trPr.GetFirstChild<TableRowHeight>();
-        if (rh?.Val?.Value != null)
+        // BUG-DUMP-R34-FLOATHEIGHT: LibreOffice writes a NON-INTEGER trHeight
+        // (w:val="1821.8200000000002"). The SDK types @w:val as UInt16, so
+        // touching rh.Val.Value parses the string and throws FormatException —
+        // aborting the entire dump. Read the raw InnerText and parse tolerantly,
+        // rounding a fractional twip to the nearest integer.
+        long? rhTwips = null;
+        if (rh?.Val?.InnerText is { Length: > 0 } rhRaw)
+        {
+            if (long.TryParse(rhRaw, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var rhExact))
+                rhTwips = rhExact;
+            else if (double.TryParse(rhRaw, System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out var rhFloat))
+                rhTwips = (long)Math.Round(rhFloat);
+        }
+        if (rhTwips != null)
         {
             // BUG-DUMP-R25-1: emit row height as RAW TWIPS ("{n}dxa") not
             // 2-decimal cm. cm round-tripping drifted the val (302→300,
@@ -5369,7 +5384,7 @@ public partial class WordHandler
             // dxa is the same exact-twip convention already used for
             // colWidths/width readback (ParseTwips strips the "dxa" suffix
             // with no scaling). Set still accepts "2cm" on the input side.
-            node.Format["height"] = rh.Val.Value + "dxa";
+            node.Format["height"] = rhTwips.Value + "dxa";
             // BUG-DUMP-R25-1: round-trip the height rule faithfully. docx
             // CT_Height @w:hRule defaults to "auto" when absent — Word treats
             // an absent hRule as auto row-sizing. Only emit height.rule when

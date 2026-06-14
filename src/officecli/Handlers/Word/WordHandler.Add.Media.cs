@@ -994,8 +994,37 @@ public partial class WordHandler
             => hostPart.AddNewPart<DiagramPersistLayoutPart>(ct, null),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => hostPart.AddNewPart<ImagePart>(ct, null),
+        // BUG-DUMP-R40-VMLOLE: a VML shape / <o:OLEObject> embeds an OLE object
+        // (legacy .xls/.doc/.ppt → application/vnd.ms-* via an `oleObject`
+        // relationship) or a modern OOXML package (.xlsx/.docx/.pptx via a
+        // `package` relationship). These reach the inlined-parts path as part{N}
+        // and were unsupported, aborting the whole `add vmlshape` (and dropping
+        // the embedded spreadsheet) on dump→batch. Route OLE-object content
+        // types to an EmbeddedObjectPart (preserving the source content type so
+        // .xls round-trips) and package content types to an EmbeddedPackagePart.
+        _ when IsEmbeddedPackageContentType(ct)
+            => hostPart.AddNewPart<EmbeddedPackagePart>(ct, null),
+        _ when IsEmbeddedOleObjectContentType(ct)
+            => hostPart.AddNewPart<EmbeddedObjectPart>(ct, null),
         _ => null,
     };
+
+    // Modern OOXML formats embedded as an OLE package (rel type `package`).
+    private static bool IsEmbeddedPackageContentType(string ct) =>
+        ct is "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+           or "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.macroEnabled.main+xml"
+           or "application/vnd.ms-excel.sheet.macroEnabled.12"
+           or "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+           or "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+    // Legacy / generic OLE objects embedded via an `oleObject` relationship.
+    private static bool IsEmbeddedOleObjectContentType(string ct) =>
+        ct is "application/vnd.openxmlformats-officedocument.oleObject"
+           or "application/vnd.ms-excel"
+           or "application/msword"
+           or "application/vnd.ms-powerpoint"
+           or "application/vnd.ms-office"
+        || ct.StartsWith("application/vnd.ms-", StringComparison.OrdinalIgnoreCase);
 
     // Child parts keep their SOURCE rel id (scoped to the freshly created
     // parent part, so the verbatim parent bytes' internal refs resolve).

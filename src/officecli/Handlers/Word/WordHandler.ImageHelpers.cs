@@ -306,6 +306,13 @@ public partial class WordHandler
         };
         if (docProps?.Id?.HasValue == true) node.Format["id"] = docProps.Id.Value;
         if (docProps?.Name?.Value != null) node.Format["name"] = docProps.Name.Value;
+        // BUG-DUMP-R28-PICHIDDEN: <wp:docPr hidden="1"> marks a drawing invisible.
+        // A footer/background logo set is commonly two overlapping anchored
+        // pictures — a visible colour logo and a hidden monochrome print variant
+        // (LogoColour + LogoMono). Without reading the flag back the dump dropped
+        // it, so the mono picture replayed visible and rendered (black) over the
+        // colour logo. Surface it so AddPicture restores the hidden state.
+        if (docProps?.Hidden?.Value == true) node.Format["hidden"] = true;
         if (extent?.Cx != null) node.Format["width"] = $"{extent.Cx.Value / EmuConverter.EmuPerCmF:F1}cm";
         if (extent?.Cy != null) node.Format["height"] = $"{extent.Cy.Value / EmuConverter.EmuPerCmF:F1}cm";
         if (docProps?.Description?.Value != null) node.Format["alt"] = docProps.Description.Value;

@@ -490,6 +490,16 @@ public partial class WordHandler
             imgRun = CreateImageRun(relId, cxEmu, cyEmu, altText, imgDocPropId, pictureName, effectExtent);
         }
 
+        // BUG-DUMP-R28-PICHIDDEN: restore the drawing's hidden flag
+        // (<wp:docPr hidden="1">). CreateImageRun/CreateAnchorImageRun never set
+        // it, so a hidden monochrome print logo replayed visible and rendered
+        // (black) on top of the visible colour logo. Apply it to the wp:docPr.
+        if (properties.TryGetValue("hidden", out var hiddenVal) && IsTruthy(hiddenVal))
+        {
+            var hiddenDocPr = imgRun.Descendants<DW.DocProperties>().FirstOrDefault();
+            if (hiddenDocPr != null) hiddenDocPr.Hidden = true;
+        }
+
         // Wire the asvg:svgBlip extension after the run is built. Walking
         // the Drawing to find the Blip keeps CreateImageRun /
         // CreateAnchorImageRun signature-stable for non-SVG callers.

@@ -2157,7 +2157,13 @@ public static partial class WordBatchEmitter
     // "/header[N]" / "/footer[N]" otherwise). <paramref name="cellHasContent"/>
     // decides prepend vs append so the SDT keeps document order relative to the
     // cell's auto-seeded leading paragraph.
-    private static void EmitCellSdt(WordHandler word, string sourcePath, string cellTargetPath,
+    // Returns true when the SDT was raw-set into the cell AHEAD of the auto-seed
+    // paragraph (the insert-after-tcPr branch), so the caller knows a spurious
+    // empty seed paragraph is left behind and must be removed when the cell has
+    // no real paragraph of its own (BUG-DUMP-R36-CELLSDT). All other paths
+    // (append after existing content, typed `add sdt`, header/footer prepend,
+    // external-rel flatten) consume or never create that seed, so return false.
+    private static bool EmitCellSdt(WordHandler word, string sourcePath, string cellTargetPath,
                                     string cellXPath, string rawPart, bool cellHasContent,
                                     List<BatchItem> items, BodyEmitContext ctx)
     {
@@ -2218,6 +2224,9 @@ public static partial class WordBatchEmitter
                         Action = "insertafter",
                         Xml = rawXml
                     });
+                    // SDT now sits ahead of AddTable's auto-seed paragraph; the
+                    // caller drops that seed when the cell has no real paragraph.
+                    return true;
                 }
                 else
                 {
@@ -2234,11 +2243,12 @@ public static partial class WordBatchEmitter
                         Xml = rawXml
                     });
                 }
-                return;
+                return false;
             }
         }
 
         EmitSdtTyped(word, sourcePath, cellTargetPath, items);
+        return false;
     }
 
     // Shared typed `add sdt` emit. Whitelists the Get-canonical keys AddSdt

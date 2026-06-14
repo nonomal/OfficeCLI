@@ -585,6 +585,7 @@ public static partial class WordBatchEmitter
                 int cellParaIdx = 0;
                 int nestedTblIdx = 0;
                 bool firstParaSeen = false;
+                bool cellSdtLeftSeed = false; // BUG-DUMP-R36-CELLSDT: SDT raw-set ahead of the cell's auto-seed paragraph
 
                 // BUG-DUMP-R27-6: a block-level <w:customXml> wrapper that is a
                 // DIRECT cell child is omitted from cellNode.Children (Navigation
@@ -727,9 +728,34 @@ public static partial class WordBatchEmitter
                         // document-order ordinal plus the current row/cell index.
                         var rawPart = containerPath == "/body" ? "/document" : containerPath;
                         var cellXPath = $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]";
-                        EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
+                        cellSdtLeftSeed |= EmitCellSdt(word, cc.Path, cellTargetPath, cellXPath, rawPart,
                                     cellHasContent: firstParaSeen, items, ctx);
                     }
+                }
+
+                // BUG-DUMP-R36-CELLSDT: a cell whose SOLE content is a block SDT
+                // (e.g. a checkbox content control filling a rating-grid cell) has
+                // no direct <w:p>, so no paragraph consumed the auto-seed paragraph
+                // AddTable creates per cell. EmitCellSdt raw-set the SDT after the
+                // <w:tcPr> (ahead of that seed), leaving a spurious trailing empty
+                // paragraph the source never had — across a 39-cell grid that
+                // inflated row heights enough to reflow a 5-page form to 6 pages.
+                // When that insert-ahead-of-seed path fired (cellSdtLeftSeed) and
+                // no real paragraph took the seed, remove the cell's direct
+                // auto-seed <w:p>. The block SDT ends with a paragraph internally,
+                // so the cell stays schema-valid (matches the source shape:
+                // <w:tc><w:tcPr/><w:sdt/></w:tc>). Gated on cellSdtLeftSeed so the
+                // typed `add sdt` / append paths (which leave no bare seed) aren't
+                // hit with a remove that matches nothing.
+                if (!cellHasCustomXml && cellSdtLeftSeed && !firstParaSeen && cellRawXPath != null)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = cellRawPart,
+                        Xpath = $"{cellRawXPath}/w:p",
+                        Action = "remove",
+                    });
                 }
 
                 // BUG-DUMP-R27-6: document-ordered cell walk used ONLY when the

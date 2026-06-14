@@ -5403,14 +5403,32 @@ public partial class WordHandler
             else if (rh.HeightType?.Value == HeightRuleValues.AtLeast)
                 node.Format["height.rule"] = "atLeast";
         }
-        if (trPr.GetFirstChild<TableHeader>() != null)
+        // BUG-DUMP-R35-TRBOOL: these are CT_TrPr on/off toggles (CT_OnOff). An
+        // element with `w:val="0"` (or "false"/"off") means the toggle is OFF —
+        // NOT the same as the bare element, which is ON. Reading "present →
+        // true" flipped an explicit `<w:tblHeader w:val="0"/>` to header=true,
+        // so dump→batch re-emitted a bare `<w:tblHeader/>` (= ON). A first row
+        // wrongly marked tblHeader is treated by Word as a repeating header that
+        // it refuses to orphan at a page bottom, pushing the whole table to the
+        // next page (a blank page + reflow on a Canva-style title-block table).
+        // The bare element (no w:val) is ON; an explicit "0"/"false"/"off" is
+        // OFF. TableHeader/CantSplit (OnOffOnlyType, EnumValue Val) and Hidden
+        // (OnOffType, OnOffValue Val) expose different Val CLR types, so read the
+        // raw attribute text uniformly. Leave the key unset when OFF (false =
+        // absent default) so dump→batch never re-emits a bare ON element.
+        static bool OnOffOn(string? raw)
+            => raw is null || !(raw is "0" or "false" or "off");
+        var trHeaderEl = trPr.GetFirstChild<TableHeader>();
+        if (trHeaderEl != null && OnOffOn(trHeaderEl.Val?.InnerText))
             node.Format["header"] = true;
-        if (trPr.GetFirstChild<CantSplit>() != null)
+        var cantSplitEl = trPr.GetFirstChild<CantSplit>();
+        if (cantSplitEl != null && OnOffOn(cantSplitEl.Val?.InnerText))
             node.Format["cantSplit"] = true;
         // BUG-DUMP-R37-3: <w:hidden/> marks the whole row not displayed/printed
         // (CT_TrPr). Previously unread — a hidden row reappeared on dump→batch.
         // Mirror the header/cantSplit toggle reads; Add/Set grow matching cases.
-        if (trPr.GetFirstChild<Hidden>() != null)
+        var rowHiddenEl = trPr.GetFirstChild<Hidden>();
+        if (rowHiddenEl != null && OnOffOn(rowHiddenEl.Val?.InnerText))
             node.Format["hidden"] = true;
         // BUG-DUMP-R24-1: row-level <w:jc> in <w:trPr> horizontally positions
         // the WHOLE ROW on the page (CT_TrPr). Distinct from table-level

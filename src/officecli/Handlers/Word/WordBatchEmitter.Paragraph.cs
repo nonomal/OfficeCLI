@@ -3268,15 +3268,19 @@ public static partial class WordBatchEmitter
             var root = parentPath.StartsWith("/header[", StringComparison.Ordinal) ? "/w:hdr" : "/w:ftr";
             return (parentPath, $"{root}/w:p[last()]");
         }
-        // Table cell: EmitTable stashes the current cell's global-ordinal XPath
-        // in the context box while walking the cell's paragraphs. Append into
-        // that cell's last paragraph. The container part is the document for a
-        // body table; header/footer-hosted tables aren't carried here (the box
-        // is only set for /document-hosted tables) so we conservatively skip.
+        // Table cell: EmitTable stashes the current cell's ordinal XPath in the
+        // context box while walking the cell's paragraphs. Append into that
+        // cell's last paragraph. CurrentCellPartBox carries the owning part:
+        // "/document" for a body table, the header/footer part path for a
+        // header/footer-hosted table (BUG-DUMP-R35-HFCELL — previously the part
+        // was hardcoded "/document" and header/footer cells were not carried at
+        // all, so a rich inline SDT there fell through to the lossy typed emit).
         if (parentPath.Contains("/tc[", StringComparison.Ordinal)
             && ctx?.CurrentCellXPathBox is { } box && box[0] is { } cellXPath)
         {
-            return ("/document", $"{cellXPath}/w:p[last()]");
+            var cellPart = ctx.CurrentCellPartBox is { } pbox && pbox[0] is { } p
+                ? p : "/document";
+            return (cellPart, $"{cellXPath}/w:p[last()]");
         }
         return null;
     }

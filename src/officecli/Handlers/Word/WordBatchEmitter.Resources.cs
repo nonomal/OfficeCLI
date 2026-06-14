@@ -1114,6 +1114,7 @@ public static partial class WordBatchEmitter
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
+            CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings ?? new List<DocxUnsupportedWarning>());
         int pIdx = 0, tblIdx = 0;

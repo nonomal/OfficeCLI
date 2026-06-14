@@ -151,6 +151,7 @@ public static partial class WordBatchEmitter
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
+            CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 
@@ -514,6 +515,14 @@ public static partial class WordBatchEmitter
         // immutable); set+restored around each cell's content walk so nested
         // tables and post-cell body content see the correct value.
         string?[] CurrentCellXPathBox,
+        // BUG-DUMP-R35-HFCELL: the raw-set PART for the cell named in
+        // CurrentCellXPathBox. "/document" for a body table; the header/footer
+        // part path ("/header[1]") for a header/footer-hosted table. Lets
+        // ResolveRawSetHost target the owning part instead of hardcoding
+        // "/document" — without it, a rich inline SDT in a header/footer table
+        // cell fell through to the lossy typed `add sdt` (dropping run rPr / the
+        // drawing). Set+restored in lockstep with CurrentCellXPathBox.
+        string?[] CurrentCellPartBox,
         // CONSISTENCY(move-range-markers): map from each moveFrom/moveTo run's
         // own w:id to the SHARED pairing id its bracketing range-marker w:name
         // implies (see WordHandler.BuildMovePairIdMap). EmitPlainOrHyperlinkRun
@@ -598,6 +607,7 @@ public static partial class WordBatchEmitter
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
+            CurrentCellPartBox: new string?[1],
             MovePairIds: word.BuildMovePairIdMap(),
             Warnings: warnings);
 

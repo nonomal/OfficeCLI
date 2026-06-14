@@ -464,12 +464,22 @@ public static partial class WordBatchEmitter
                 // EmitParagraph's inline raw-set fallbacks (rich field result,
                 // nested SDT, VML textbox) to append verbatim content into the
                 // correct cell instead of falling back to the lossy typed emit.
-                // Only carried for /document-hosted (body) tables — the same
-                // restriction the cell-SDT raw-set's rawPart uses; header/footer
-                // -hosted cell raw-set targeting is out of scope this round.
-                string? cellRawXPath = containerPath == "/body"
+                // BUG-DUMP-R35-HFCELL: carried for body AND header/footer-hosted
+                // tables. For a header/footer part the hfCtx's TableOrdinalBox is
+                // fresh per part, so `(//w:tbl)[tableOrdinal]` is the part-local
+                // DFS index the raw-set resolves against (same form the cell-SDT
+                // block raw-set already uses with rawPart=containerPath). The
+                // owning part travels alongside in cellRawPart so the cell raw-set
+                // sites below — and ResolveRawSetHost for inline SDTs — target the
+                // header/footer part instead of hardcoding "/document". Other
+                // containers (footnote/endnote parts threaded as "/body") keep the
+                // body form; their cell raw-set targeting is unchanged.
+                bool cellRawAddressable = containerPath == "/body"
+                    || IsHeaderFooterHost(containerPath);
+                string? cellRawXPath = cellRawAddressable
                     ? $"(//w:tbl)[{tableOrdinal}]/w:tr[{r + 1}]/w:tc[{c + 1}]"
                     : null;
+                string cellRawPart = containerPath == "/body" ? "/document" : containerPath;
 
                 // Cell-level tcPr properties (fill, valign, width, borders,
                 // padding, colspan, …) are surfaced on cellNode.Format but
@@ -537,7 +547,7 @@ public static partial class WordBatchEmitter
                             ? new BatchItem
                             {
                                 Command = "raw-set",
-                                Part = "/document",
+                                Part = cellRawPart,
                                 Xpath = $"{cellRawXPath}/w:tcPr",
                                 Action = "append",
                                 Xml = cellMergeXml,
@@ -545,7 +555,7 @@ public static partial class WordBatchEmitter
                             : new BatchItem
                             {
                                 Command = "raw-set",
-                                Part = "/document",
+                                Part = cellRawPart,
                                 Xpath = cellRawXPath,
                                 Action = "prepend",
                                 Xml = $"<w:tcPr>{cellMergeXml}</w:tcPr>",
@@ -694,7 +704,7 @@ public static partial class WordBatchEmitter
                         // paragraph's inline raw-set fallbacks target the right
                         // cell. Re-set per paragraph because a preceding nested
                         // table recursion overwrote the box with its own cell.
-                        if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
+                        if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                         EmitParagraph(word, cc.Path, cellTargetPath, cellParaIdx, items,
                                       autoPresent: !firstParaSeen || isTrailingAutoP, ctx);
                         firstParaSeen = true;
@@ -741,7 +751,7 @@ public static partial class WordBatchEmitter
                             var ccNode = NthChildOfType(cellChildren, "p", "paragraph", planParaIdx);
                             if (ccNode == null) continue;
                             cellParaIdx++;
-                            if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
+                            if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                             EmitParagraph(word, ccNode.Path, cellTargetPath, cellParaIdx, items,
                                           autoPresent: !firstParaSeen, ctx);
                             firstParaSeen = true;
@@ -803,7 +813,7 @@ public static partial class WordBatchEmitter
                                 catch { break; }
                                 if (innerNode == null) break;
                                 cellParaIdx++;
-                                if (ctx != null) ctx.CurrentCellXPathBox[0] = cellRawXPath;
+                                if (ctx != null) { ctx.CurrentCellXPathBox[0] = cellRawXPath; ctx.CurrentCellPartBox[0] = cellRawPart; }
                                 EmitParagraph(word, innerPath, cellTargetPath, cellParaIdx, items,
                                               autoPresent: !firstParaSeen, ctx);
                                 firstParaSeen = true;
@@ -882,7 +892,7 @@ public static partial class WordBatchEmitter
         // cell's content after a nested table) doesn't inherit a stale cell
         // address. A parent cell re-publishes its own XPath before its next
         // paragraph (see the per-paragraph set above), so null here is safe.
-        if (ctx != null) ctx.CurrentCellXPathBox[0] = null;
+        if (ctx != null) { ctx.CurrentCellXPathBox[0] = null; ctx.CurrentCellPartBox[0] = null; }
     }
 
     // BUG-R4 (DBF-R4-02): emit a typed `add equation` (display) targeting a cell

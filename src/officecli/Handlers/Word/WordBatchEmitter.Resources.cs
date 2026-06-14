@@ -2314,6 +2314,14 @@ public static partial class WordBatchEmitter
         // worth preserving verbatim and the typed path can't express it).
         if (sdtXml.Contains("<w:rPr", StringComparison.Ordinal))
             return true;
+        // A content paragraph carrying a pStyle (e.g. a placeholder cover-title
+        // SDT whose inner <w:p> is styled "Title") cannot round-trip through the
+        // flat `add sdt text=` path — AddSdt seeds a default-styled paragraph, so
+        // the pStyle is lost and the placeholder renders at body-text size and
+        // top-of-page position instead of the styled title. Raw-set verbatim so
+        // the inner paragraph style (and the showingPlcHdr placeholder) survive.
+        if (sdtXml.Contains("<w:pStyle", StringComparison.Ordinal))
+            return true;
         return sdtXml.Contains("<w:hyperlink", StringComparison.Ordinal)
             || sdtXml.Contains("<w:fldChar", StringComparison.Ordinal)
             || sdtXml.Contains("w:instrText", StringComparison.Ordinal)

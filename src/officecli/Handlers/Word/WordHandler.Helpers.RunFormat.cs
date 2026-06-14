@@ -1053,9 +1053,13 @@ public partial class WordHandler
                 // (see WordHandler.Navigation.cs); Add/Set previously
                 // routed to tab-stop SetElementTabStop only.
                 props.RemoveAllChildren<Position>();
-                if (!string.IsNullOrEmpty(value)
-                    && int.TryParse(value, out var posVal))
+                if (!string.IsNullOrEmpty(value))
+                {
+                    int posVal = value.EndsWith("pt", StringComparison.OrdinalIgnoreCase)
+                        ? (int)Math.Round(ParseHelpers.SafeParseDouble(value[..^2], "position") * 2, MidpointRounding.AwayFromZero)
+                        : (int)Math.Round(ParseHelpers.SafeParseDouble(value, "position"), MidpointRounding.AwayFromZero);
                     InsertRunPropInSchemaOrder(props, new Position { Val = posVal.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+                }
                 return true;
             case "lang" or "lang.latin" or "lang.val":
             case "lang.ea" or "lang.eastasia" or "lang.eastasian":

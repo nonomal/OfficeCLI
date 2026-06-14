@@ -1653,8 +1653,14 @@ public partial class WordHandler
         var posVal = rProps.Position?.Val?.Value;
         if (!string.IsNullOrEmpty(posVal) && int.TryParse(posVal, out var posHalfPt) && posHalfPt != 0)
         {
-            var offsetPt = posHalfPt / 2.0;
-            parts.Add($"vertical-align:{offsetPt:0.###}pt");
+            // Use position:relative;top: rather than vertical-align:<length>:
+            // a length-valued vertical-align expands the inline line box by the
+            // shift amount (an 8pt raise on 11pt text grows the row to ~1000px in
+            // some browsers), which doesn't match Word's rendering. Matches the
+            // super/sub handling above. positive posHalfPt = raise → negative top.
+            var offsetPt = Math.Abs(posHalfPt) / 2.0;
+            var sign = posHalfPt > 0 ? "-" : "";
+            parts.Add($"position:relative;top:{sign}{offsetPt:0.###}pt");
         }
 
         // SmallCaps / AllCaps
@@ -2112,7 +2118,7 @@ public partial class WordHandler
         {
             var wm = tcDir switch
             {
-                "btLr" => "vertical-rl;transform:rotate(180deg)", // read bottom-up
+                "btLr" => "vertical-lr",                            // read bottom-up (left-to-right column axis)
                 "tbRl" => "vertical-rl",                            // read top-down
                 "lrTb" or null => null,                             // default horizontal
                 _ => null,
@@ -2822,6 +2828,7 @@ public partial class WordHandler
         .dropcap-wrap > p:first-child > span {{ line-height: inherit !important; }}
         .equation {{ text-align: center; padding: 0.5em 0; overflow-x: auto; }}
         img {{ max-width: 100%; height: auto; }}
+        img {{ writing-mode: horizontal-tb; }}
         .img-error {{ color: #999; font-style: italic; }}
         table {{ border-collapse: collapse; font-size: {sz}; }}
         td.tsf span, td.tsf div {{ font-size: inherit !important; color: inherit !important; text-align: inherit !important; }}

@@ -2333,7 +2333,10 @@ public partial class WordHandler
                     // Heading 1 etc. carry <w:b/> in their style → keep h1's
                     // browser-default bold.
                     var pStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-                    if (ResolveStyleBold(pStyleId) != true)
+                    // Only force normal when the style chain EXPLICITLY resolves to
+                    // non-bold (false). null = style not in doc → defer to browser
+                    // <hN> bold default instead of stomping it.
+                    if (ResolveStyleBold(pStyleId) == false)
                         hStyle = string.IsNullOrEmpty(hStyle) ? "font-weight:normal" : $"{hStyle};font-weight:normal";
                     if (!string.IsNullOrEmpty(hStyle))
                         sb.Append($" style=\"{hStyle}\"");
@@ -2409,7 +2412,13 @@ public partial class WordHandler
                         continue;
                     }
 
-                    sb.Append("<p");
+                    // Block-level drawings (anchored textboxes / charts / shapes)
+                    // emit float:left <div>s. A <div> inside <p> is invalid HTML
+                    // and browsers auto-close the <p> before the <div>, breaking
+                    // float layout. Promote to <div> when the paragraph contains
+                    // any block-level drawing. CONSISTENCY: mirrors RenderParagraphHtml.
+                    var pTag = HasBlockLevelDrawing(para) ? "div" : "p";
+                    sb.Append("<").Append(pTag);
                     sb.Append($" data-path=\"/body/p[{wParaCount}]\"");
                     // Add CSS class for TOC paragraphs (suppress hyperlink styling, enable dot leaders)
                     var paraStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
@@ -2440,8 +2449,8 @@ public partial class WordHandler
                     var lenBefore = sb.Length;
                     RenderParagraphContentHtml(sb, para);
                     if (sb.Length == lenBefore) sb.Append("&nbsp;");
-                    sb.AppendLine("</p>");
-                    AppendW14ReflectionBlock(sb, para, "p", pStyle);
+                    sb.Append("</").Append(pTag).AppendLine(">");
+                    AppendW14ReflectionBlock(sb, para, pTag, pStyle);
                 }
             }
             else if (element.LocalName == "oMathPara" || element is M.Paragraph)

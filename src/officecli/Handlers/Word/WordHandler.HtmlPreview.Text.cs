@@ -779,7 +779,10 @@ public partial class WordHandler
             // with no explicit underline state stays underlined.)
             var aStyle = HyperlinkUnderlineExplicitlyNone(hyperlink, para)
                 ? " style=\"text-decoration:none\"" : "";
-            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}{aStyle}>");
+            var tooltip = hyperlink.Tooltip?.Value;
+            var titleAttr = !string.IsNullOrEmpty(tooltip)
+                ? $" title=\"{HtmlEncodeAttr(tooltip)}\"" : "";
+            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}{titleAttr}{aStyle}>");
         }
         foreach (var descendant in hyperlink.Descendants<Run>())
             RenderRunHtml(sb, descendant, para);

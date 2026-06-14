@@ -45,14 +45,23 @@ public partial class WordHandler
     /// <summary>Check if paragraph contains any drawing that renders as block-level HTML (text box, chart, shape).</summary>
     private static bool HasBlockLevelDrawing(Paragraph para)
     {
-        // Check all descendants (including inside mc:AlternateContent)
-        foreach (var drawing in para.Descendants<Drawing>())
+        // LocalName-based sweep over all descendants. Typed Descendants<Drawing>()
+        // misses w:drawing nodes whose AddTextbox emit re-declared xmlns:w inline
+        // (parser treats them as untyped). LocalName matches across both shapes.
+        foreach (var e in para.Descendants())
         {
-            if (HasGroupOrShape(drawing)) return true;
-            if (drawing.Descendants().Any(e => e.LocalName == "chart")) return true;
+            var ln = e.LocalName;
+            if (ln == "wsp" || ln == "wgp" || ln == "chart" || ln == "txbxContent")
+                return true;
         }
-        // Also check for text box content via localName (catches mc:AlternateContent cases)
-        if (para.Descendants().Any(e => e.LocalName == "txbxContent"))
+        // Some drawings ship with inline xmlns:w re-declaration on <w:drawing>,
+        // which causes the SDK to materialize them as untyped OpenXmlUnknownElement
+        // with no child Descendants() walk past the drawing root. Fall back to
+        // raw OuterXml substring scan so inline-redeclared drawings still register.
+        var rawOuter = para.OuterXml;
+        if (rawOuter.IndexOf("<wps:wsp", StringComparison.Ordinal) >= 0
+            || rawOuter.IndexOf(":txbxContent", StringComparison.Ordinal) >= 0
+            || rawOuter.IndexOf("<wpg:", StringComparison.Ordinal) >= 0)
             return true;
         return false;
     }
@@ -852,9 +861,17 @@ public partial class WordHandler
                 floatImages = null;
             }
 
-            foreach (var para in txbx.Descendants<Paragraph>())
+            // Walk txbxContent's direct children — Descendants<Paragraph>()
+            // alone would skip <w:tbl> entirely (its row cell paragraphs would
+            // surface as bare <p>s, losing the table structure). Mirror the
+            // body-render pattern: Paragraph → RenderParagraphHtml,
+            // Table → RenderTableHtml.
+            foreach (var child in txbx.ChildElements)
             {
-                RenderParagraphHtml(sb, para);
+                if (child is Paragraph para)
+                    RenderParagraphHtml(sb, para);
+                else if (child is Table tbl)
+                    RenderTableHtml(sb, tbl);
             }
             sb.Append("</div>");
         }

@@ -80,6 +80,62 @@ public partial class WordHandler
         return spans;
     }
 
+    /// <summary>
+    /// Same cross-paragraph field-span detection as
+    /// <see cref="GetCrossParagraphFieldSpanRanges"/>, but scoped to the DIRECT
+    /// block children of a block SDT's sdtContent (a TOC content control whose
+    /// cached field straddles all its entry paragraphs). The SDT-unwrap fallback
+    /// re-emits each inner paragraph through the per-paragraph typed path, which
+    /// — exactly like the body path — would collapse the opener and drop the
+    /// field's first cached entry. Returns inclusive 1-based ranges in the SDT's
+    /// paragraph-only ordinal (matching the unwrap's `/sdt[N]/p[K]` counting), so
+    /// the unwrap can raw-pass each span member verbatim instead. Empty when the
+    /// SDT carries no cross-paragraph field.
+    /// </summary>
+    internal List<(int Start, int End)> GetSdtContentCrossParagraphFieldSpanRanges(string sdtPath)
+    {
+        var spans = new List<(int, int)>();
+        OpenXmlElement? element;
+        try { element = NavigateToElement(ParsePath(sdtPath)); }
+        catch { return spans; }
+        var content = (element as SdtBlock)?.SdtContentBlock;
+        if (content == null) return spans;
+
+        int pos = 0, depth = 0, spanStart = -1;
+        foreach (var el in content.ChildElements)
+        {
+            if (el is Paragraph p)
+            {
+                if (IsOMathParaWrapperParagraph(p)) continue;
+                pos++;
+                int begins = 0, ends = 0;
+                foreach (var fc in p.Descendants<FieldChar>())
+                {
+                    if (fc.FieldCharType?.HasValue != true) continue;
+                    var t = fc.FieldCharType.InnerText;
+                    if (t == "begin") begins++;
+                    else if (t == "end") ends++;
+                }
+                if (spanStart < 0)
+                {
+                    if (begins > ends) { spanStart = pos; depth = begins - ends; }
+                }
+                else
+                {
+                    depth += begins - ends;
+                    if (depth <= 0) { spans.Add((spanStart, pos)); depth = 0; spanStart = -1; }
+                }
+            }
+            else if (spanStart >= 0)
+            {
+                // A non-paragraph child interrupts the span — abandon it (the
+                // members fall back to the per-paragraph emit, degraded but safe).
+                depth = 0; spanStart = -1;
+            }
+        }
+        return spans;
+    }
+
     // CONSISTENCY(field-cache-stale): true when <paramref name="run"/> sits
     // between an owning field's <w:fldChar w:fldCharType="separate"/> and
     // <w:fldChar w:fldCharType="end"/> — i.e. it is the cached result run

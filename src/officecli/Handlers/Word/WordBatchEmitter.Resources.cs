@@ -2061,13 +2061,45 @@ public static partial class WordBatchEmitter
                 // no addressable block children at all.
                 int sdtParaOrdinal = 0, sdtTblOrdinal = 0, sdtNestedOrdinal = 0;
                 bool sdtEmittedAny = false;
+                // A cross-paragraph field (a cached TOC inside this content
+                // control) must NOT be re-emitted paragraph-by-paragraph — the
+                // opener's fldChar(begin) has no matching end in its own
+                // paragraph, so the typed emit collapses it and drops the first
+                // cached entry. Raw-pass every paragraph of such a span verbatim,
+                // mirroring the body walk's EmitCrossParagraphFieldMember.
+                var sdtSpanEnd = new Dictionary<int, int>();
+                foreach (var (s, e) in word.GetSdtContentCrossParagraphFieldSpanRanges(sourcePath))
+                    sdtSpanEnd[s] = e;
+                int? activeSdtSpanEnd = null;
                 foreach (var kind in EnumerateSdtContentDirectChildren(rawXml!))
                 {
                     if (kind == "p")
                     {
                         sdtParaOrdinal++;
-                        EmitParagraph(word, $"{sourcePath}/p[{sdtParaOrdinal}]", "/body", 1,
-                                      items, autoPresent: false, ctx);
+                        if (activeSdtSpanEnd == null && sdtSpanEnd.TryGetValue(sdtParaOrdinal, out var spEnd))
+                            activeSdtSpanEnd = spEnd;
+                        if (activeSdtSpanEnd != null)
+                        {
+                            var rawP = word.GetElementXml($"{sourcePath}/p[{sdtParaOrdinal}]");
+                            if (!string.IsNullOrEmpty(rawP))
+                                items.Add(new BatchItem
+                                {
+                                    Command = "raw-set",
+                                    Part = "/document",
+                                    Xpath = "//w:body/w:sectPr",
+                                    Action = "insertbefore",
+                                    Xml = rawP
+                                });
+                            else
+                                EmitParagraph(word, $"{sourcePath}/p[{sdtParaOrdinal}]", "/body", 1,
+                                              items, autoPresent: false, ctx);
+                            if (sdtParaOrdinal >= activeSdtSpanEnd.Value) activeSdtSpanEnd = null;
+                        }
+                        else
+                        {
+                            EmitParagraph(word, $"{sourcePath}/p[{sdtParaOrdinal}]", "/body", 1,
+                                          items, autoPresent: false, ctx);
+                        }
                         sdtEmittedAny = true;
                     }
                     else if (kind == "tbl")

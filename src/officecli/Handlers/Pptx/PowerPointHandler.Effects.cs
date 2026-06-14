@@ -896,13 +896,19 @@ public partial class PowerPointHandler
             "dkedge" or "darkedge" => Drawing.PresetMaterialTypeValues.DarkEdge,
             "softedge" => Drawing.PresetMaterialTypeValues.SoftEdge,
             "flat" => Drawing.PresetMaterialTypeValues.Flat,
-            "wire" or "wireframe" => Drawing.PresetMaterialTypeValues.LegacyWireframe,
+            "wire" or "wireframe" or "legacywireframe" => Drawing.PresetMaterialTypeValues.LegacyWireframe,
             "powder" => Drawing.PresetMaterialTypeValues.Powder,
             "translucentpowder" => Drawing.PresetMaterialTypeValues.TranslucentPowder,
             "clear" => Drawing.PresetMaterialTypeValues.Clear,
             "softmetal" => Drawing.PresetMaterialTypeValues.SoftMetal,
             "matte" => Drawing.PresetMaterialTypeValues.Matte,
-            _ => throw new ArgumentException($"Invalid material value: '{value}'. Valid values: warmmatte, plastic, metal, darkedge, flat, wire, powder, translucentpowder, clear, softmetal, matte.")
+            // Legacy 3D presets (ST_PresetMaterialType, the legacy* tokens). Get
+            // emits sp3d.PresetMaterial.InnerText verbatim, so these raw OOXML
+            // tokens must round-trip back through Set/Add.
+            "legacymatte" => Drawing.PresetMaterialTypeValues.LegacyMatte,
+            "legacyplastic" => Drawing.PresetMaterialTypeValues.LegacyPlastic,
+            "legacymetal" => Drawing.PresetMaterialTypeValues.LegacyMetal,
+            _ => throw new ArgumentException($"Invalid material value: '{value}'. Valid values: warmmatte, plastic, metal, darkedge, flat, wire, powder, translucentpowder, clear, softmetal, matte, legacymatte, legacyplastic, legacymetal, legacywireframe.")
         };
     }
 

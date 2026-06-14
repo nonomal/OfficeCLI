@@ -536,15 +536,16 @@ public partial class WordHandler
         para.AppendChild(separateRun);
 
         // Result run
+        Run? resultRun = null;
         if (!string.IsNullOrEmpty(text))
         {
-            var resultRun = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
+            resultRun = new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
             para.AppendChild(resultRun);
         }
         else if (!textPinnedEmpty)
         {
             // Add default placeholder for FORMTEXT
-            var resultRun = new Run(new Text("\u00A0") { Space = SpaceProcessingModeValues.Preserve }); // non-breaking space
+            resultRun = new Run(new Text("\u00A0") { Space = SpaceProcessingModeValues.Preserve }); // non-breaking space
             para.AppendChild(resultRun);
         }
 
@@ -553,8 +554,15 @@ public partial class WordHandler
         para.AppendChild(endRun);
 
         // Field-run formatting (theme/literal font slots, size, bold, color):
-        // stamp the forwarded rPr onto every run of the rebuilt field so the
-        // form renders in the host face instead of the docDefaults font.
+        // stamp the forwarded rPr onto THIS field's own runs so the form renders
+        // in the host face instead of the docDefaults font.
+        // BUG-DUMP-R49-FFSCOPE: stamp ONLY the runs this call created (begin /
+        // instr / separate / result / end). The old loop walked
+        // `para.Elements<Run>()` and stamped every run carrying a <w:t> — so a
+        // form field appended to a paragraph that ALREADY held styled text (a
+        // Heading1 title run + an inline Date field) overwrote those sibling
+        // runs' font/size, dropping their character-style size (a 16pt heading
+        // re-rendered at the field's 10pt). Scope the stamp to the field's runs.
         {
             var ffFontKeys = new[]
             {
@@ -569,12 +577,11 @@ public partial class WordHandler
                 .ToList();
             if (ffFmt.Count > 0)
             {
-                foreach (var ffRun in para.Elements<Run>())
+                var fieldRuns = new List<Run> { beginRun, instrRun, separateRun };
+                if (resultRun != null) fieldRuns.Add(resultRun);
+                fieldRuns.Add(endRun);
+                foreach (var ffRun in fieldRuns)
                 {
-                    if (ffRun.GetFirstChild<FieldChar>() == null
-                        && ffRun.GetFirstChild<FieldCode>() == null
-                        && ffRun.GetFirstChild<Text>() == null)
-                        continue;
                     var rp = ffRun.RunProperties ?? ffRun.PrependChild(new RunProperties());
                     foreach (var (k, v) in ffFmt)
                         ApplyRunFormatting(rp, k, v);

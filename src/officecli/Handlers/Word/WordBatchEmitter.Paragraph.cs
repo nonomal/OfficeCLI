@@ -1751,6 +1751,38 @@ public static partial class WordBatchEmitter
     private static bool TryEmitFieldRun(WordHandler word, DocumentNode run, string paraTargetPath, string parentPath, List<BatchItem> items, BodyEmitContext? ctx = null)
     {
         if (run.Type != "field") return false;
+        // BUG-DUMP-R28-INCLUDEPICTURE: a marker-only synth emitted by
+        // CollapseFieldChains when it decomposed a drawing-result field
+        // (INCLUDEPICTURE). It carries the source paths of one contiguous run of
+        // fldChar/instrText (and any text result) runs to round-trip verbatim via
+        // raw-set, interleaved with the real `picture` nodes the same decompose
+        // produced. The markers carry no relationships, so the append is safe.
+        if (run.Format.TryGetValue("_fieldMarkerRaw", out var fmr) && fmr is bool fmrB && fmrB)
+        {
+            var markerPaths = run.Format.TryGetValue("_markerSlicePaths", out var mspObj)
+                ? mspObj as List<string> : null;
+            if (markerPaths is { Count: > 0 } && ResolveRawSetHost(parentPath, ctx) is { } markerHost)
+            {
+                var sb = new System.Text.StringBuilder();
+                foreach (var mp in markerPaths)
+                {
+                    var mx = word.GetElementXml(mp);
+                    if (!string.IsNullOrEmpty(mx)) sb.Append(mx);
+                }
+                if (sb.Length > 0)
+                {
+                    items.Add(new BatchItem
+                    {
+                        Command = "raw-set",
+                        Part = markerHost.Part,
+                        Xpath = markerHost.XPath,
+                        Action = "append",
+                        Xml = sb.ToString()
+                    });
+                }
+            }
+            return true;
+        }
         // BUG-DUMP-R26-2: a field whose cached result has multiple distinctly-
         // formatted runs can't round-trip through `add field` (single-rPr model
         // collapses the runs and leaks the first run's bold onto the fldChar

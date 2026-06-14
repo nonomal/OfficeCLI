@@ -165,6 +165,14 @@ public static partial class WordBatchEmitter
             // distinctly-formatted run, we round-trip the whole field chain
             // verbatim via raw-set instead (see TryEmitFieldRun).
             var resultRuns = new List<DocumentNode>();
+            // BUG-DUMP-R28-INCLUDEPICTURE: a field whose cached result is a
+            // DRAWING (the canonical case is INCLUDEPICTURE, whose separate→end
+            // span holds a <w:drawing>/<pic:pic> logo) surfaces the drawing as a
+            // type="picture" child. The typed `add field` path has no model for a
+            // drawing result, so it was silently dropped — the rendered logo
+            // vanished. Collect every drawing result child so the field can be
+            // decomposed into raw fldChar/instrText markers + a real picture emit.
+            var resultPictureNodes = new List<DocumentNode>();
             // BUG-DUMP-FIELDVALIGN: field-wide vertical alignment (superscript /
             // subscript) is uniform across EVERY run of the field — a citation
             // mark whose begin/instr/separate/result/end runs all carry the same
@@ -256,6 +264,11 @@ public static partial class WordBatchEmitter
                         else if (k.Format.TryGetValue("subscript", out var subv) && subv is bool sbb && sbb)
                             fieldVertAlign = "subscript";
                     }
+                }
+                else if (k.Type == "picture" && depth == 1)
+                {
+                    // BUG-DUMP-R28-INCLUDEPICTURE: the cached result drawing.
+                    resultPictureNodes.Add(k);
                 }
             }
             if (end < 0)
@@ -363,6 +376,54 @@ public static partial class WordBatchEmitter
                         ffSynth.Format[fk] = fv;
                 }
                 result.Add(ffSynth);
+                i = end;
+                continue;
+            }
+            // BUG-DUMP-R28-INCLUDEPICTURE: the cached result holds a drawing
+            // (INCLUDEPICTURE \* MERGEFORMATINET — a header logo fetched from a
+            // URL and cached as an inline <w:drawing>). The typed `add field`
+            // path can only express text results, so the picture was dropped and
+            // the logo disappeared on round-trip. Decompose the begin..end slice
+            // into ordered emit units: each fldChar/instrText marker (and any
+            // text result run) rides a verbatim raw-set; each drawing result run
+            // is re-emitted as a real `picture` node so the picture pipeline
+            // ships the image bytes (data URI) and rebinds the blip rel on
+            // replay. Order is preserved by appending each unit to the same host
+            // paragraph in sequence, so the live INCLUDEPICTURE field structure
+            // (begin/instr/separate/<drawing>/end) AND the rendered logo both
+            // survive. Markers carry no relationships, so the raw-set is safe.
+            if (resultPictureNodes.Count > 0)
+            {
+                var pendingMarkers = new List<string>();
+                void FlushMarkers()
+                {
+                    if (pendingMarkers.Count == 0) return;
+                    result.Add(new DocumentNode
+                    {
+                        Path = c.Path,
+                        Type = "field",
+                        Format = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["_fieldMarkerRaw"] = true,
+                            ["_markerSlicePaths"] = new List<string>(pendingMarkers),
+                        }
+                    });
+                    pendingMarkers.Clear();
+                }
+                for (int s = i; s <= end; s++)
+                {
+                    var sc = children[s];
+                    if (sc.Type == "picture")
+                    {
+                        FlushMarkers();
+                        result.Add(sc);
+                    }
+                    else if (!string.IsNullOrEmpty(sc.Path))
+                    {
+                        pendingMarkers.Add(sc.Path);
+                    }
+                }
+                FlushMarkers();
                 i = end;
                 continue;
             }

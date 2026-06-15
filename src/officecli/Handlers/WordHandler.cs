@@ -315,6 +315,43 @@ public partial class WordHandler : IDocumentHandler
         }
     }
 
+    /// <summary>
+    /// Concatenated OuterXml of the contiguous run of sibling elements from
+    /// <paramref name="firstPath"/> to <paramref name="lastPath"/> (inclusive).
+    /// The dump→batch nested-field / rich-field-result raw-set walks a field's
+    /// begin..end slice; that slice may interleave bookmarkStart / bookmarkEnd
+    /// children whose query paths (indexed by w:id) don't round-trip through
+    /// NavigateToElement (positional indexing). Resolving only the begin and end
+    /// runs — which always navigate — and then iterating the parent's actual
+    /// child elements between them captures every interleaved element verbatim,
+    /// regardless of whether each has an individually-navigable path. Returns
+    /// null when either endpoint fails to resolve or they aren't siblings.
+    /// </summary>
+    public string? GetSiblingRangeXml(string firstPath, string lastPath)
+    {
+        try
+        {
+            var first = NavigateToElement(ParsePath(firstPath));
+            var last = NavigateToElement(ParsePath(lastPath));
+            if (first == null || last == null) return null;
+            if (!ReferenceEquals(first.Parent, last.Parent) || first.Parent == null) return null;
+            var sb = new System.Text.StringBuilder();
+            bool collecting = false;
+            foreach (var child in first.Parent.ChildElements)
+            {
+                if (ReferenceEquals(child, first)) collecting = true;
+                if (collecting) sb.Append(child.OuterXml);
+                if (ReferenceEquals(child, last)) return sb.Length > 0 ? sb.ToString() : null;
+            }
+            // last never encountered after first — order inverted or detached.
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public (byte[] Bytes, string ContentType)? GetImageBinary(string runPath)
     {
         // Parse + navigate via the same machinery Get/Set use so paraId

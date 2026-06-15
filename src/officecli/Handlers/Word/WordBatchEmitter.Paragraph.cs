@@ -1799,12 +1799,26 @@ public static partial class WordBatchEmitter
         {
             var sb = new System.Text.StringBuilder();
             bool ok = true;
-            foreach (var p in spStr.Split('\n'))
+            var rfSlice = spStr.Split('\n').Where(p => !string.IsNullOrEmpty(p)).ToList();
+            foreach (var p in rfSlice)
             {
-                if (string.IsNullOrEmpty(p)) continue;
                 var xml = word.GetElementXml(p);
                 if (string.IsNullOrEmpty(xml)) { ok = false; break; }
                 sb.Append(xml);
+            }
+            // BUG-DUMP-R56-NESTEDFORMFIELD: same bookmark-in-slice fragility as
+            // the nested-field branch — fall back to a contiguous sibling-range
+            // resolve when a per-child path (e.g. a bookmark indexed by w:id)
+            // doesn't navigate.
+            if (!ok && rfSlice.Count > 0)
+            {
+                var rangeXml = word.GetSiblingRangeXml(rfSlice[0], rfSlice[^1]);
+                if (!string.IsNullOrEmpty(rangeXml))
+                {
+                    sb.Clear();
+                    sb.Append(rangeXml);
+                    ok = true;
+                }
             }
             if (ok && sb.Length > 0)
             {
@@ -1930,6 +1944,25 @@ public static partial class WordBatchEmitter
                     var rx = word.GetElementXml(sp);
                     if (string.IsNullOrEmpty(rx)) { allResolved = false; break; }
                     sb.Append(rx);
+                }
+                // BUG-DUMP-R56-NESTEDFORMFIELD: the slice may interleave
+                // bookmarkStart/bookmarkEnd children (the inner field carries a
+                // form-field bookmark), whose query paths (indexed by w:id) don't
+                // round-trip through NavigateToElement — per-child resolution then
+                // bails to the lossy cached-text fallback, dropping the nested
+                // FORMTEXT structure, its bookmark AND the field-run formatting
+                // (bold/size/font). Resolve the contiguous begin..end sibling
+                // range from the parent instead; it captures every interleaved
+                // element verbatim regardless of individual path navigability.
+                if (!allResolved)
+                {
+                    var rangeXml = word.GetSiblingRangeXml(slicePaths[0], slicePaths[^1]);
+                    if (!string.IsNullOrEmpty(rangeXml))
+                    {
+                        sb.Clear();
+                        sb.Append(rangeXml);
+                        allResolved = true;
+                    }
                 }
                 if (allResolved && sb.Length > 0)
                 {

@@ -40,6 +40,12 @@ public static partial class PptxBatchEmitter
         if (fullTable.Children == null) return;
         var rows = fullTable.Children.Where(c => c.Type == "tr").ToList();
 
+        // Collect external-hyperlink rIds referenced by any cell's verbatim
+        // txBodyRaw. A cell that links a run to a URL keeps <a:hlinkClick
+        // r:id="rIdN"> in the raw body, but the typed emit never re-creates that
+        // external relationship — the rebuilt slide dangled. Carry each below.
+        var cellHlinkRids = new HashSet<string>(StringComparer.Ordinal);
+
         int rIdx = 0;
         foreach (var row in rows)
         {
@@ -106,6 +112,12 @@ public static partial class PptxBatchEmitter
                 // rebuild bare paragraphs and clobber it. Suppress text= in that
                 // case and let the txBodyRaw set op restore the body verbatim.
                 bool hasRawBody = cellProps.ContainsKey("txBodyRaw");
+                if (hasRawBody && cellProps.TryGetValue("txBodyRaw", out var rawBody) && rawBody != null)
+                {
+                    foreach (System.Text.RegularExpressions.Match hm in
+                             System.Text.RegularExpressions.Regex.Matches(rawBody, @"<a:hlink(?:Click|Hover)\b[^>]*r:id=""([^""]+)"""))
+                        cellHlinkRids.Add(hm.Groups[1].Value);
+                }
                 // Set tc accepts text= for replacing the cell's text body.
                 if (hasRawBody)
                 {
@@ -122,6 +134,38 @@ public static partial class PptxBatchEmitter
                     Path = $"{tablePath}/tr[{rIdx}]/tc[{cIdx}]",
                     Props = cellProps,
                 });
+            }
+        }
+
+        // Carry external hyperlink rels referenced by the cells' verbatim
+        // txBodyRaw so <a:hlinkClick r:id="rIdN"> resolves instead of dangling.
+        // Host is the slide (cell hlink rels live on the SlidePart); pin the
+        // source rId + URL. Mirrors the layout/notes external-hyperlink carrier.
+        if (cellHlinkRids.Count > 0)
+        {
+            var slideM = System.Text.RegularExpressions.Regex.Match(parentSlidePath, @"^/slide\[(\d+)\]");
+            if (slideM.Success)
+            {
+                var slideHostPath = $"/slide[{slideM.Groups[1].Value}]";
+                try
+                {
+                    foreach (var (relId, target) in
+                             ppt.GetSlideExternalHyperlinksByRelId(int.Parse(slideM.Groups[1].Value), cellHlinkRids))
+                    {
+                        items.Add(new BatchItem
+                        {
+                            Command = "add-part",
+                            Parent = slideHostPath,
+                            Type = "hyperlink",
+                            Props = new Dictionary<string, string>
+                            {
+                                ["rid"] = relId,
+                                ["target"] = target,
+                            },
+                        });
+                    }
+                }
+                catch { /* best-effort */ }
             }
         }
     }

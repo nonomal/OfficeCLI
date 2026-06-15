@@ -2155,6 +2155,34 @@ public partial class PowerPointHandler : IDocumentHandler
     }
 
     /// <summary>
+    /// External (TargetMode="External") hyperlink relationships on a slide whose
+    /// relationship id is one of <paramref name="relIds"/>. A table cell (and
+    /// other raw-passthrough content) is replayed via verbatim txBodyRaw that
+    /// keeps <c>&lt;a:hlinkClick r:id="rIdN"&gt;</c> pointing at a URL; the typed
+    /// emit never re-creates that external relationship, so the rebuilt slide
+    /// kept a dangling rId. Surfaced as (rId, target) so the emitter pins each
+    /// via add-part hyperlink. Scoped to the requested rIds (the ones the raw
+    /// body actually references) to avoid re-creating links the typed `link=`
+    /// path already rebuilt. Mirrors <see cref="GetNoteSlideExternalHyperlinks"/>.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetSlideExternalHyperlinksByRelId(
+        int slideIdx, IReadOnlyCollection<string> relIds)
+    {
+        var result = new List<(string, string)>();
+        if (relIds.Count == 0) return result;
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count) return result;
+        var slide = slideParts[slideIdx - 1];
+        var wanted = new HashSet<string>(relIds, StringComparer.Ordinal);
+        foreach (var rel in slide.HyperlinkRelationships)
+        {
+            if (rel.IsExternal && wanted.Contains(rel.Id))
+                result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
+    /// <summary>
     /// ImageParts on a slide whose relationship id is one of <paramref name="relIds"/>.
     /// Used by PptxBatchEmitter.EmitRawSlideBgSlice so a slide-level
     /// <c>&lt;p:bg&gt;&lt;p:bgPr&gt;&lt;a:blipFill&gt;&lt;a:blip r:embed="rIdN"&gt;</c>

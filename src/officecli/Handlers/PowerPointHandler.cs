@@ -717,6 +717,9 @@ public partial class PowerPointHandler : IDocumentHandler
                 // Pictures embedded in the diagram are referenced from the data
                 // part's own .rels; re-attach them with pinned rIds.
                 AttachDiagramImages(dataPart, properties, "dataImage");
+                // External hyperlinks on diagram nodes (<a:hlinkClick r:id>) live
+                // on the data part's own .rels; re-add with pinned rIds.
+                AttachDiagramHyperlinks(dataPart, properties, "dataHlink");
                 WriteDiagramPartXml(layoutPart, layoutXml,
                     () => new DocumentFormat.OpenXml.Drawing.Diagrams.LayoutDefinition());
                 WriteDiagramPartXml(colorsPart, colorsXml,
@@ -744,6 +747,7 @@ public partial class PowerPointHandler : IDocumentHandler
                     // The DSP cached drawing re-references the same pictures for
                     // rendering via its own .rels; re-attach with pinned rIds.
                     AttachDiagramImages(drawingPart, properties, "drawingImage");
+                    AttachDiagramHyperlinks(drawingPart, properties, "drawingHlink");
                 }
 
                 // Encode all four rIds in the RelId field — callers (batch
@@ -1867,6 +1871,24 @@ public partial class PowerPointHandler : IDocumentHandler
         }
     }
 
+    // Re-add external hyperlink relationships on a diagram data / drawing part
+    // with pinned rIds, so a diagram node's <a:hlinkClick r:id> resolves on
+    // replay instead of dangling. Numbered keys {prefix}{k}.rid / .target.
+    private static void AttachDiagramHyperlinks(OpenXmlPart host, Dictionary<string, string>? properties, string prefix)
+    {
+        if (properties == null) return;
+        for (int k = 0; ; k++)
+        {
+            if (!properties.TryGetValue($"{prefix}{k}.rid", out var rid) || string.IsNullOrEmpty(rid))
+                break;
+            if (!properties.TryGetValue($"{prefix}{k}.target", out var target) || string.IsNullOrEmpty(target))
+                continue;
+            if (host.HyperlinkRelationships.Any(r => r.Id == rid)) continue; // idempotent
+            try { host.AddHyperlinkRelationship(new Uri(target, UriKind.RelativeOrAbsolute), true, rid); }
+            catch { /* malformed URI — skip rather than abort the whole add */ }
+        }
+    }
+
     public List<ValidationError> Validate() => RawXmlHelper.ValidateDocument(_doc, _filePath);
 
     public void Save()
@@ -2531,7 +2553,26 @@ public partial class PowerPointHandler : IDocumentHandler
         // with pinned rIds their r:embed references dangle and PowerPoint refuses
         // the deck (0x80070570). Empty when the SmartArt carries no pictures.
         IReadOnlyList<MasterImageInfo> DataImages,
-        IReadOnlyList<MasterImageInfo> DrawingImages);
+        IReadOnlyList<MasterImageInfo> DrawingImages,
+        // External hyperlink relationships on the data part and the DSP drawing
+        // part's OWN .rels — a diagram node can carry an <a:hlinkClick r:id> to
+        // an external URL. add-part smartart recreates both parts empty, so
+        // without re-adding these external relationships with pinned rIds their
+        // r:id dangles and PowerPoint refuses the deck (0x80070570). Empty when
+        // the SmartArt carries no hyperlinks.
+        IReadOnlyList<(string RelId, string Target)> DataHyperlinks,
+        IReadOnlyList<(string RelId, string Target)> DrawingHyperlinks);
+
+    // External (TargetMode="External") hyperlink relationships on a part's own
+    // .rels, surfaced as (rId, target-uri). Mirrors GetLayoutExternalHyperlinks
+    // for any OpenXmlPartContainer host (diagram data / drawing parts).
+    private static IReadOnlyList<(string RelId, string Target)> ReadExternalHyperlinksOf(OpenXmlPart host)
+    {
+        var result = new List<(string, string)>();
+        foreach (var rel in host.HyperlinkRelationships)
+            if (rel.IsExternal) result.Add((rel.Id, rel.Uri.OriginalString));
+        return result;
+    }
 
     // Enumerate the ImageParts directly attached to a part (its own .rels),
     // surfaced as (rId, content-type, base64). Mirrors GetMasterImageParts but
@@ -2611,6 +2652,8 @@ public partial class PowerPointHandler : IDocumentHandler
             string? drawingXml = null, drawingRelId = null;
             IReadOnlyList<MasterImageInfo> dataImages = Array.Empty<MasterImageInfo>();
             IReadOnlyList<MasterImageInfo> drawingImages = Array.Empty<MasterImageInfo>();
+            IReadOnlyList<(string, string)> dataHlinks = Array.Empty<(string, string)>();
+            IReadOnlyList<(string, string)> drawingHlinks = Array.Empty<(string, string)>();
             try
             {
                 if (slidePart.GetPartById(dRid) is DiagramDataPart ddp)
@@ -2618,6 +2661,8 @@ public partial class PowerPointHandler : IDocumentHandler
                     // Pictures embedded in the diagram (point-level blipFills)
                     // live as ImageParts on the data part's own .rels.
                     try { dataImages = ReadImagePartsOf(ddp); } catch { }
+                    // External hyperlinks on diagram nodes live as hyperlink rels.
+                    try { dataHlinks = ReadExternalHyperlinksOf(ddp); } catch { }
                     const string dspNs = "http://schemas.microsoft.com/office/drawing/2008/diagram";
                     var ext = ddp.DataModelRoot?.Descendants().FirstOrDefault(e =>
                         e.LocalName == "dataModelExt" && e.NamespaceUri == dspNs);
@@ -2635,6 +2680,7 @@ public partial class PowerPointHandler : IDocumentHandler
                                 // The DSP cached drawing re-references the same
                                 // pictures for rendering via its own .rels.
                                 try { drawingImages = ReadImagePartsOf(drawingPart); } catch { }
+                                try { drawingHlinks = ReadExternalHyperlinksOf(drawingPart); } catch { }
                                 using var s = drawingPart.GetStream(FileMode.Open, FileAccess.Read);
                                 using var r = new StreamReader(s);
                                 drawingXml = r.ReadToEnd();
@@ -2662,7 +2708,8 @@ public partial class PowerPointHandler : IDocumentHandler
                 DataRelId: dRid, LayoutRelId: lRid, ColorsRelId: cRid, QuickStyleRelId: qRid,
                 DataXml: dXml, LayoutXml: lXml, ColorsXml: cXml, QuickStyleXml: qXml,
                 DrawingXml: drawingXml, DrawingRelId: drawingRelId,
-                DataImages: dataImages, DrawingImages: drawingImages));
+                DataImages: dataImages, DrawingImages: drawingImages,
+                DataHyperlinks: dataHlinks, DrawingHyperlinks: drawingHlinks));
         }
         return result;
     }

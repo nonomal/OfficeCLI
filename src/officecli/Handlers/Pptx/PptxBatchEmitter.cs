@@ -1688,6 +1688,11 @@ public static partial class PptxBatchEmitter
             // reflection serialization for a nested image list).
             EmitDiagramImageProps(saProps, "dataImage", sa.DataImages);
             EmitDiagramImageProps(saProps, "drawingImage", sa.DrawingImages);
+            // External hyperlinks on diagram nodes (data + DSP drawing parts):
+            // carry (rId, target) so replay re-adds the relationship and the
+            // verbatim <a:hlinkClick r:id> resolves instead of dangling.
+            EmitDiagramHyperlinkProps(saProps, "dataHlink", sa.DataHyperlinks);
+            EmitDiagramHyperlinkProps(saProps, "drawingHlink", sa.DrawingHyperlinks);
             items.Add(new BatchItem
             {
                 Command = "add-part",
@@ -1738,6 +1743,20 @@ public static partial class PptxBatchEmitter
             props[$"{prefix}{k}.rid"] = images[k].RelId;
             props[$"{prefix}{k}.ct"] = images[k].ContentType;
             props[$"{prefix}{k}.data"] = images[k].Base64Data;
+        }
+    }
+
+    // Flatten a diagram part's external hyperlink relationships into numbered
+    // props the add-part smartart handler reads back (see AttachDiagramHyperlinks).
+    // Keys: {prefix}{k}.rid / .target.
+    private static void EmitDiagramHyperlinkProps(
+        Dictionary<string, string> props, string prefix,
+        IReadOnlyList<(string RelId, string Target)> hyperlinks)
+    {
+        for (int k = 0; k < hyperlinks.Count; k++)
+        {
+            props[$"{prefix}{k}.rid"] = hyperlinks[k].RelId;
+            props[$"{prefix}{k}.target"] = hyperlinks[k].Target;
         }
     }
 

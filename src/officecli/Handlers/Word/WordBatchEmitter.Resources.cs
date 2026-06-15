@@ -2210,6 +2210,46 @@ public static partial class WordBatchEmitter
         {
             if (HasExternalRelRef(rawXml!))
             {
+                // BUG-DUMP-CELLSDT-CARRIER: mirror the body-level EmitSdt path —
+                // a cell content control wrapping a hyperlink or image used to
+                // flatten to plain text (the rel-bearing raw XML can't be raw-set
+                // without dangling). Ship it through the inlined-parts carrier
+                // instead (verbatim sdtXml + part/ext data; rel ids rewritten on
+                // replay), so the link/image and the control's rich structure
+                // survive. Only fall back to the text flatten when a referenced
+                // part genuinely can't be resolved.
+                var sdtData = word.GetSdtEmitData(sourcePath);
+                bool carrierHostIsCell = System.Text.RegularExpressions.Regex.IsMatch(
+                    cellXPath, @"/w:tc(\[\d+\])?$");
+                if (sdtData != null)
+                {
+                    var carrierProps = PackInlinedPartsProps(sdtData);
+                    carrierProps["sdtXml"] = carrierProps["runXml"];
+                    carrierProps.Remove("runXml");
+                    items.Add(new BatchItem
+                    {
+                        Command = "add",
+                        Parent = cellTargetPath,
+                        Type = "sdt",
+                        Props = carrierProps,
+                    });
+                    // The carrier's `add sdt` APPENDS the control (AppendToParent),
+                    // landing it after the cell's auto-seed <w:p> when it is the
+                    // leading content ([seed, sdt]). Drop that now-leading seed so
+                    // the cell matches the source shape (SDT first); when the SDT
+                    // is NOT leading (cellHasContent) it appends after real content
+                    // and no seed remains to remove. Only genuine cell hosts have
+                    // the auto-seed paragraph (header/footer roots do not).
+                    if (carrierHostIsCell && !cellHasContent)
+                        items.Add(new BatchItem
+                        {
+                            Command = "raw-set",
+                            Part = rawPart,
+                            Xpath = $"{cellXPath}/w:p[1]",
+                            Action = "remove",
+                        });
+                    return false;
+                }
                 ctx.Warnings.Add(new DocxUnsupportedWarning(
                     Element: "sdt.richContent",
                     Path: sourcePath,

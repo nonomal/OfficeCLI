@@ -93,12 +93,33 @@ internal static partial class ChartHelper
             if (trendType == C.TrendlineValues.Polynomial)
                 trendline.AppendChild(new C.PolynomialOrder { Val = (byte)Math.Clamp(order, 2, 6) });
             else if (trendType == C.TrendlineValues.MovingAverage)
+            {
+                // OOXML ST_Skip MinInclusive=2 (c:period inside c:trendline).
+                // Pre-fix code silently accepted order=0/1 which Word 422s on.
+                if (order < 2)
+                    throw new ArgumentException($"movingAvg period must be >= 2 (OOXML ST_Skip MinInclusive=2). Got: {order}.");
                 trendline.AppendChild(new C.Period { Val = (uint)order });
+            }
             else
             {
                 // Treat as forward extrapolation periods
                 trendline.AppendChild(new C.Forward { Val = order });
             }
+        }
+        // OOXML CT_Trendline requires <c:period> when trendlineType=movingAvg;
+        // Word rejects the file otherwise. When no explicit period was given,
+        // fall back to 2 (Excel's default for "Add Trendline → Moving Average").
+        if (trendType == C.TrendlineValues.MovingAverage
+            && trendline.GetFirstChild<C.Period>() == null)
+        {
+            trendline.AppendChild(new C.Period { Val = 2u });
+        }
+        // Same family for polynomial: <c:order> is required for poly trendlines.
+        // Default to degree 2 (Excel's default for "Add Trendline → Polynomial").
+        if (trendType == C.TrendlineValues.Polynomial
+            && trendline.GetFirstChild<C.PolynomialOrder>() == null)
+        {
+            trendline.AppendChild(new C.PolynomialOrder { Val = 2 });
         }
 
         // Backward extrapolation
@@ -154,9 +175,16 @@ internal static partial class ChartHelper
                 trendline.AppendChild(new C.PolynomialOrder { Val = (byte)Math.Clamp(ParseHelpers.SafeParseInt(value, "trendline.order"), 2, 6) });
                 break;
             case "period":
+            {
+                // OOXML ST_Skip MinInclusive=2. Pre-fix code clamped < 2 to 2;
+                // silently coerce hid invalid input from callers. Throw instead.
+                var periodVal = ParseHelpers.SafeParseInt(value, "trendline.period");
+                if (periodVal < 2)
+                    throw new ArgumentException($"trendline.period must be >= 2 (OOXML ST_Skip MinInclusive=2). Got: {periodVal}.");
                 trendline.RemoveAllChildren<C.Period>();
-                trendline.AppendChild(new C.Period { Val = (uint)Math.Max(2, ParseHelpers.SafeParseInt(value, "trendline.period")) });
+                trendline.AppendChild(new C.Period { Val = (uint)periodVal });
                 break;
+            }
             case "intercept":
                 trendline.RemoveAllChildren<C.Intercept>();
                 trendline.AppendChild(new C.Intercept { Val = ParseHelpers.SafeParseDouble(value, "trendline.intercept") });

@@ -502,6 +502,21 @@ public partial class WordHandler
     /// Parse a w:shd value string ("fill", "val;fill", "val;fill;color") into a Shading element.
     /// Shared by paragraph-level, run-level, and pmrp shading handlers.
     /// </summary>
+    // OOXML ST_Shd enum values. Kept as a static set so ParseShadingValue can
+    // reject anything else before the SDK's opaque EnumValue ctor leaks at
+    // save time.
+    private static readonly HashSet<string> s_knownShadingPatternValues = new(StringComparer.Ordinal)
+    {
+        "clear", "solid", "nil",
+        "pct5", "pct10", "pct12", "pct15", "pct20", "pct25", "pct30", "pct35",
+        "pct37", "pct40", "pct45", "pct50", "pct55", "pct60", "pct62", "pct65",
+        "pct70", "pct75", "pct80", "pct85", "pct87", "pct90", "pct95",
+        "diagStripe", "reverseDiagStripe", "thinDiagStripe", "thinReverseDiagStripe",
+        "horzStripe", "vertStripe", "thinHorzStripe", "thinVertStripe",
+        "diagCross", "thinDiagCross", "horzCross", "thinHorzCross",
+    };
+    private static bool IsKnownShadingPatternValue(string v) => s_knownShadingPatternValues.Contains(v);
+
     private static Shading ParseShadingValue(string value)
     {
         // BUG-DUMP-R41-4: peel off any theme key=val tail
@@ -529,6 +544,14 @@ public partial class WordHandler
             else
             {
                 WarnIfShadingOrderWrong(shdParts[0]);
+                // OOXML ST_Shd enum: clear/solid/nil + many pct*/stripe/cross
+                // variants. SDK's `new ShadingPatternValues(raw)` happily
+                // accepts any string and throws an opaque internal exception
+                // at serialize time. Validate up-front so callers see a
+                // friendly ArgumentException.
+                if (!IsKnownShadingPatternValue(shdParts[0]))
+                    throw new ArgumentException(
+                        $"Invalid 'shading' pattern value: '{shdParts[0]}'. Valid ST_Shd values: clear, solid, nil, pct5/10/12/15/20/25/30/35/37/40/45/50/55/60/62/65/70/75/80/85/87/90/95, diagStripe, reverseDiagStripe, thinDiagStripe, thinReverseDiagStripe, horzStripe, vertStripe, thinHorzStripe, thinVertStripe, diagCross, thinDiagCross, horzCross, thinHorzCross.");
                 shd.Val = new ShadingPatternValues(shdParts[0]);
                 shd.Fill = SanitizeHex(shdParts[1]);
                 if (shdParts.Length >= 3 && !string.IsNullOrEmpty(shdParts[2])) shd.Color = SanitizeHex(shdParts[2]);
@@ -942,16 +965,14 @@ public partial class WordHandler
                 {
                     InsertRunPropInSchemaOrder(props, new RightToLeftText());
                 }
-                else if (isLegacyRtlKey)
+                else
                 {
-                    // Legacy 'rtl=false' is an explicit override of inherited
-                    // docDefaults / style rtl=true — emit <w:rtl w:val="0"/>
-                    // so the override actually takes effect at render time.
+                    // Both legacy 'rtl=false' and canonical 'direction=ltr'
+                    // emit <w:rtl w:val="0"/> as an explicit override of an
+                    // inherited RTL paragraph / style / docDefaults — without
+                    // it the LTR override has no render-time effect.
                     InsertRunPropInSchemaOrder(props, new RightToLeftText { Val = DocumentFormat.OpenXml.OnOffValue.FromBoolean(false) });
                 }
-                // 'direction=ltr' is the canonical clear: no element written
-                // (LTR is the schema default; cascade is broken by clearing
-                // the docDefaults / style level, not by polluting every run).
                 return true;
             case "charspacing" or "letterspacing" or "spacing":
                 // w:spacing native unit is twips. With `pt` suffix convert to
@@ -992,6 +1013,23 @@ public partial class WordHandler
                 props.RemoveAllChildren<VerticalTextAlignment>();
                 if (IsTruthy(value))
                     InsertRunPropInSchemaOrder(props, new VerticalTextAlignment { Val = VerticalPositionValues.Subscript });
+                return true;
+            case "vertalign":
+                // Canonical run-level vertAlign Set. Without this case the
+                // generic TypedAttributeFallback silently accepted invalid
+                // values (banana → SDK EnumValue null → Word silently treats
+                // as baseline). Mirror AddRun's vocabulary.
+                props.RemoveAllChildren<VerticalTextAlignment>();
+                InsertRunPropInSchemaOrder(props, new VerticalTextAlignment
+                {
+                    Val = value.ToLowerInvariant() switch
+                    {
+                        "superscript" or "super" => VerticalPositionValues.Superscript,
+                        "subscript" or "sub" => VerticalPositionValues.Subscript,
+                        "baseline" => VerticalPositionValues.Baseline,
+                        _ => throw new ArgumentException($"Invalid 'vertAlign' value: '{value}'. Valid values: superscript, subscript, baseline."),
+                    }
+                });
                 return true;
             case "caps":
             case "allcaps":
@@ -1050,6 +1088,10 @@ public partial class WordHandler
                 if (!uint.TryParse(value, out var kernVal))
                     throw new ArgumentException(
                         $"Invalid kern value '{value}'. Pass an integer in half-points (e.g. 28 = 14pt threshold); 'pt' suffix is not accepted on docx kern.");
+                // OOXML ST_HpsMeasure MaxInclusive=3277 half-points (~164pt).
+                if (kernVal > 3277)
+                    throw new ArgumentException(
+                        $"Invalid kern value '{value}'. Must be 0-3277 (OOXML ST_HpsMeasure MaxInclusive=3277 half-points = ~164pt).");
                 InsertRunPropInSchemaOrder(props, new Kern { Val = kernVal });
                 return true;
             case "position":

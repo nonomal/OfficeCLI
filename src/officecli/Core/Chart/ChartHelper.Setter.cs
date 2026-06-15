@@ -184,6 +184,7 @@ internal static partial class ChartHelper
                         // the new title element is present but suppressed at render.
                         chart.RemoveAllChildren<C.AutoTitleDeleted>();
                         properties.TryGetValue("title.lang", out var setterTitleLang);
+                        OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "title");
                         chart.PrependChild(BuildChartTitle(value, setterTitleLang));
                     }
                     break;
@@ -815,6 +816,7 @@ internal static partial class ChartHelper
                     valAxis.RemoveAllChildren<C.Title>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
+                        OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "axisTitle");
                         var insertAfter = (OpenXmlElement?)valAxis.GetFirstChild<C.MinorGridlines>()
                             ?? (OpenXmlElement?)valAxis.GetFirstChild<C.MajorGridlines>()
                             ?? valAxis.GetFirstChild<C.AxisPosition>();
@@ -831,6 +833,7 @@ internal static partial class ChartHelper
                     catAxis.RemoveAllChildren<C.Title>();
                     if (!value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
+                        OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "catTitle");
                         var insertAfter = (OpenXmlElement?)catAxis.GetFirstChild<C.MinorGridlines>()
                             ?? (OpenXmlElement?)catAxis.GetFirstChild<C.MajorGridlines>()
                             ?? catAxis.GetFirstChild<C.AxisPosition>();
@@ -1284,6 +1287,8 @@ internal static partial class ChartHelper
                             unsupported.Add(key);
                             break;
                         }
+                        if (p < 0 || p > 240)
+                            throw new ArgumentException($"view3d perspective must be between 0 and 240 (OOXML ST_Perspective MaxInclusive=240), got {p}.");
                         view3d.AppendChild(new C.Perspective { Val = (byte)p });
                     }
                     else
@@ -1306,7 +1311,11 @@ internal static partial class ChartHelper
                         }
                         if (v3dParts.Length >= 3 && !string.IsNullOrWhiteSpace(v3dParts[2])
                             && int.TryParse(v3dParts[2], out var persp))
+                        {
+                            if (persp < 0 || persp > 240)
+                                throw new ArgumentException($"view3d perspective must be between 0 and 240 (OOXML ST_Perspective MaxInclusive=240), got {persp}.");
                             view3d.AppendChild(new C.Perspective { Val = (byte)persp });
+                        }
                     }
                     // Schema order: title, autoTitleDeleted, pivotFmts, view3D, ..., plotArea
                     var v3dPlotArea = chart.GetFirstChild<C.PlotArea>();
@@ -1483,8 +1492,17 @@ internal static partial class ChartHelper
                     else
                     {
                         // value = series indices on secondary axis, e.g. "2,3" (1-based)
+                        // or "series2"/"series2,series3" alias forms (R47).
                         secondaryIndices = value.Split(',')
-                            .Select(s => int.TryParse(s.Trim(), out var v) ? v : -1)
+                            .Select(s =>
+                            {
+                                var trimmed = s.Trim();
+                                if (int.TryParse(trimmed, out var v)) return v;
+                                var m = System.Text.RegularExpressions.Regex.Match(
+                                    trimmed, @"^series(\d+)$",
+                                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                                return m.Success && int.TryParse(m.Groups[1].Value, out var sv) ? sv : -1;
+                            })
                             .Where(v => v > 0).ToHashSet();
                         // Type-name form, e.g. "line" on a combo chart — route every
                         // series whose parent CT_*Chart element matches that type to
@@ -1493,6 +1511,13 @@ internal static partial class ChartHelper
                         // to the primary axId (the R26 combo bug).
                         if (secondaryIndices.Count == 0)
                             secondaryIndices = SeriesIndicesForChartType(plotArea2, value);
+                        // R47: still empty → value was not a valid index, type name,
+                        // or seriesN alias. Throw instead of silent no-op.
+                        if (secondaryIndices.Count == 0)
+                            throw new ArgumentException(
+                                $"Invalid 'secondaryAxis' value: '{value}'. Valid forms: " +
+                                "index ('2'), comma index list ('2,3'), 'true', 'false'/'none', " +
+                                "seriesN alias ('series2'), or a chart-type name on a combo chart ('line').");
                     }
                     ApplySecondaryAxis(plotArea2, secondaryIndices);
                     break;
@@ -1628,7 +1653,8 @@ internal static partial class ChartHelper
                         "none" => C.TickLabelPositionValues.None,
                         "high" or "top" => C.TickLabelPositionValues.High,
                         "low" or "bottom" => C.TickLabelPositionValues.Low,
-                        _ => C.TickLabelPositionValues.NextTo
+                        "nextto" => C.TickLabelPositionValues.NextTo,
+                        _ => throw new ArgumentException($"Invalid 'tickLabelPos' value: '{value}'. Valid: none, high, low, nextTo.")
                     };
                     foreach (var ax in plotArea2.Elements<C.ValueAxis>())
                     { ax.RemoveAllChildren<C.TickLabelPosition>(); InsertAxisChildInOrder(ax, new C.TickLabelPosition { Val = tlPos }); }
@@ -1647,7 +1673,7 @@ internal static partial class ChartHelper
                         "bottom" or "b" => C.AxisPositionValues.Bottom,
                         "left" or "l" => C.AxisPositionValues.Left,
                         "right" or "r" => C.AxisPositionValues.Right,
-                        _ => C.AxisPositionValues.Bottom
+                        _ => throw new ArgumentException($"Invalid 'axisPos' value: '{value}'. Valid: top, bottom, left, right.")
                     };
                     foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
                     {
@@ -1678,7 +1704,8 @@ internal static partial class ChartHelper
                     {
                         "max" => C.CrossesValues.Maximum,
                         "min" => C.CrossesValues.Minimum,
-                        _ => C.CrossesValues.AutoZero
+                        "autozero" => C.CrossesValues.AutoZero,
+                        _ => throw new ArgumentException($"Invalid 'crosses' value: '{value}'. Valid: autoZero, max, min.")
                     };
                     // CONSISTENCY(chart/crosses-schema-order): CT_ValAx requires
                     // crossAx → crosses → crossesAt → crossBetween. Insert
@@ -1725,7 +1752,8 @@ internal static partial class ChartHelper
                     var cbVal = value.ToLowerInvariant() switch
                     {
                         "midcat" or "midpoint" => C.CrossBetweenValues.MidpointCategory,
-                        _ => C.CrossBetweenValues.Between
+                        "between" => C.CrossBetweenValues.Between,
+                        _ => throw new ArgumentException($"Invalid 'crossBetween' value: '{value}'. Valid: midCat, between.")
                     };
                     // CT_ValAx schema: crossAx, crosses?, crossesAt?, crossBetween?,
                     // majorUnit?, minorUnit?, dispUnits?, extLst?. AppendChild lands
@@ -1768,16 +1796,23 @@ internal static partial class ChartHelper
                     // `linear`/`none` removes the log scale.
                     if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                         value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-                        value.Equals("log", StringComparison.OrdinalIgnoreCase) ||
-                        value == "1")
+                        value.Equals("log", StringComparison.OrdinalIgnoreCase))
                     {
+                        // "1" was historically treated as truthy shorthand too,
+                        // but ST_LogBase has minInclusive=2.0 — letting "1"
+                        // mean logBase=10 silently masked out-of-range input.
+                        // Numeric "1" now falls through to the range-check below.
                         scaling.PrependChild(new C.LogBase { Val = 10d });
                     }
                     else if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
                              !value.Equals("linear", StringComparison.OrdinalIgnoreCase) &&
                              !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
-                             !value.Equals("no", StringComparison.OrdinalIgnoreCase) &&
-                             value != "0")
+                             !value.Equals("no", StringComparison.OrdinalIgnoreCase))
+                    // "0" was historically treated as the falsy shorthand for
+                    // "no log scale" alongside false/no/none/linear, but the
+                    // resulting silent accept hid out-of-range numeric input.
+                    // Drop the "0" guard so numeric 0 falls into the range
+                    // check below and throws (matches the "1" treatment from R33).
                     {
                         var logVal = ParseHelpers.SafeParseDouble(value, "logBase");
                         // OOXML ST_LogBase: numeric range [2.0, 1000.0]. Values
@@ -1788,10 +1823,9 @@ internal static partial class ChartHelper
                         // Truthy/falsy shorthands (true/yes/log/1, false/no/
                         // none/linear/0) are intercepted earlier and don't
                         // reach this branch.
-                        // ST_LogBase: minInclusive=2.0, maxExclusive=1000.0.
-                        // logBase=1000 itself is rejected (matches Excel's clamp); logBase=2 is the lower bound.
-                        if (logVal < 2.0 || logVal >= 1000.0)
-                            throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000) (ST_LogBase).");
+                        // ST_LogBase: minInclusive=2.0, maxInclusive=1000.0.
+                        if (logVal < 2.0 || logVal > 1000.0)
+                            throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000] (ST_LogBase).");
                         scaling.PrependChild(new C.LogBase { Val = logVal });
                     }
                     break;
@@ -1840,14 +1874,19 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var catAx = plotArea2?.GetFirstChild<C.CategoryAxis>();
                     if (catAx == null) { unsupported.Add(key); break; }
+                    var loVal = ParseHelpers.SafeParseInt(value, "labelOffset");
+                    // OOXML ST_LabelOffset: MinInclusive=0, MaxInclusive=1000.
+                    // Without this guard a value > 65535 wrapped via the ushort
+                    // cast and 1001..65535 stored above the documented max.
+                    if (loVal < 0 || loVal > 1000)
+                        throw new ArgumentException($"Invalid 'labelOffset' value: '{value}'. Must be 0..1000 (OOXML ST_LabelOffset MaxInclusive=1000).");
                     // CONSISTENCY(catax-schema-order): bare AppendChild lands
                     // lblOffset after any later-order siblings already present
                     // (e.g. tickLblSkip from a prior Set), producing an invalid
                     // file. InsertAxisChildInOrder anchors on the schema-order
                     // list shared across catAx setters.
                     catAx.RemoveAllChildren<C.LabelOffset>();
-                    InsertAxisChildInOrder(catAx,
-                        new C.LabelOffset { Val = (ushort)ParseHelpers.SafeParseInt(value, "labelOffset") });
+                    InsertAxisChildInOrder(catAx, new C.LabelOffset { Val = (ushort)loVal });
                     break;
                 }
 
@@ -1856,10 +1895,14 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     var catAx = plotArea2?.GetFirstChild<C.CategoryAxis>();
                     if (catAx == null) { unsupported.Add(key); break; }
-                    // Same schema-order rationale as labelOffset above.
+                    var tlsVal = ParseHelpers.SafeParseInt(value, "tickLabelSkip");
+                    // OOXML ST_Skip: Min=1, Max=65535 (xsd:unsignedShort).
+                    // SafeParseInt accepts the full Int32 range, so 65536+ has
+                    // to be rejected explicitly.
+                    if (tlsVal < 1 || tlsVal > 65535)
+                        throw new ArgumentException($"Invalid 'tickLabelSkip' value: '{value}'. Must be an integer 1..65535 (OOXML ST_Skip).");
                     catAx.RemoveAllChildren<C.TickLabelSkip>();
-                    InsertAxisChildInOrder(catAx,
-                        new C.TickLabelSkip { Val = ParseHelpers.SafeParseInt(value, "tickLabelSkip") });
+                    InsertAxisChildInOrder(catAx, new C.TickLabelSkip { Val = tlsVal });
                     break;
                 }
 
@@ -2419,8 +2462,10 @@ internal static partial class ChartHelper
                     if (doughnut == null) { unsupported.Add(key); break; }
                     doughnut.RemoveAllChildren<C.HoleSize>();
                     var holeSizeInt = ParseHelpers.SafeParseInt(value, "holeSize");
-                    if (holeSizeInt < 0) holeSizeInt = 0;
-                    else if (holeSizeInt > 90) holeSizeInt = 90;
+                    // OOXML ST_HoleSize: MinInclusive=1, MaxInclusive=90. Pre-fix
+                    // code silently clamped, masking out-of-range input.
+                    if (holeSizeInt < 1 || holeSizeInt > 90)
+                        throw new ArgumentException($"Invalid 'holeSize' value: '{value}'. Must be between 1 and 90 (OOXML ST_HoleSize).");
                     doughnut.AppendChild(new C.HoleSize { Val = (byte)holeSizeInt });
                     break;
                 }
@@ -3104,6 +3149,7 @@ internal static partial class ChartHelper
                         if (colonIdx >= 0)
                         {
                             var sName = value[..colonIdx].Trim();
+                            OfficeCli.Core.ParseHelpers.ValidateXmlText(sName, "series name");
                             vals = ParseSeriesValues(value[(colonIdx + 1)..], value[..colonIdx].Trim());
                             var serText = ser.GetFirstChild<C.SeriesText>();
                             if (serText != null)
@@ -3596,7 +3642,7 @@ internal static partial class ChartHelper
             "longdash" or "lgdash" => Drawing.PresetLineDashValues.LargeDash,
             "longdashdot" or "lgdashdot" => Drawing.PresetLineDashValues.LargeDashDot,
             "longdashdotdot" or "lgdashdotdot" => Drawing.PresetLineDashValues.LargeDashDotDot,
-            _ => Drawing.PresetLineDashValues.Solid
+            _ => throw new ArgumentException($"Unknown lineDash value '{dash}'. Valid: solid, dot/sysDot, dash/sysDash, dashDot/sysDashDot, dashDotDot/sysDashDotDot, longDash/lgDash, longDashDot/lgDashDot, longDashDotDot/lgDashDotDot.")
         };
     }
 

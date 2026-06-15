@@ -1012,18 +1012,23 @@ internal static partial class ChartHelper
                     if (rawDpts.Count > 0)
                         // \x1e (record separator) joins the dPt fragments; it can
                         // never appear inside XML, so a literal split is safe.
-                        seriesNode.Format["dPt"] = string.Join("\x1e", rawDpts);
+                        // Stored in InternalFormat — verbatim OOXML is a dump→
+                        // batch replay carrier, not user-facing Get output. The
+                        // canonical per-point readback lives at point{N}.color/
+                        // etc. below.
+                        seriesNode.InternalFormat["dPt"] = string.Join("\x1e", rawDpts);
 
                     var rawDLbls = serEl.GetFirstChild<C.DataLabels>();
                     // Only round-trip dLbls verbatim when it carries rich styling
                     // (numFmt / spPr / txPr). A bare show-flag-only <c:dLbls> is
                     // already reconstructed by the existing dataLabels= readback,
                     // and replaying it verbatim would just duplicate that work.
+                    // InternalFormat: same rationale as dPt above.
                     if (rawDLbls != null
                         && (rawDLbls.GetFirstChild<C.NumberingFormat>() != null
                             || rawDLbls.GetFirstChild<C.ChartShapeProperties>() != null
                             || rawDLbls.GetFirstChild<C.TextProperties>() != null))
-                        seriesNode.Format["dLbls"] = rawDLbls.OuterXml;
+                        seriesNode.InternalFormat["dLbls"] = rawDLbls.OuterXml;
                 }
 
                 var serSpPr = serEl?.GetFirstChild<C.ChartShapeProperties>();

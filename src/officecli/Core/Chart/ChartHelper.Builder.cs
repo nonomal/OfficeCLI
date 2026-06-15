@@ -29,6 +29,7 @@ internal static partial class ChartHelper
             // inside BuildChartTitle when absent) so dump→replay preserves the
             // source locale on the chart-title run.
             properties.TryGetValue("title.lang", out var titleLangBuild);
+            OfficeCli.Core.ParseHelpers.ValidateXmlText(title, "title");
             chart.AppendChild(BuildChartTitle(title, titleLangBuild));
         }
 
@@ -1092,7 +1093,7 @@ internal static partial class ChartHelper
             var series = new C.BubbleChartSeries(
                 new C.Index { Val = (uint)i },
                 new C.Order { Val = (uint)i },
-                new C.SeriesText(new C.NumericValue(name))
+                BuildSeriesText(name)
             );
             ApplySeriesColor(series, color);
 
@@ -1148,7 +1149,7 @@ internal static partial class ChartHelper
             var series = new C.RadarChartSeries(
                 new C.Index { Val = (uint)i },
                 new C.Order { Val = (uint)i },
-                new C.SeriesText(new C.NumericValue(seriesData[i].name))
+                BuildSeriesText(seriesData[i].name)
             );
             ApplySeriesColor(series, color);
             if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -1184,7 +1185,7 @@ internal static partial class ChartHelper
             var series = new C.LineChartSeries(
                 new C.Index { Val = (uint)i },
                 new C.Order { Val = (uint)i },
-                new C.SeriesText(new C.NumericValue(seriesData[i].name))
+                BuildSeriesText(seriesData[i].name)
             );
 
             // Hide individual series lines — stock chart visuals come from
@@ -1734,7 +1735,7 @@ internal static partial class ChartHelper
         var series = new C.BarChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.NumericValue(name))
+            BuildSeriesText(name)
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -1748,7 +1749,7 @@ internal static partial class ChartHelper
         var series = new C.LineChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.NumericValue(name))
+            BuildSeriesText(name)
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -1762,7 +1763,7 @@ internal static partial class ChartHelper
         var series = new C.AreaChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.NumericValue(name))
+            BuildSeriesText(name)
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -1776,7 +1777,7 @@ internal static partial class ChartHelper
         var series = new C.PieChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.NumericValue(name))
+            BuildSeriesText(name)
         );
         if (color != null) ApplySeriesColor(series, color);
         if (categories != null) series.AppendChild(BuildCategoryData(categories));
@@ -1790,7 +1791,7 @@ internal static partial class ChartHelper
         var series = new C.ScatterChartSeries(
             new C.Index { Val = idx },
             new C.Order { Val = idx },
-            new C.SeriesText(new C.NumericValue(name))
+            BuildSeriesText(name)
         );
 
         if (xValues != null)
@@ -1975,6 +1976,16 @@ internal static partial class ChartHelper
             new C.AxisPosition { Val = C.AxisPositionValues.Bottom },
             new C.CrossingAxis { Val = crossAxisId }
         );
+    }
+
+    // Shared helper for chart series text: validate XML-illegal chars up-front
+    // so callers don't have to remember (every `BuildSeriesText(name)`
+    // call site was previously a leak point — R32). Returns the SeriesText
+    // wrapping a NumericValue, ready to AppendChild.
+    internal static C.SeriesText BuildSeriesText(string name)
+    {
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(name, "series name");
+        return new C.SeriesText(new C.NumericValue(name));
     }
 
     // ==================== Title Builder ====================

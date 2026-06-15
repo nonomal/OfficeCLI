@@ -19,26 +19,11 @@ public partial class WordHandler
         // AddHyperlink (round23 C). When the parent paragraph lives in a Header/Footer
         // part, the chart rel must live on that part — otherwise r:id in headerN.xml
         // points to a rel only present in document.xml.rels and Word reports broken.
-        OpenXmlPart chartMainPart = _doc.MainDocumentPart!;
-        // parent may itself be a Header/Footer (e.g. /header[1]) when the chart is
-        // appended directly, or a descendant paragraph (e.g. /header[1]/p[N]).
-        var chartHeaderAnc = parent as Header ?? parent.Ancestors<Header>().FirstOrDefault();
-        if (chartHeaderAnc != null)
-        {
-            var hp = _doc.MainDocumentPart!.HeaderParts
-                .FirstOrDefault(p => ReferenceEquals(p.Header, chartHeaderAnc));
-            if (hp != null) chartMainPart = hp;
-        }
-        else
-        {
-            var chartFooterAnc = parent as Footer ?? parent.Ancestors<Footer>().FirstOrDefault();
-            if (chartFooterAnc != null)
-            {
-                var fp = _doc.MainDocumentPart!.FooterParts
-                    .FirstOrDefault(p => ReferenceEquals(p.Footer, chartFooterAnc));
-                if (fp != null) chartMainPart = fp;
-            }
-        }
+        // Resolve the host part (MainDocument / Header / Footer / Footnotes /
+        // Endnotes / Comments) so the ChartPart rel registers where the chart
+        // actually lives. Mirrors AddPicture/AddHyperlink. Without this,
+        // footnote/endnote charts landed under document.xml.rels and Word 422'd.
+        OpenXmlPart chartMainPart = ResolveHostPart(parent);
 
         // Parse chart data. Use TryGetValue(case-insensitive) so reads
         // are recorded by TrackingPropertyDictionary.
@@ -246,6 +231,13 @@ public partial class WordHandler
     {
         if (!properties.TryGetValue("path", out var imgPath) && !properties.TryGetValue("src", out imgPath))
             throw new ArgumentException("'src' property is required for picture type");
+        // R49: `/chart[N]` resolves to the paragraph hosting the chart; AddPicture
+        // would silently re-route the image into body and return a bogus path
+        // (`/chart[1]/r[K]`) that 404s on Get. Mirrors the R47 AddTextbox guard.
+        if (parentPath.StartsWith("/chart[", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"Cannot add a picture to a chart path ('{parentPath}'). " +
+                "Charts don't host picture children — use /body or a table cell as parent.");
 
         // Buffer the image bytes so we can both feed the image part and sniff
         // the native pixel dimensions for auto aspect-ratio calculations.
@@ -341,6 +333,13 @@ public partial class WordHandler
             || properties.TryGetValue("h", out heightStr);
         long cxEmu = hasWidth ? ParseEmu(widthStr!) : 5486400;  // 6 inches fallback
         long cyEmu = hasHeight ? ParseEmu(heightStr!) : 3657600; // 4 inches fallback
+        // OOXML CT_PositiveSize2D / ST_PositiveCoordinate require strictly
+        // positive width and height. Negative/zero EMUs would write a
+        // schema-invalid <wp:extent> that Word rejects (file repair / 422).
+        if (hasWidth && cxEmu <= 0)
+            throw new ArgumentException($"Invalid 'width' value: '{widthStr}'. Picture width must be > 0 (OOXML ST_PositiveCoordinate).");
+        if (hasHeight && cyEmu <= 0)
+            throw new ArgumentException($"Invalid 'height' value: '{heightStr}'. Picture height must be > 0 (OOXML ST_PositiveCoordinate).");
 
         if (!hasWidth || !hasHeight)
         {
@@ -681,6 +680,17 @@ public partial class WordHandler
         // height, alt, name, wrap, anchor, …) are not in the helper's
         // vocabulary so they pass through untouched.
         OpenXmlCompositeElement? imgRunRPr = null;
+        // ACCOUNTING(handler-as-truth): the foreach below dereferences the
+        // dict via IEnumerable.GetEnumerator on the Dictionary static type,
+        // which bypasses TrackingPropertyDictionary's overridden enumerator.
+        // The crop keys are consumed by the `lk is "crop"…` branch but never
+        // get marked as read → false-positive UNSUPPORTED warning. Explicitly
+        // probe each so the tracker records them.
+        properties.TryGetValue("crop", out _);
+        properties.TryGetValue("cropLeft", out _);
+        properties.TryGetValue("cropRight", out _);
+        properties.TryGetValue("cropTop", out _);
+        properties.TryGetValue("cropBottom", out _);
         foreach (var (key, value) in properties)
         {
             var lk = key.ToLowerInvariant();

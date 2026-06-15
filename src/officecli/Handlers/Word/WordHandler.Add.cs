@@ -234,6 +234,15 @@ public partial class WordHandler
             "commentrangestart" or "commentrangeend" or "commentreference" =>
                 throw new ArgumentException(
                     $"Cannot add '{type}' directly. Adding a bare comment range marker into a paragraph destroys existing runs (schema-aware sequence reset). Use `add --type comment --prop start=... --prop end=... --prop text=...` to create the comment atomically."),
+            // Reject altChunk: it embeds alternate-format payloads (HTML/RTF
+            // fragments) via OOXML relationship-bound parts. AddDefault would
+            // fall through to TryCreateTypedElement which writes user props
+            // as raw unnamespaced attrs (e.g. src=...) — schema-invalid; Word
+            // rejects the file. Batch dump already warns+drops altChunk for
+            // the same reason.
+            "altchunk" =>
+                throw new ArgumentException(
+                    "Cannot add 'altChunk' directly. altChunk embeds alternate-format payloads via OOXML relationships which require a curated implementation. Use the batch import or raw-set path for round-trip fidelity."),
             _ => AddDefault(parent, parentPath, index, properties, type),
         };
         }
@@ -310,8 +319,10 @@ public partial class WordHandler
 
         // /body/sectPr cannot contain added children via `add` — the section
         // element only holds layout primitives (pgSz, pgMar, cols, ...), all
-        // of which are managed via `set` on /body/sectPr instead.
-        if (parent is SectionProperties)
+        // of which are managed via `set` on /body/sectPr instead. EXCEPTION:
+        // header/footer adds are routed by section selector; the actual part
+        // attachment runs via ResolveTargetSectPrForHeaderFooter.
+        if (parent is SectionProperties && t != "header" && t != "footer")
         {
             throw new ArgumentException(
                 $"Cannot add '{type}' under {parentPath}. SectionProperties only holds layout metadata; use 'officecli set' to modify pgSz, pgMar, cols, etc.");

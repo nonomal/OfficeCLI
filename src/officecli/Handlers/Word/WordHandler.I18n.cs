@@ -77,12 +77,27 @@ public partial class WordHandler
 
         var markRPr = pProps.ParagraphMarkRunProperties
             ?? EnsureParagraphMarkRunPropertiesInSchemaOrder(pProps);
-        ApplyRunFormatting(markRPr, "direction", rtl ? "rtl" : "ltr");
+        if (rtl)
+        {
+            ApplyRunFormatting(markRPr, "direction", "rtl");
+        }
+        else
+        {
+            // CONSISTENCY(rtl-cascade): paragraph-level flip to ltr clears
+            // run/mark-level <w:rtl/> outright. Direct run-level direction=ltr
+            // (see ApplyRunFormatting) emits explicit val=0 to override
+            // inherited RTL; here the cascade owns the override at the
+            // paragraph layer, so child runs do not each need to repeat it.
+            markRPr.RemoveAllChildren<RightToLeftText>();
+        }
 
         foreach (var run in paragraph.Descendants<Run>())
         {
             var rPr = EnsureRunProperties(run);
-            ApplyRunFormatting(rPr, "direction", rtl ? "rtl" : "ltr");
+            if (rtl)
+                ApplyRunFormatting(rPr, "direction", "rtl");
+            else
+                rPr.RemoveAllChildren<RightToLeftText>();
         }
     }
 

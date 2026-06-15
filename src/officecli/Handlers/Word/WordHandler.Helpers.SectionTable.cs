@@ -18,7 +18,10 @@ public partial class WordHandler
 
     /// <summary>
     /// Ensure Columns exists in SectionProperties in correct schema order.
-    /// Schema order: ..., PageMargin, ..., Columns, ...
+    /// CT_SectPr child sequence is strict (cols is rank 11, after lnNumType
+    /// rank 9). Delegate to InsertSectPrChildInOrder so later children
+    /// (lnNumType, pgNumType, …) that the old hardcoded "after PageMargin"
+    /// branch landed cols ahead of are now sorted correctly.
     /// </summary>
     private static Columns EnsureColumns(SectionProperties sectPr)
     {
@@ -26,35 +29,7 @@ public partial class WordHandler
         if (existing != null) return existing;
 
         var cols = new Columns();
-        var pm = sectPr.GetFirstChild<PageMargin>();
-        if (pm != null)
-            pm.InsertAfterSelf(cols);
-        else
-        {
-            var pgSz = sectPr.GetFirstChild<PageSize>();
-            if (pgSz != null)
-                pgSz.InsertAfterSelf(cols);
-            else
-            {
-                // Insert after SectionType, or after last headerReference/footerReference
-                var sectionType = sectPr.GetFirstChild<SectionType>();
-                if (sectionType != null)
-                    sectionType.InsertAfterSelf(cols);
-                else
-                {
-                    OpenXmlElement? lastRef = null;
-                    foreach (var child in sectPr.ChildElements)
-                    {
-                        if (child is HeaderReference || child is FooterReference)
-                            lastRef = child;
-                    }
-                    if (lastRef != null)
-                        lastRef.InsertAfterSelf(cols);
-                    else
-                        sectPr.PrependChild(cols);
-                }
-            }
-        }
+        InsertSectPrChildInOrder(sectPr, cols);
         return cols;
     }
 

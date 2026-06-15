@@ -271,7 +271,8 @@ internal static partial class ChartHelper
                         {
                             "max" => C.CrossesValues.Maximum,
                             "min" => C.CrossesValues.Minimum,
-                            _ => C.CrossesValues.AutoZero
+                            "autozero" => C.CrossesValues.AutoZero,
+                            _ => throw new ArgumentException($"Invalid 'crosses' value: '{value}'. Valid: autoZero, max, min.")
                         };
                         var newCrosses = new C.Crosses { Val = crossVal };
                         var crsAnchor = crsAx2.GetFirstChild<C.CrossesAt>() as OpenXmlElement
@@ -410,23 +411,27 @@ internal static partial class ChartHelper
                             scaling.RemoveAllChildren<C.LogBase>();
                             if (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                                 value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
-                                value.Equals("log", StringComparison.OrdinalIgnoreCase) ||
-                                value == "1")
+                                value.Equals("log", StringComparison.OrdinalIgnoreCase))
                             {
+                                // "1" was historically truthy shorthand here too;
+                                // routed through SafeParseDouble + range-check below
+                                // so logBase=1 surfaces as ArgumentException.
                                 scaling.PrependChild(new C.LogBase { Val = 10d });
                             }
                             else if (!value.Equals("none", StringComparison.OrdinalIgnoreCase) &&
                                      !value.Equals("linear", StringComparison.OrdinalIgnoreCase) &&
                                      !value.Equals("false", StringComparison.OrdinalIgnoreCase) &&
-                                     !value.Equals("no", StringComparison.OrdinalIgnoreCase) &&
-                                     value != "0")
+                                     !value.Equals("no", StringComparison.OrdinalIgnoreCase))
+                            // "0" dropped as a falsy synonym for the same
+                            // reason as the Setter.cs site — falls into the
+                            // range check below and throws.
                             {
                                 var logVal = ParseHelpers.SafeParseDouble(value, "logBase");
-                                // ST_LogBase: minInclusive=2.0, maxExclusive=1000.0 — reject
-                                // fractional and out-of-band values so Excel doesn't silently
+                                // ST_LogBase: minInclusive=2.0, maxInclusive=1000.0 — reject
+                                // out-of-band values so Excel doesn't silently
                                 // ghost-rewrite the chart back to linear.
-                                if (logVal < 2.0 || logVal >= 1000.0)
-                                    throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000) (ST_LogBase).");
+                                if (logVal < 2.0 || logVal > 1000.0)
+                                    throw new ArgumentException($"Invalid logBase '{value}': must be in the OOXML range [2, 1000] (ST_LogBase).");
                                 scaling.PrependChild(new C.LogBase { Val = logVal });
                             }
                         }
@@ -493,8 +498,11 @@ internal static partial class ChartHelper
                     if (normalizedRole != "category") { directlyHandled.Add(key); break; }
                     if (targetAxis is OpenXmlCompositeElement axTls)
                     {
+                        var tlsVal = ParseHelpers.SafeParseInt(value, "tickLabelSkip");
+                        if (tlsVal < 1 || tlsVal > 65535)
+                            throw new ArgumentException($"Invalid 'tickLabelSkip' value: '{value}'. Must be an integer 1..65535 (OOXML ST_Skip).");
                         axTls.RemoveAllChildren<C.TickLabelSkip>();
-                        axTls.AppendChild(new C.TickLabelSkip { Val = ParseHelpers.SafeParseInt(value, "tickLabelSkip") });
+                        axTls.AppendChild(new C.TickLabelSkip { Val = tlsVal });
                     }
                     directlyHandled.Add(key);
                     break;

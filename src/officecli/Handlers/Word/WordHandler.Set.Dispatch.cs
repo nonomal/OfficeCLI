@@ -371,6 +371,7 @@ public partial class WordHandler
                 // accept the same set or `--prop code=...` becomes silent
                 // unsupported here while it succeeds on Add.
                 case "instruction" or "instr" or "code":
+                    OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "instr");
                     field.InstrCode.Text = value.StartsWith(" ") ? value : $" {value} ";
                     // Auto-mark dirty when instruction changes
                     var beginCharI = field.BeginRun.GetFirstChild<FieldChar>();
@@ -897,8 +898,8 @@ public partial class WordHandler
                     // Equal-width columns: "3" or "3,720" (count,space in twips)
                     var eqCols = EnsureColumns(sectPr);
                     var colParts = value.Split(',');
-                    if (!short.TryParse(colParts[0], out var colCount) || colCount < 1)
-                        throw new ArgumentException($"Invalid 'columns' value: '{value}'. Expected a positive integer (>= 1), optionally followed by ',space' (e.g. '3' or '3,720').");
+                    if (!short.TryParse(colParts[0], out var colCount) || colCount < 1 || colCount > 45)
+                        throw new ArgumentException($"Invalid 'cols' value: '{value}'. cols must be between 1 and 45 (OOXML CT_Columns/@num MaxInclusive=45), optionally followed by ',space' (e.g. '3' or '3,720').");
                     eqCols.ColumnCount = (Int16Value)colCount;
                     eqCols.EqualWidth = true;
                     if (colParts.Length > 1)
@@ -1169,6 +1170,19 @@ public partial class WordHandler
                     // set section-level footnote/endnote numbering. Shared helper
                     // keeps the body / and per-section paths identical.
                     TrySetFootnoteEndnoteNumProps(sectPr, key, value);
+                    break;
+                }
+                case "pgborders" or "pageborders":
+                case var pgK when pgK.StartsWith("pgborders.", StringComparison.OrdinalIgnoreCase)
+                              || pgK.StartsWith("pageborders.", StringComparison.OrdinalIgnoreCase):
+                {
+                    // CONSISTENCY(add-set-symmetry): pgBorders is implemented in
+                    // TrySetSectionLayout (used by /-path Add); the /section[N]
+                    // and /body/sectPr Set paths must accept the same vocabulary.
+                    // Normalize pageborders→pgborders alias before delegating.
+                    var keyLc = key.ToLowerInvariant().Replace("pageborders", "pgborders");
+                    if (!TrySetSectionLayout(keyLc, value))
+                        unsupported.Add(key);
                     break;
                 }
                 default:

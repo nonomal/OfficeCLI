@@ -709,7 +709,10 @@ public partial class WordHandler
 
         var fnFmt = GetFootnoteNumFmt();
         int num = 0;
-        foreach (var fnId in _ctx.FootnoteRefs)
+        // Snapshot: rendering a footnote body may itself reach a run carrying a
+        // FootnoteReference, which appends to _ctx.FootnoteRefs. Iterating the
+        // live List<int> mutates-during-enumerate → InvalidOperationException.
+        foreach (var fnId in _ctx.FootnoteRefs.ToList())
         {
             num++;
             var fn = fnPart.Footnotes.Elements<Footnote>().FirstOrDefault(f => f.Id?.Value == fnId);

@@ -585,9 +585,21 @@ public partial class WordHandler
     {
         if (!properties.TryGetValue("text", out var fnText))
             throw new ArgumentException("'text' property is required for footnote type");
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(fnText, "text");
 
         if (parent is not Paragraph fnPara)
             throw new ArgumentException("Footnotes must be added to a paragraph: /body/p[N]");
+
+        // OOXML: CT_HdrFtr has no footnoteReference content model. A footnote
+        // reference written into a header/footer part is silently ignored by
+        // Word (the note body in the global footnotes part becomes unreachable).
+        // Reject upfront — same silent-accept-bad-OOXML family as altChunk and
+        // nested-SDT.
+        if (parentPath.StartsWith("/header[", StringComparison.OrdinalIgnoreCase)
+            || parentPath.StartsWith("/footer[", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"Footnotes cannot be added inside a header or footer (path: {parentPath}). " +
+                "Add footnotes only to body paragraphs: /body/p[N].");
 
         var mainPart2 = _doc.MainDocumentPart!;
         var fnPart = mainPart2.FootnotesPart ?? mainPart2.AddNewPart<FootnotesPart>();
@@ -662,9 +674,18 @@ public partial class WordHandler
     {
         if (!properties.TryGetValue("text", out var enText))
             throw new ArgumentException("'text' property is required for endnote type");
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(enText, "text");
 
         if (parent is not Paragraph enPara)
             throw new ArgumentException("Endnotes must be added to a paragraph: /body/p[N]");
+
+        // OOXML: CT_HdrFtr has no endnoteReference content model. Same
+        // silent-accept-bad-OOXML family as footnotes; reject upfront.
+        if (parentPath.StartsWith("/header[", StringComparison.OrdinalIgnoreCase)
+            || parentPath.StartsWith("/footer[", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"Endnotes cannot be added inside a header or footer (path: {parentPath}). " +
+                "Add endnotes only to body paragraphs: /body/p[N].");
 
         var mainPart3 = _doc.MainDocumentPart!;
         var enPart = mainPart3.EndnotesPart ?? mainPart3.AddNewPart<EndnotesPart>();
@@ -1121,7 +1142,7 @@ public partial class WordHandler
         // Style paragraph properties
         var stylePPr = new StyleParagraphProperties();
         bool hasPPr = false;
-        if (properties.TryGetValue("align", out var sAlign) || properties.TryGetValue("alignment", out sAlign))
+        if (properties.TryGetValue("align", out var sAlign) || properties.TryGetValue("alignment", out sAlign) || properties.TryGetValue("jc", out sAlign))
         {
             stylePPr.Justification = new Justification { Val = ParseJustification(sAlign) };
             hasPPr = true;
@@ -2318,7 +2339,7 @@ public partial class WordHandler
         AssignParaId(hPara);
         var hPProps = new ParagraphProperties();
 
-        if (properties.TryGetValue("align", out var hAlign) || properties.TryGetValue("alignment", out hAlign))
+        if (properties.TryGetValue("align", out var hAlign) || properties.TryGetValue("alignment", out hAlign) || properties.TryGetValue("jc", out hAlign))
             hPProps.Justification = new Justification { Val = ParseJustification(hAlign) };
         // Reading direction (Arabic / Hebrew). Parsed here, applied at the
         // end of paragraph build via ApplyDirectionCascade (cascades to all
@@ -2352,6 +2373,7 @@ public partial class WordHandler
 
         if (properties.TryGetValue("text", out var hText))
         {
+            OfficeCli.Core.ParseHelpers.ValidateXmlText(hText, "text");
             var hRun = new Run();
             if (hSharedRProps != null) hRun.AppendChild((RunProperties)hSharedRProps.CloneNode(true));
             hRun.AppendChild(new Text(hText) { Space = SpaceProcessingModeValues.Preserve });
@@ -2514,7 +2536,7 @@ public partial class WordHandler
         AssignParaId(fPara);
         var fPProps = new ParagraphProperties();
 
-        if (properties.TryGetValue("align", out var fAlign) || properties.TryGetValue("alignment", out fAlign))
+        if (properties.TryGetValue("align", out var fAlign) || properties.TryGetValue("alignment", out fAlign) || properties.TryGetValue("jc", out fAlign))
             fPProps.Justification = new Justification { Val = ParseJustification(fAlign) };
         // Reading direction (Arabic / Hebrew) — mirrors AddHeader. Applied
         // at end of paragraph build via ApplyDirectionCascade.
@@ -2547,6 +2569,7 @@ public partial class WordHandler
 
         if (properties.TryGetValue("text", out var fText))
         {
+            OfficeCli.Core.ParseHelpers.ValidateXmlText(fText, "text");
             var fRun = new Run();
             if (sharedRProps != null) fRun.AppendChild((RunProperties)sharedRProps.CloneNode(true));
             fRun.AppendChild(new Text(fText) { Space = SpaceProcessingModeValues.Preserve });

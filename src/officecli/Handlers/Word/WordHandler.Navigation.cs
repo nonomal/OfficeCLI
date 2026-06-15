@@ -2104,8 +2104,10 @@ public partial class WordHandler
         // lowered baseline offset in half-points). Mirror it on the Get
         // side so the round-trip key survives.
         var posVal = run.RunProperties?.GetFirstChild<Position>()?.Val?.Value;
-        if (!string.IsNullOrEmpty(posVal))
-            node.Format["position"] = posVal;
+        if (!string.IsNullOrEmpty(posVal)
+            && int.TryParse(posVal, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var posHalfPts))
+            node.Format["position"] = $"{posHalfPts / 2.0:0.##}pt";
         if (run.RunProperties?.Spacing?.Val?.HasValue == true)
             node.Format["charSpacing"] = $"{run.RunProperties.Spacing.Val.Value / 20.0:0.##}pt";
         // BUG-DUMP22-08: <w:bdr/> (character border) is multi-attribute

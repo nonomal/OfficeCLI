@@ -57,8 +57,48 @@ public partial class WordHandler
                 LastAddWarnings.Add($"styleName '{styleName}' not found in styles part and contains spaces — skipped (OOXML styleId disallows spaces)");
             }
         }
-        if (properties.TryGetValue("align", out var alignment) || properties.TryGetValue("alignment", out alignment))
+        if (properties.TryGetValue("align", out var alignment) || properties.TryGetValue("alignment", out alignment) || properties.TryGetValue("jc", out alignment))
             pProps.Justification = new Justification { Val = ParseJustification(alignment) };
+        // textAlignment (ST_TextAlignment) is the vertical baseline alignment.
+        // Curate here so invalid values like "justified" throw upfront rather
+        // than slipping through TypedAttributeFallback as schema-invalid XML.
+        // Mirrors the Set case (Set.cs:1110).
+        if (properties.TryGetValue("textAlignment", out var txtAlign)
+            || properties.TryGetValue("textalignment", out txtAlign))
+        {
+            pProps.TextAlignment = new TextAlignment
+            {
+                Val = txtAlign.ToLowerInvariant() switch
+                {
+                    "auto"     => VerticalTextAlignmentValues.Auto,
+                    "top"      => VerticalTextAlignmentValues.Top,
+                    "center"   => VerticalTextAlignmentValues.Center,
+                    "baseline" => VerticalTextAlignmentValues.Baseline,
+                    "bottom"   => VerticalTextAlignmentValues.Bottom,
+                    _ => throw new ArgumentException($"Invalid 'textAlignment' value: '{txtAlign}'. Valid: auto, top, center, baseline, bottom."),
+                },
+            };
+        }
+        // textboxTightWrap (ST_TextboxTightWrap): controls how text wraps
+        // around the floating textbox. Curate so invalid input throws
+        // upfront (the generic TypedAttributeFallback would silently store
+        // a bogus string as an extension attribute).
+        if (properties.TryGetValue("textboxTightWrap", out var tbtw)
+            || properties.TryGetValue("textboxtightwrap", out tbtw))
+        {
+            pProps.TextBoxTightWrap = new TextBoxTightWrap
+            {
+                Val = tbtw.ToLowerInvariant() switch
+                {
+                    "none"             => TextBoxTightWrapValues.None,
+                    "alllines"         => TextBoxTightWrapValues.AllLines,
+                    "firstandlastline" => TextBoxTightWrapValues.FirstAndLastLine,
+                    "firstlineonly"    => TextBoxTightWrapValues.FirstLineOnly,
+                    "lastlineonly"     => TextBoxTightWrapValues.LastLineOnly,
+                    _ => throw new ArgumentException($"Invalid 'textboxTightWrap' value: '{tbtw}'. Valid: none, allLines, firstAndLastLine, firstLineOnly, lastLineOnly."),
+                },
+            };
+        }
         // Reading direction (Arabic / Hebrew). 'rtl' enables <w:bidi/> AND
         // writes <w:rtl/> on the paragraph mark (so any later runs added
         // via Set inherit the run-level direction without a separate flag).
@@ -274,13 +314,14 @@ public partial class WordHandler
         if (properties.TryGetValue("firstlineindent", out var indent) || properties.TryGetValue("firstLineIndent", out indent))
         {
             // Lenient input: accept "2cm", "0.5in", "18pt", or bare twips (backward compat).
-            // SpacingConverter.ParseWordSpacing treats bare numbers as twips.
-            var indentTwips = SpacingConverter.ParseWordSpacing(indent);
-            if (indentTwips > 31680)
-                throw new OverflowException($"First line indent value out of range (0-31680 twips): {indent}");
+            // OOXML w:firstLine is ST_SignedTwipsMeasure — negatives are legal hanging
+            // indents (Set already uses ParseWordSpacingSigned). CONSISTENCY(add-set-symmetry).
+            var indentTwips = SpacingConverter.ParseWordSpacingSigned(indent);
+            if (Math.Abs(indentTwips) > 31680)
+                throw new OverflowException($"First line indent value out of range (|v| <= 31680 twips): {indent}");
             pProps.Indentation = new Indentation
             {
-                FirstLine = indentTwips.ToString()  // raw twips, consistent with Set and Get
+                FirstLine = indentTwips.ToString()  // signed twips, consistent with Set and Get
             };
         }
         if (properties.TryGetValue("spacebefore", out var sb4) || properties.TryGetValue("spaceBefore", out sb4))
@@ -467,18 +508,51 @@ public partial class WordHandler
         FrameProperties? frameProps = null;
         FrameProperties EnsureFramePr() => frameProps ??= new FrameProperties();
         if (properties.TryGetValue("framePr.w", out var fpW) || properties.TryGetValue("framepr.w", out fpW))
+        {
+            // OOXML w:framePr/@w:w is ST_TwipsMeasure = unsigned int with
+            // MaxInclusive=31680. Width is StringValue in the SDK so a raw
+            // "auto" or out-of-range integer passes through and Word 422s.
+            if (!uint.TryParse(fpW, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fwV)
+                || fwV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.w' value: '{fpW}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
             EnsureFramePr().Width = fpW;
+        }
         if (properties.TryGetValue("framePr.h", out var fpH) || properties.TryGetValue("framepr.h", out fpH))
-            if (uint.TryParse(fpH, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fhV))
-                EnsureFramePr().Height = fhV;
+        {
+            if (!uint.TryParse(fpH, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fhV)
+                || fhV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.h' value: '{fpH}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
+            EnsureFramePr().Height = fhV;
+        }
         if (properties.TryGetValue("framePr.x", out var fpX) || properties.TryGetValue("framepr.x", out fpX))
+        {
+            // ST_SignedTwipsMeasure: -31680 <= x <= 31680. X is StringValue.
+            if (!int.TryParse(fpX, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fxV)
+                || fxV < -31680 || fxV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.x' value: '{fpX}'. Must be a signed integer -31680..31680 (twips, ST_SignedTwipsMeasure).");
             EnsureFramePr().X = fpX;
+        }
         if (properties.TryGetValue("framePr.y", out var fpY) || properties.TryGetValue("framepr.y", out fpY))
+        {
+            if (!int.TryParse(fpY, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fyV)
+                || fyV < -31680 || fyV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.y' value: '{fpY}'. Must be a signed integer -31680..31680 (twips, ST_SignedTwipsMeasure).");
             EnsureFramePr().Y = fpY;
+        }
         if (properties.TryGetValue("framePr.hSpace", out var fpHS) || properties.TryGetValue("framepr.hspace", out fpHS))
+        {
+            if (!uint.TryParse(fpHS, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fhsV)
+                || fhsV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.hSpace' value: '{fpHS}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
             EnsureFramePr().HorizontalSpace = fpHS;
+        }
         if (properties.TryGetValue("framePr.vSpace", out var fpVS) || properties.TryGetValue("framepr.vspace", out fpVS))
+        {
+            if (!uint.TryParse(fpVS, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fvsV)
+                || fvsV > 31680)
+                throw new ArgumentException($"Invalid 'framePr.vSpace' value: '{fpVS}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
             EnsureFramePr().VerticalSpace = fpVS;
+        }
         if (properties.TryGetValue("framePr.wrap", out var fpWrap) || properties.TryGetValue("framepr.wrap", out fpWrap))
         {
             EnsureFramePr().Wrap = fpWrap.ToLowerInvariant() switch
@@ -488,7 +562,7 @@ public partial class WordHandler
                 "none"      => TextWrappingValues.None,
                 "notbeside" => TextWrappingValues.NotBeside,
                 "through"   => TextWrappingValues.Through,
-                _ => TextWrappingValues.Auto,
+                _ => throw new ArgumentException($"Invalid 'framePr.wrap' value: '{fpWrap}'. Valid values: auto, around, none, notBeside, through."),
             };
         }
         if (properties.TryGetValue("framePr.hAnchor", out var fpHA) || properties.TryGetValue("framepr.hanchor", out fpHA))
@@ -497,7 +571,8 @@ public partial class WordHandler
             {
                 "page"   => HorizontalAnchorValues.Page,
                 "margin" => HorizontalAnchorValues.Margin,
-                _ => HorizontalAnchorValues.Text,
+                "text"   => HorizontalAnchorValues.Text,
+                _ => throw new ArgumentException($"Invalid 'framePr.hAnchor' value: '{fpHA}'. Valid values: page, margin, text."),
             };
         }
         if (properties.TryGetValue("framePr.vAnchor", out var fpVA) || properties.TryGetValue("framepr.vanchor", out fpVA))
@@ -506,8 +581,61 @@ public partial class WordHandler
             {
                 "page"   => VerticalAnchorValues.Page,
                 "margin" => VerticalAnchorValues.Margin,
-                _ => VerticalAnchorValues.Text,
+                "text"   => VerticalAnchorValues.Text,
+                _ => throw new ArgumentException($"Invalid 'framePr.vAnchor' value: '{fpVA}'. Valid values: page, margin, text."),
             };
+        }
+        // OOXML ST_XAlign / ST_YAlign are enums; SDK FrameProperties.XAlign and
+        // YAlign are EnumValue-typed but TypedAttributeFallback in Set still
+        // writes the raw string via the SDK accessor. Curate here so invalid
+        // values surface as ArgumentException instead of silently producing
+        // schema-invalid XML.
+        if (properties.TryGetValue("framePr.xAlign", out var fpXA) || properties.TryGetValue("framepr.xalign", out fpXA))
+        {
+            EnsureFramePr().XAlign = fpXA.ToLowerInvariant() switch
+            {
+                "left"    => HorizontalAlignmentValues.Left,
+                "center"  => HorizontalAlignmentValues.Center,
+                "right"   => HorizontalAlignmentValues.Right,
+                "inside"  => HorizontalAlignmentValues.Inside,
+                "outside" => HorizontalAlignmentValues.Outside,
+                _ => throw new ArgumentException($"Invalid 'framePr.xAlign' value: '{fpXA}'. Valid values: left, center, right, inside, outside."),
+            };
+        }
+        if (properties.TryGetValue("framePr.dropCap", out var fpDC) || properties.TryGetValue("framepr.dropcap", out fpDC))
+        {
+            EnsureFramePr().DropCap = fpDC.ToLowerInvariant() switch
+            {
+                "none"   => DropCapLocationValues.None,
+                "drop"   => DropCapLocationValues.Drop,
+                "margin" => DropCapLocationValues.Margin,
+                _ => throw new ArgumentException($"Invalid 'framePr.dropCap' value: '{fpDC}'. Valid values: none, drop, margin."),
+            };
+        }
+        if (properties.TryGetValue("framePr.yAlign", out var fpYA) || properties.TryGetValue("framepr.yalign", out fpYA))
+        {
+            EnsureFramePr().YAlign = fpYA.ToLowerInvariant() switch
+            {
+                "inline"  => VerticalAlignmentValues.Inline,
+                "top"     => VerticalAlignmentValues.Top,
+                "center"  => VerticalAlignmentValues.Center,
+                "bottom"  => VerticalAlignmentValues.Bottom,
+                "inside"  => VerticalAlignmentValues.Inside,
+                "outside" => VerticalAlignmentValues.Outside,
+                _ => throw new ArgumentException($"Invalid 'framePr.yAlign' value: '{fpYA}'. Valid values: inline, top, center, bottom, inside, outside."),
+            };
+        }
+        // framePr.lines is the drop-cap line span. Word UI exposes 1..10;
+        // anything outside renders unpredictably and round-trips poorly.
+        // The generic TypedAttributeFallback below didn't range-check either
+        // bound, so 0 / 50 silently slipped through.
+        if (properties.TryGetValue("framePr.lines", out var fpLines) || properties.TryGetValue("framepr.lines", out fpLines))
+        {
+            if (!int.TryParse(fpLines, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var fpLinesInt)
+                || fpLinesInt < 1 || fpLinesInt > 10)
+                throw new ArgumentException($"Invalid 'framePr.lines' value: '{fpLines}'. Must be an integer 1..10 (drop-cap line span).");
+            EnsureFramePr().Lines = fpLinesInt;
         }
         if (frameProps != null)
             pProps.FrameProperties = frameProps;
@@ -582,8 +710,15 @@ public partial class WordHandler
             || properties.TryGetValue("outlineLevel", out addOLvl)
             || properties.TryGetValue("outlinelevel", out addOLvl))
         {
-            if (int.TryParse(addOLvl, out var olvl) && olvl >= 0 && olvl <= 9)
-                pProps.OutlineLevel = new OutlineLevel { Val = olvl };
+            // OOXML w:outlineLvl/@w:val is ST_DecimalNumber 0..9. Reject
+            // out-of-range upfront — silent-drop produced files where the
+            // user-specified outline level disappeared without warning, and
+            // even an unparseable int slipped through.
+            if (!int.TryParse(addOLvl, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var olvl)
+                || olvl < 0 || olvl > 9)
+                throw new ArgumentException($"Invalid 'outlineLvl' value: '{addOLvl}'. Must be 0-9 (OOXML MaxInclusive=9).");
+            pProps.OutlineLevel = new OutlineLevel { Val = olvl };
         }
         // CONSISTENCY(add-set-symmetry): paragraph rStyle binds the paragraph
         // mark's run style. Run Add already supports rStyle; paragraph dump
@@ -900,7 +1035,8 @@ public partial class WordHandler
                     {
                         "superscript" or "super" => VerticalPositionValues.Superscript,
                         "subscript" or "sub" => VerticalPositionValues.Subscript,
-                        _ => VerticalPositionValues.Baseline
+                        "baseline" => VerticalPositionValues.Baseline,
+                        _ => throw new ArgumentException($"Invalid 'vertAlign' value: '{pVertAlign}'. Valid values: superscript, subscript, baseline."),
                     }
                 };
             }
@@ -947,7 +1083,9 @@ public partial class WordHandler
         {
             "type", "text", "html", "anchor", "anchorId", "anchorid",
             "style", "styleid", "stylename",
-            "align", "alignment", "direction", "dir", "bidi",
+            "align", "alignment", "jc", "textAlignment", "textalignment",
+            "textboxTightWrap", "textboxtightwrap",
+            "direction", "dir", "bidi",
             "firstlineindent", "leftindent", "indentleft", "indent",
             // BUG-R5-F3: chars-based indent variants consumed above.
             "firstlinechars", "firstLineChars",
@@ -979,7 +1117,6 @@ public partial class WordHandler
             "charspacing", "charSpacing", "letterspacing", "letterSpacing",
             "caps", "smallcaps",
             "boldcs", "italiccs", "sizecs",
-            "field", "formula", "ref", "id",
             // BUG-DUMP23-01: bdr was previously listed here, which made the
             // fallback `continue` at line 765 skip it entirely (no curated
             // handler exists in the rProps block above either). Removed so
@@ -1969,7 +2106,8 @@ public partial class WordHandler
                 {
                     "superscript" or "super" => VerticalPositionValues.Superscript,
                     "subscript" or "sub" => VerticalPositionValues.Subscript,
-                    _ => VerticalPositionValues.Baseline
+                    "baseline" => VerticalPositionValues.Baseline,
+                    _ => throw new ArgumentException($"Invalid 'vertAlign' value: '{rVertAlign}'. Valid values: superscript, subscript, baseline."),
                 }
             };
         }
@@ -2138,7 +2276,9 @@ public partial class WordHandler
             "textoutline", "textfill", "w14shadow", "w14glow", "w14reflection",
             // OpenType typographic toggles applied via ApplyW14Effects above.
             "ligatures", "numform", "numspacing",
-            "field", "formula", "ref", "id",
+            // R53-A: link / href / url consumed by the post-insertion
+            // hyperlink-wrap block below (mirrors pptx Add vocabulary).
+            "link", "href", "url",
             // BUG-DUMP5-10: consumed up-front for the w:ins/w:del wrapper
             // emit at the bottom of this method. Bare `revision` is no
             // longer a valid key — creation = `revision.type`, action =
@@ -2324,6 +2464,47 @@ public partial class WordHandler
             {
                 var runCount = GetAllRuns(targetPara).IndexOf(newRun) + 1;
                 resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/r[{runCount}]";
+            }
+        }
+
+        // R53-A: AddRun supports a `link=`/`href=`/`url=` shortcut that wraps
+        // the newly inserted run in a <w:hyperlink> with the corresponding
+        // relationship — same vocabulary the pptx Add accepts and the docx
+        // hyperlink Add supports. Without this, link= surfaced as an
+        // UNSUPPORTED warning and no rel was created.
+        if (targetHyperlink == null
+            && (properties.TryGetValue("link", out var runLink)
+                || properties.TryGetValue("href", out runLink)
+                || properties.TryGetValue("url", out runLink))
+            && !string.IsNullOrWhiteSpace(runLink))
+        {
+            var hlRunHost = ResolveHostPart(targetPara);
+            bool runLinkIsFragment = runLink.StartsWith('#');
+            Uri? runLinkUri;
+            if (runLinkIsFragment)
+            {
+                runLinkUri = new Uri(runLink, UriKind.Relative);
+            }
+            else if (Uri.TryCreate(runLink, UriKind.Absolute, out runLinkUri))
+            {
+                Core.HyperlinkUriValidator.RequireSafeScheme(runLink, "link");
+                runLinkUri = new Uri(PercentEncodeUri(runLink), UriKind.Absolute);
+            }
+            else if (!Uri.TryCreate(runLink, UriKind.Relative, out runLinkUri))
+            {
+                throw new ArgumentException($"Invalid run link URL '{runLink}'. Expected an absolute URI, relative target, or fragment-only anchor (e.g. '#bookmark').");
+            }
+            string runHlRelId = hlRunHost.AddHyperlinkRelationship(runLinkUri!, isExternal: !runLinkIsFragment).Id;
+            var runHlWrap = new Hyperlink { Id = runHlRelId };
+            var newRunParent = newRun.Parent;
+            if (newRunParent != null)
+            {
+                newRunParent.ReplaceChild(runHlWrap, newRun);
+                runHlWrap.AppendChild(newRun);
+                // Recompute resultPath to point at the run inside the hyperlink.
+                var rebuiltHlIdx = targetPara.Elements<Hyperlink>()
+                    .TakeWhile(h => !ReferenceEquals(h, runHlWrap)).Count() + 1;
+                resultPath = $"{ReplaceTrailingParaSegment(parentPath, targetPara)}/hyperlink[{rebuiltHlIdx}]/r[1]";
             }
         }
 

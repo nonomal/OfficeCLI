@@ -141,6 +141,8 @@ public partial class WordHandler
                 cols = ParseHelpers.SafeParseInt(colsStr, "cols");
                 if (cols <= 0)
                     throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. Must be a positive integer (> 0).");
+                if (cols > 63)
+                    throw new ArgumentException($"Invalid 'cols' value: '{colsStr}'. OOXML limits table columns to 63 (w:tblGrid max). Got: {cols}.");
             }
         }
 
@@ -381,7 +383,12 @@ public partial class WordHandler
                 case "layout":
                     tblProps.TableLayout = new TableLayout
                     {
-                        Type = tv.ToLowerInvariant() == "fixed" ? TableLayoutValues.Fixed : TableLayoutValues.Autofit
+                        Type = tv.ToLowerInvariant() switch
+                        {
+                            "fixed"   => TableLayoutValues.Fixed,
+                            "autofit" or "auto" => TableLayoutValues.Autofit,
+                            _ => throw new ArgumentException($"Invalid 'layout' value: '{tv}'. Valid values: fixed, autofit."),
+                        }
                     };
                     break;
                 case "padding":
@@ -729,6 +736,59 @@ public partial class WordHandler
             // them here so they aren't double-tagged as UNSUPPORTED by the
             // generic TypedAttributeFallback. Mirrors border.* skip.
             if (key.StartsWith("padding.", StringComparison.OrdinalIgnoreCase)) continue;
+            // CONSISTENCY(add-set-symmetry): tblp.horzAnchor / tblp.vertAnchor
+            // are enum-valued (ST_HAnchor / ST_VAnchor). The Set side curated
+            // them at Set.Element.cs:2659 and throws on invalid input; the
+            // generic TypedAttributeFallback below would write raw strings
+            // like "column" verbatim. Validate here so Add matches Set.
+            var kLowAdd = key.ToLowerInvariant();
+            if (kLowAdd is "tblp.horzanchor" or "tblp.horizontalanchor"
+                or "tblppr.horzanchor" or "tblppr.horizontalanchor")
+            {
+                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
+                    ?? tblProps.AppendChild(new TablePositionProperties());
+                tpp.HorizontalAnchor = value.ToLowerInvariant() switch
+                {
+                    "margin" => HorizontalAnchorValues.Margin,
+                    "page" => HorizontalAnchorValues.Page,
+                    "text" => HorizontalAnchorValues.Text,
+                    _ => throw new ArgumentException($"Invalid 'tblp.horzAnchor' value: '{value}'. Valid: margin, page, text."),
+                };
+                continue;
+            }
+            if (kLowAdd is "tblp.vertanchor" or "tblp.verticalanchor"
+                or "tblppr.vertanchor" or "tblppr.verticalanchor")
+            {
+                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
+                    ?? tblProps.AppendChild(new TablePositionProperties());
+                tpp.VerticalAnchor = value.ToLowerInvariant() switch
+                {
+                    "margin" => VerticalAnchorValues.Margin,
+                    "page" => VerticalAnchorValues.Page,
+                    "text" => VerticalAnchorValues.Text,
+                    _ => throw new ArgumentException($"Invalid 'tblp.vertAnchor' value: '{value}'. Valid: margin, page, text."),
+                };
+                continue;
+            }
+            // tblpPr.*FromText / position.*FromText — ST_TwipsMeasure with the
+            // short-range SDK property. TypedAttributeFallback would write the
+            // overflowed value verbatim (32768 cast → -32768); validate up-front.
+            if (kLowAdd is "tblppr.leftfromtext" or "tblppr.rightfromtext"
+                or "tblppr.topfromtext" or "tblppr.bottomfromtext"
+                or "position.leftfromtext" or "position.rightfromtext"
+                or "position.topfromtext" or "position.bottomfromtext")
+            {
+                var ftTwips = ParseTwips(value);
+                if (ftTwips > 32767)
+                    throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be 0..32767 twips (OOXML ST_TwipsMeasure short range).");
+                var tpp = tblProps.GetFirstChild<TablePositionProperties>()
+                    ?? tblProps.AppendChild(new TablePositionProperties());
+                if (kLowAdd.EndsWith("leftfromtext")) tpp.LeftFromText = (short)ftTwips;
+                else if (kLowAdd.EndsWith("rightfromtext")) tpp.RightFromText = (short)ftTwips;
+                else if (kLowAdd.EndsWith("topfromtext")) tpp.TopFromText = (short)ftTwips;
+                else tpp.BottomFromText = (short)ftTwips;
+                continue;
+            }
             if (Core.TypedAttributeFallback.TrySet(tblProps, key, value)) continue;
             LastAddUnsupportedProps.Add(key);
         }
@@ -1473,7 +1533,11 @@ public partial class WordHandler
             if (key.StartsWith("border.", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("border", StringComparison.OrdinalIgnoreCase))
             {
-                ApplyCellBorders(lazyTcPr, key, value);
+                if (!ApplyCellBorders(lazyTcPr, key, value))
+                {
+                    LastAddUnsupportedProps.Add(key);
+                    continue;
+                }
                 if (tcPr == null) newCell.PrependChild(lazyTcPr);
                 continue;
             }

@@ -135,8 +135,10 @@ public static partial class WordBatchEmitter
             // Get output doesn't expose raw OOXML). Reader writes there;
             // emitters read from there.
             bool hasVerbatimSpPr = s.InternalFormat.TryGetValue("spPr", out var spObj) && spObj is string sp && sp.Length > 0;
-            bool hasVerbatimDpt = s.Format.TryGetValue("dPt", out var dpObj) && dpObj is string dp && dp.Length > 0;
-            bool hasVerbatimDLbls = s.Format.TryGetValue("dLbls", out var dlbObj) && dlbObj is string dlb && dlb.Length > 0;
+            // R45: dPt/dLbls verbatim XML moved to InternalFormat (was Format).
+            // Reader writes there; emitter must read there too.
+            bool hasVerbatimDpt = s.InternalFormat.TryGetValue("dPt", out var dpObj) && dpObj is string dp && dp.Length > 0;
+            bool hasVerbatimDLbls = s.InternalFormat.TryGetValue("dLbls", out var dlbObj) && dlbObj is string dlb && dlb.Length > 0;
             if (hasVerbatimSpPr)
             {
                 props[$"series{seriesIdx}.spPr"] = (string)spObj!;

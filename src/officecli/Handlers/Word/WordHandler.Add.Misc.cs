@@ -320,6 +320,14 @@ public partial class WordHandler
         var bkName = properties.GetValueOrDefault("name", "");
         if (string.IsNullOrEmpty(bkName))
             throw new ArgumentException("'name' property is required for bookmark");
+        // OOXML ST_Bookmark caps the name attribute at maxLength=40.
+        if (bkName.Length > 40)
+            throw new ArgumentException(
+                $"bookmark name exceeds OOXML maxLength=40 (got {bkName.Length} chars). Truncate the name.");
+        // XML 1.0 §2.2: reject illegal control chars, lone surrogates, and
+        // U+FFFE/FFFF noncharacters in the bookmark name. The shared helper
+        // raises an ArgumentException whose message contains the prop name.
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(bkName, "bookmark name");
 
         // BUG-DUMP-BMSPAN: `end=true` places ONLY a <w:bookmarkEnd> closing an
         // already-open <w:bookmarkStart> of the same name (the start was added
@@ -753,6 +761,65 @@ public partial class WordHandler
         run.AppendChild(new Text(text) { Space = SpaceProcessingModeValues.Preserve });
     }
 
+    /// <summary>
+    /// Percent-encode characters disallowed in RFC 3986 URIs so the rel
+    /// target conforms to OPC requirements. ASCII unreserved + reserved chars
+    /// and already-encoded `%xx` sequences pass through; everything else
+    /// (non-ASCII, ASCII space, control chars, and the gen-delim outliers
+    /// `<>"{}|\^`+backtick) is percent-encoded as UTF-8 bytes. Used for
+    /// hyperlink relationship targets on both Add and Set paths.
+    /// </summary>
+    private static string PercentEncodeUri(string uri)
+    {
+        if (string.IsNullOrEmpty(uri)) return uri;
+        var sb = new System.Text.StringBuilder(uri.Length + 16);
+        var bytes = new byte[4]; // max UTF-8 sequence
+        for (int i = 0; i < uri.Length; i++)
+        {
+            char c = uri[i];
+            if (c < 0x80 && IsUriSafe(c))
+            {
+                sb.Append(c);
+                continue;
+            }
+            // Non-safe ASCII (space, controls, "<>`{}|\^"…) → single-byte %xx.
+            if (c < 0x80)
+            {
+                sb.Append('%').Append(((byte)c).ToString("X2"));
+                continue;
+            }
+            // Surrogate pair → 4-byte UTF-8 sequence.
+            int codePoint;
+            if (char.IsHighSurrogate(c) && i + 1 < uri.Length && char.IsLowSurrogate(uri[i + 1]))
+            {
+                codePoint = char.ConvertToUtf32(c, uri[i + 1]);
+                i++;
+            }
+            else
+            {
+                codePoint = c;
+            }
+            int byteCount = System.Text.Encoding.UTF8.GetBytes(char.ConvertFromUtf32(codePoint), bytes);
+            for (int j = 0; j < byteCount; j++)
+                sb.Append('%').Append(bytes[j].ToString("X2"));
+        }
+        return sb.ToString();
+    }
+
+    // RFC 3986: unreserved + reserved chars + '%' (for already-encoded
+    // sequences). Anything not on this list inside the ASCII range needs
+    // percent-encoding. Tightening here also encodes 0x7F (DEL) and the
+    // "exclude" set "<>`{}|\^"\""
+    private static bool IsUriSafe(char c) =>
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+        c == '-' || c == '.' || c == '_' || c == '~' ||      // unreserved
+        c == ':' || c == '/' || c == '?' || c == '#' ||      // gen-delims
+        c == '[' || c == ']' || c == '@' ||
+        c == '!' || c == '$' || c == '&' || c == '\'' ||     // sub-delims
+        c == '(' || c == ')' || c == '*' || c == '+' ||
+        c == ',' || c == ';' || c == '=' ||
+        c == '%';                                            // already-encoded passthrough
+
     private string AddHyperlink(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         // CONSISTENCY(docx-hyperlink-canonical-url): canonical key is `url`
@@ -814,6 +881,11 @@ public partial class WordHandler
             {
                 // CONSISTENCY(hyperlink-scheme-allowlist): gate absolute URIs only.
                 Core.HyperlinkUriValidator.RequireSafeScheme(hlUrl!, "url");
+                // OPC requires RFC 3986 encoded URIs in .rels. Percent-encode
+                // any non-ASCII chars (and other reserved bytes) before
+                // handing to the SDK — leaving raw IRI chars in the rel
+                // target makes some consumers reject the file.
+                hlUri = new Uri(PercentEncodeUri(hlUrl!), UriKind.Absolute);
             }
             else if (Uri.TryCreate(hlUrl, UriKind.Relative, out hlUri))
             {
@@ -1262,6 +1334,10 @@ public partial class WordHandler
         var fieldCharBegin = new FieldChar { FieldCharType = FieldCharValues.Begin };
         if (fieldLocked) fieldCharBegin.FieldLock = true;
         var fieldRunBegin = new Run(fieldCharBegin);
+        // Reject XML-illegal control chars in the field instruction before
+        // they reach the serializer (otherwise the close-time save crashes
+        // with "data may be lost").
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(fieldInstr, "instr");
         var fieldRunInstr = new Run(new FieldCode(fieldInstr) { Space = SpaceProcessingModeValues.Preserve });
         var fieldRunSep = fieldNoSeparator
             ? null
@@ -1804,6 +1880,22 @@ public partial class WordHandler
     {
         var body = _doc.MainDocumentPart?.Document?.Body
             ?? throw new InvalidOperationException("Document body not found");
+
+        // Reject SDT nested inside a plain-text SDT (sdtPr/<w:text/>): the
+        // outer marks its content as plain-text-only, so adding any SDT
+        // descendant produces OOXML that Word rejects (error 0x422). Walk
+        // ancestors AND the parent's own SdtBlock chain (when parent is the
+        // SDT's content paragraph) so both block- and inline-nest paths are
+        // caught before any mutation. Mirrors the R22 nested-textbox guard.
+        for (var cur = parent; cur != null; cur = cur.Parent)
+        {
+            var sdtPr = (cur as SdtBlock)?.SdtProperties
+                ?? (cur as SdtRun)?.SdtProperties
+                ?? cur.GetFirstChild<SdtProperties>();
+            if (sdtPr?.GetFirstChild<SdtContentText>() != null)
+                throw new ArgumentException(
+                    "Cannot nest an SDT inside a plain-text SDT (sdtPr/<w:text/>). The outer control marks its content as plain-text-only; nested SDTs produce OOXML that Word rejects (error 0x422).");
+        }
 
         // Verbatim carrier (dump-emitted): a rich BLOCK content control whose
         // content references parts/relationships (a cover page with anchored
@@ -2464,6 +2556,14 @@ public partial class WordHandler
 
     private string AddTextbox(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
+        // R47: `/chart[N]` resolves to the paragraph that hosts the chart,
+        // not a chart-internal container. Adding a textbox there silently
+        // landed the drawing in body and returned an unresolvable
+        // `/chart[N]/textbox[M]` path. Reject up-front.
+        if (parentPath.StartsWith("/chart[", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException(
+                $"Cannot add a textbox to a chart path ('{parentPath}'). " +
+                "Charts don't host textbox children — use /body or a table cell as parent.");
         // BUG-D1-MULTIDRAWING-HOST: a paragraph parent means "attach the
         // textbox drawing to this existing paragraph" instead of creating a
         // fresh host. Used by the dump emitter when N textboxes share one
@@ -2952,7 +3052,7 @@ public partial class WordHandler
         "downarrow"              => "downArrow",
         "star5"                  => "star5",
         "wedgerectcallout"       => "wedgeRectCallout",
-        _                        => "rect",
+        _ => throw new ArgumentException($"Unknown geometry '{preset}'. Valid: rect, ellipse, line, roundRect, triangle, diamond, pentagon, hexagon, octagon, rightArrow, leftArrow, upArrow, downArrow, star5, wedgeRectCallout."),
     };
 
     /// <summary>Parse a w:drawing element from XML with full namespace

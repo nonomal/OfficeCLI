@@ -738,11 +738,15 @@ internal static class ParseHelpers
     }
 
     /// <summary>
-    /// Reject XML 1.0 illegal control characters before they reach the OOXML
+    /// Reject XML 1.0 illegal characters before they reach the OOXML
     /// serializer. Without this, the resident process accepts the value into
     /// the in-memory DOM and only fails at close-time with "save failed —
-    /// data may be lost", losing the user's work. Allowed: \t (0x09), \n
-    /// (0x0A), \r (0x0D). Rejected: 0x00–0x08, 0x0B, 0x0C, 0x0E–0x1F.
+    /// data may be lost", losing the user's work.
+    ///
+    /// XML 1.0 §2.2 Char := #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+    /// Rejected: 0x00–0x08, 0x0B, 0x0C, 0x0E–0x1F, lone UTF-16 surrogates
+    /// (U+D800–U+DFFF without a matching pair), and the U+FFFE / U+FFFF
+    /// noncharacters.
     /// </summary>
     public static void ValidateXmlText(string? value, string propName)
     {
@@ -755,6 +759,22 @@ internal static class ParseHelpers
                 throw new ArgumentException(
                     $"{propName} contains XML-illegal control character U+{(int)c:X4} at position {i}. " +
                     "Allowed control chars: \\t, \\n, \\r.");
+            // UTF-16 surrogates only valid in pairs (high then low). A lone
+            // half is illegal in XML 1.0 character data.
+            if (char.IsHighSurrogate(c))
+            {
+                if (i + 1 >= value.Length || !char.IsLowSurrogate(value[i + 1]))
+                    throw new ArgumentException(
+                        $"{propName} contains an unpaired high surrogate U+{(int)c:X4} at position {i}. Use a complete UTF-16 surrogate pair.");
+                i++; // skip the matched low surrogate
+                continue;
+            }
+            if (char.IsLowSurrogate(c))
+                throw new ArgumentException(
+                    $"{propName} contains an unpaired low surrogate U+{(int)c:X4} at position {i}. Use a complete UTF-16 surrogate pair.");
+            if (c == 0xFFFE || c == 0xFFFF)
+                throw new ArgumentException(
+                    $"{propName} contains the XML-illegal noncharacter U+{(int)c:X4} at position {i}.");
         }
     }
 }

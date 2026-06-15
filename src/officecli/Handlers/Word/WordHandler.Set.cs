@@ -265,6 +265,25 @@ public partial class WordHandler
             return unsupported;
         }
 
+        // /docDefaults: same routing as /document, but bare keys (font,
+        // fontSize, color, bold, …) implicitly target docDefaults. Prepend
+        // "docdefaults." to any non-prefixed key so TrySetDocDefaults picks
+        // them up. Keys already prefixed pass through unchanged.
+        if (path.Equals("/docDefaults", StringComparison.OrdinalIgnoreCase))
+        {
+            var rewritten = new Dictionary<string, string>(properties.Comparer ?? StringComparer.OrdinalIgnoreCase);
+            foreach (var (k, v) in properties)
+            {
+                if (k.StartsWith("docdefaults.", StringComparison.OrdinalIgnoreCase))
+                    rewritten[k] = v;
+                else
+                    rewritten["docDefaults." + k] = v;
+            }
+            SetDocumentProperties(rewritten, unsupported);
+            SaveDoc();
+            return unsupported;
+        }
+
         // Handle /settings path — route to SetDocumentProperties which calls TrySetDocSetting
         if (path.Equals("/settings", StringComparison.OrdinalIgnoreCase))
         {
@@ -471,6 +490,25 @@ public partial class WordHandler
         if (element is Table tbl) return SetElementTable(tbl, properties);
         if (element is TabStop tabStop) return SetElementTabStop(tabStop, properties);
         if (element is TextBoxContent txbx) return SetElementTextBoxContent(txbx, properties);
+        // Shapes (Drawing host or wps:wsp/v:shape descendant) have no curated
+        // Set handler. Without this guard the dispatcher returned an empty
+        // unsupported list → CLI reported "Updated" (exit 0) while writing
+        // nothing. Surface every key as unsupported + a warning so the call
+        // signals the gap clearly, mirroring how Add returns UNSUPPORTED for
+        // shape props it doesn't model.
+        bool isShape = element is Drawing
+            || string.Equals(element.LocalName, "wsp", StringComparison.Ordinal)
+            || string.Equals(element.LocalName, "shape", StringComparison.Ordinal);
+        if (isShape)
+        {
+            var dropped = new List<string>();
+            foreach (var k in properties.Keys)
+            {
+                dropped.Add(k);
+                LastSetWarnings.Add($"unsupported property on shape: '{k}' (Set does not currently model shape transforms; see Add path for the supported props).");
+            }
+            return dropped;
+        }
         return new List<string>();
     }
 
@@ -915,7 +953,22 @@ public partial class WordHandler
         // sizeProvided info route through MakeBorderTyped below; the legacy
         // overload stays size-always-stamped for non-nil borders that
         // genuinely default to size 4.
-        var b = new T { Val = style };
+        T b;
+        try { b = new T { Val = style }; }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        {
+            // ParseBorderStyle is lenient (passes unknown tokens via
+            // `new BorderValues(raw)` to support art borders). The SDK's
+            // EnumValue<BorderValues> setter validates on assignment and
+            // throws an enum-type exception with the opaque "specified
+            // value is not valid" message. Convert to a friendly
+            // ArgumentException carrying the bad token.
+            throw new ArgumentException(
+                $"Invalid border style '{style.ToString()}'. " +
+                "Valid styles include: single, double, dashed, dotted, thick, thin, " +
+                "wave, doubleWave, dashSmallGap, dotDash, dotDotDash, triple, outset, " +
+                "inset, dashDotStroked, threeDEmboss, threeDEngrave, none, nil.", ex);
+        }
         if (!(style == BorderValues.Nil && size == 0)) b.Size = size;
         if (space.HasValue) b.Space = space.Value;
         if (color != null) b.Color = color;
@@ -964,7 +1017,7 @@ public partial class WordHandler
                 var resolved = ResolveStyleIdFromName(value);
                 pProps.ParagraphStyleId = new ParagraphStyleId { Val = resolved ?? value };
                 return true;
-            case "align" or "alignment":
+            case "align" or "alignment" or "jc":
                 pProps.Justification = new Justification { Val = ParseJustification(value) };
                 return true;
             case "firstlineindent":
@@ -1042,6 +1095,144 @@ public partial class WordHandler
                     pProps.PageBreakBefore = new PageBreakBefore { Val = OnOffValue.FromBoolean(false) };
                 else pProps.PageBreakBefore = null;
                 return true;
+            case "outlinelvl" or "outlinelevel":
+            {
+                // OOXML w:outlineLvl/@w:val is ST_DecimalNumber 0..9.
+                // TypedAttributeFallback accepts the full ByteValue range so
+                // val=10 silently produced schema-invalid XML. Mirror Add.
+                if (!int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out var olvlS)
+                    || olvlS < 0 || olvlS > 9)
+                    throw new ArgumentException($"Invalid 'outlineLvl' value: '{value}'. Must be 0-9 (OOXML MaxInclusive=9).");
+                pProps.OutlineLevel = new OutlineLevel { Val = olvlS };
+                return true;
+            }
+            case "textalignment":
+            {
+                // OOXML ST_TextAlignment enum (auto/top/center/baseline/bottom).
+                // TypedAttributeFallback wrote the raw string so "banana" 422'd
+                // the file. Validate canonically.
+                pProps.TextAlignment = new TextAlignment
+                {
+                    Val = value.ToLowerInvariant() switch
+                    {
+                        "auto"     => VerticalTextAlignmentValues.Auto,
+                        "top"      => VerticalTextAlignmentValues.Top,
+                        "center"   => VerticalTextAlignmentValues.Center,
+                        "baseline" => VerticalTextAlignmentValues.Baseline,
+                        "bottom"   => VerticalTextAlignmentValues.Bottom,
+                        _ => throw new ArgumentException($"Invalid 'textAlignment' value: '{value}'. Valid: auto, top, center, baseline, bottom."),
+                    },
+                };
+                return true;
+            }
+            case "wordwrap":
+            {
+                // OOXML CT_OnOff toggle (true = wrap, false = no wrap). The
+                // generic fallback treated unrecognized strings as truthy/falsy
+                // silently — reject anything that isn't a recognized boolean.
+                var wwLower = value.ToLowerInvariant();
+                if (wwLower is "true" or "1" or "yes" or "on")
+                    pProps.WordWrap = new WordWrap();
+                else if (wwLower is "false" or "0" or "no" or "off")
+                    pProps.WordWrap = new WordWrap { Val = OnOffValue.FromBoolean(false) };
+                else
+                    throw new ArgumentException($"Invalid 'wordWrap' value: '{value}'. Valid: true, false, 1, 0, yes, no, on, off.");
+                return true;
+            }
+            case "textboxtightwrap":
+            {
+                // OOXML ST_TextboxTightWrap. Curate so the SDK's lenient
+                // EnumValue (which stores invalid strings as extension attrs)
+                // can't slip past — invalid input must throw.
+                pProps.TextBoxTightWrap = new TextBoxTightWrap
+                {
+                    Val = value.ToLowerInvariant() switch
+                    {
+                        "none"             => TextBoxTightWrapValues.None,
+                        "alllines"         => TextBoxTightWrapValues.AllLines,
+                        "firstandlastline" => TextBoxTightWrapValues.FirstAndLastLine,
+                        "firstlineonly"    => TextBoxTightWrapValues.FirstLineOnly,
+                        "lastlineonly"     => TextBoxTightWrapValues.LastLineOnly,
+                        _ => throw new ArgumentException($"Invalid 'textboxTightWrap' value: '{value}'. Valid: none, allLines, firstAndLastLine, firstLineOnly, lastLineOnly."),
+                    },
+                };
+                return true;
+            }
+            // R15 sweep: CT_OnOff paragraph toggles that previously fell through
+            // to GenericXmlQuery.TryCreateTypedChild without strict boolean
+            // validation. Same family as wordWrap above — invalid input silently
+            // produced <w:kinsoku w:val="banana"/> (Get re-read as false).
+            case "kinsoku":
+            case "overflowpunct":
+            case "toplinepunct":
+            case "autospaceDE" or "autospacede":
+            case "autospaceDN" or "autospacedn":
+            case "adjustrightind":
+            case "snaptogrid":
+            case "mirrorindents":
+            case "suppressoverlap":
+            case "suppressautohyphens":
+            case "suppresslinenumbers":
+            {
+                var onOffLower = value.ToLowerInvariant();
+                bool? boolVal = onOffLower switch
+                {
+                    "true" or "1" or "yes" or "on"  => true,
+                    "false" or "0" or "no" or "off" => false,
+                    _ => null,
+                };
+                if (boolVal == null)
+                    throw new ArgumentException($"Invalid '{key}' value: '{value}'. Valid: true, false, 1, 0, yes, no, on, off.");
+                switch (key.ToLowerInvariant())
+                {
+                    case "kinsoku":
+                        pProps.Kinsoku = boolVal.Value
+                            ? new Kinsoku()
+                            : new Kinsoku { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "overflowpunct":
+                        pProps.OverflowPunctuation = boolVal.Value
+                            ? new OverflowPunctuation()
+                            : new OverflowPunctuation { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "toplinepunct":
+                        pProps.TopLinePunctuation = boolVal.Value
+                            ? new TopLinePunctuation()
+                            : new TopLinePunctuation { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "autospacede":
+                        pProps.AutoSpaceDE = boolVal.Value
+                            ? new AutoSpaceDE()
+                            : new AutoSpaceDE { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "autospacedn":
+                        pProps.AutoSpaceDN = boolVal.Value
+                            ? new AutoSpaceDN()
+                            : new AutoSpaceDN { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "adjustrightind":
+                        pProps.AdjustRightIndent = boolVal.Value
+                            ? new AdjustRightIndent()
+                            : new AdjustRightIndent { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "snaptogrid":
+                        pProps.SnapToGrid = boolVal.Value
+                            ? new SnapToGrid()
+                            : new SnapToGrid { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "mirrorindents":
+                        pProps.MirrorIndents = boolVal.Value
+                            ? new MirrorIndents()
+                            : new MirrorIndents { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "suppressoverlap":
+                        pProps.SuppressOverlap = boolVal.Value
+                            ? new SuppressOverlap()
+                            : new SuppressOverlap { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "suppressautohyphens":
+                        pProps.SuppressAutoHyphens = boolVal.Value
+                            ? new SuppressAutoHyphens()
+                            : new SuppressAutoHyphens { Val = OnOffValue.FromBoolean(false) }; break;
+                    case "suppresslinenumbers":
+                        pProps.SuppressLineNumbers = boolVal.Value
+                            ? new SuppressLineNumbers()
+                            : new SuppressLineNumbers { Val = OnOffValue.FromBoolean(false) }; break;
+                }
+                return true;
+            }
             // fuzz-2: 'break=newPage' is the natural paragraph-context spelling
             // (mirrors section-context CONSISTENCY(section-type-alias) in
             // WordHandler.Set.Dispatch.cs:387). For a paragraph this maps to
@@ -1476,6 +1667,50 @@ public partial class WordHandler
             case "border.insidev" or "border.vertical":
                 borders.InsideVerticalBorder = MakeBorder<InsideVerticalBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
                 break;
+            default:
+                // Sub-property form: border.<edge>.<attr> — set a single
+                // attribute on the existing edge border (caller must have
+                // set border.<edge> first; we lazily create a default
+                // `single` border if absent). Mirrors ApplyCellBorderSubProperty.
+                ApplyTableBorderSubProperty(borders, key.ToLowerInvariant(), value);
+                break;
+        }
+    }
+
+    private static void ApplyTableBorderSubProperty(TableBorders borders, string key, string value)
+    {
+        var parts = key.Split('.');
+        if (parts.Length != 3 || parts[0] != "border") return;
+        var edge = parts[1];
+        var attr = parts[2];
+        BorderType? b = edge switch
+        {
+            "top"    => borders.TopBorder    ??= new TopBorder    { Val = BorderValues.Single },
+            "bottom" => borders.BottomBorder ??= new BottomBorder { Val = BorderValues.Single },
+            "left" or "start" => borders.LeftBorder  ??= new LeftBorder  { Val = BorderValues.Single },
+            "right" or "end"  => borders.RightBorder ??= new RightBorder { Val = BorderValues.Single },
+            "insideh" or "horizontal" => borders.InsideHorizontalBorder ??= new InsideHorizontalBorder { Val = BorderValues.Single },
+            "insidev" or "vertical"   => borders.InsideVerticalBorder   ??= new InsideVerticalBorder   { Val = BorderValues.Single },
+            _ => null,
+        };
+        if (b == null) return;
+        switch (attr)
+        {
+            case "sz":
+            case "size":
+                b.Size = (uint)ParseHelpers.SafeParseInt(value, key);
+                break;
+            case "color":
+                var (cHex, _) = ParseHelpers.SanitizeColorForOoxml(value);
+                b.Color = cHex;
+                break;
+            case "space":
+                b.Space = (uint)ParseHelpers.SafeParseInt(value, key);
+                break;
+            case "val":
+            case "style":
+                b.Val = new EnumValue<BorderValues>(new BorderValues(value));
+                break;
         }
     }
 
@@ -1527,8 +1762,32 @@ public partial class WordHandler
         tcPr.AppendChild(child);
     }
 
-    private static void ApplyCellBorders(TableCellProperties tcPr, string key, string value)
+    private static bool ApplyCellBorders(TableCellProperties tcPr, string key, string value)
     {
+        // Validate the key shape before mutating tcPr — an unknown border.*
+        // key (e.g. "borderStyle", or a length-2 split that ApplyCellBorderSubProperty
+        // would silently drop) must surface as unsupported rather than leaving
+        // an empty <w:tcBorders/> element behind.
+        var keyLower = key.ToLowerInvariant();
+        bool isWhole = keyLower is "border.all" or "border" or "border.top"
+            or "border.bottom" or "border.left" or "border.right"
+            or "border.tl2br" or "border.tr2bl";
+        bool isSubProp = false;
+        if (!isWhole)
+        {
+            var parts = keyLower.Split('.');
+            if (parts.Length == 3 && parts[0] == "border")
+            {
+                var edge = parts[1];
+                var attr = parts[2];
+                bool edgeOk = edge is "top" or "bottom" or "left" or "start"
+                    or "right" or "end" or "tl2br" or "tr2bl";
+                bool attrOk = attr is "sz" or "size" or "color" or "space" or "val" or "style";
+                isSubProp = edgeOk && attrOk;
+            }
+        }
+        if (!isWhole && !isSubProp) return false;
+
         // CT_TcPr child sequence is strict: cnfStyle → tcW → gridSpan →
         // hMerge → vMerge → tcBorders → shd → noWrap → tcMar →
         // textDirection → tcFitText → vAlign → hideMark → ... → tcPrChange.
@@ -1548,7 +1807,7 @@ public partial class WordHandler
         // MakeBorder below so w:themeColor/Shade/Tint round-trip.
         var (_, bTheme) = ExtractThemeTail(value);
 
-        switch (key.ToLowerInvariant())
+        switch (keyLower)
         {
             case "border.all" or "border":
                 borders.TopBorder = MakeBorder<TopBorder>(style, size, color, space, sf.shadow, sf.frame, theme: bTheme);
@@ -1578,9 +1837,10 @@ public partial class WordHandler
                 // Sub-property form: border.<edge>.<attr> — set an attribute on
                 // the existing edge border (caller must have set border.<edge>
                 // first; we lazily create a default `single` border if absent).
-                ApplyCellBorderSubProperty(borders, key.ToLowerInvariant(), value);
+                ApplyCellBorderSubProperty(borders, keyLower, value);
                 break;
         }
+        return true;
     }
 
     private static void ApplyCellBorderSubProperty(TableCellBorders borders, string key, string value)

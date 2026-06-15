@@ -16,6 +16,18 @@ namespace OfficeCli.Handlers;
 // becomes a thin dispatcher. Mechanically extracted, no behavior change.
 public partial class WordHandler
 {
+    // OOXML CT_TblPPr @w:*FromText is ST_TwipsMeasure (unsigned int) but the
+    // SDK exposes the property as `short` so we must reject values that
+    // overflow that range before the (short) cast. Pre-fix code silently
+    // wrapped 32768 → -32768. Used by all four *FromText Set cases.
+    private static short ParseTblpFromTextShort(string value, string key)
+    {
+        var twips = ParseTwips(value);
+        if (twips > 32767)
+            throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be 0..32767 twips (OOXML ST_TwipsMeasure short range).");
+        return (short)twips;
+    }
+
     private List<string> SetElementBookmark(BookmarkStart bkStart, Dictionary<string, string> properties)
     {
         var unsupported = new List<string>();
@@ -260,6 +272,7 @@ public partial class WordHandler
                         unsupported.Add(key);
                         break;
                     }
+                    OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "text");
                     var textEl = run.GetFirstChild<Text>();
                     if (textEl != null) textEl.Text = value;
                     // CONSISTENCY(field-cache-stale): if this run sits between
@@ -601,7 +614,11 @@ public partial class WordHandler
                         // relative refs are intra-document and stay open.
                         if (isAbs)
                             Core.HyperlinkUriValidator.RequireSafeScheme(value, key);
-                        var uri = isAbs ? absUri! : new Uri(value, UriKind.Relative);
+                        // OPC requires RFC 3986 encoded URIs in .rels — percent-
+                        // encode non-ASCII chars in absolute Uris before write.
+                        var uri = isAbs
+                            ? new Uri(PercentEncodeUri(value), UriKind.Absolute)
+                            : new Uri(value, UriKind.Relative);
                         var isFragment = !string.IsNullOrEmpty(value) && value.StartsWith('#');
                         var newRelId = hostPart3.AddHyperlinkRelationship(uri, isExternal: !isFragment).Id;
                         if (run.Parent is Hyperlink existingHl)
@@ -798,7 +815,11 @@ public partial class WordHandler
                     // URIs are scheme-gated; fragment/relative stay open.
                     if (isAbs)
                         Core.HyperlinkUriValidator.RequireSafeScheme(value, k);
-                    var uri = isAbs ? absUri! : new Uri(value, UriKind.Relative);
+                    // OPC: percent-encode non-ASCII in absolute Uris before
+                    // writing the .rels target.
+                    var uri = isAbs
+                        ? new Uri(PercentEncodeUri(value), UriKind.Absolute)
+                        : new Uri(value, UriKind.Relative);
                     var isFragment = !string.IsNullOrEmpty(value) && value.StartsWith('#');
                     var newRelId = hostPartHl.AddHyperlinkRelationship(uri, isExternal: !isFragment).Id;
                     hl.Id = newRelId;
@@ -1205,6 +1226,160 @@ public partial class WordHandler
                         para.AppendChild(newRun);
                     }
                     break;
+                case "framepr.w":
+                case "framepr.h":
+                {
+                    // OOXML w:framePr/@w:w and @w:h are ST_TwipsMeasure
+                    // (unsigned int, MaxInclusive=31680). SDK Width is
+                    // StringValue and Height is UInt32Value, but the generic
+                    // TypedAttributeFallback below sets Width as a raw string
+                    // so "auto" or oversized integers slip through and Word
+                    // 422s. Validate explicitly and mirror Add.Text.cs.
+                    if (!uint.TryParse(value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var fpUInt)
+                        || fpUInt > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    if (k == "framepr.w") fp.Width = value;
+                    else fp.Height = fpUInt;
+                    break;
+                }
+                case "framepr.x":
+                case "framepr.y":
+                {
+                    // ST_SignedTwipsMeasure: -31680 <= v <= 31680. SDK X/Y are
+                    // StringValue → TypedAttributeFallback passes anything.
+                    if (!int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var fpSigned)
+                        || fpSigned < -31680 || fpSigned > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a signed integer -31680..31680 (twips, ST_SignedTwipsMeasure).");
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    if (k == "framepr.x") fp.X = value;
+                    else fp.Y = value;
+                    break;
+                }
+                case "framepr.hspace":
+                case "framepr.vspace":
+                {
+                    // ST_TwipsMeasure unsigned, MaxInclusive=31680.
+                    if (!uint.TryParse(value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var fpSp)
+                        || fpSp > 31680)
+                        throw new ArgumentException($"Invalid '{key}' value: '{value}'. Must be a non-negative integer 0..31680 (twips, ST_TwipsMeasure).");
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    if (k == "framepr.hspace") fp.HorizontalSpace = value;
+                    else fp.VerticalSpace = value;
+                    break;
+                }
+                case "framepr.wrap":
+                {
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.Wrap = value.ToLowerInvariant() switch
+                    {
+                        "auto"      => TextWrappingValues.Auto,
+                        "around"    => TextWrappingValues.Around,
+                        "none"      => TextWrappingValues.None,
+                        "notbeside" => TextWrappingValues.NotBeside,
+                        "through"   => TextWrappingValues.Through,
+                        _ => throw new ArgumentException($"Invalid 'framePr.wrap' value: '{value}'. Valid values: auto, around, none, notBeside, through."),
+                    };
+                    break;
+                }
+                case "framepr.hanchor":
+                {
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.HorizontalPosition = value.ToLowerInvariant() switch
+                    {
+                        "page"   => HorizontalAnchorValues.Page,
+                        "margin" => HorizontalAnchorValues.Margin,
+                        "text"   => HorizontalAnchorValues.Text,
+                        _ => throw new ArgumentException($"Invalid 'framePr.hAnchor' value: '{value}'. Valid values: page, margin, text."),
+                    };
+                    break;
+                }
+                case "framepr.vanchor":
+                {
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.VerticalPosition = value.ToLowerInvariant() switch
+                    {
+                        "page"   => VerticalAnchorValues.Page,
+                        "margin" => VerticalAnchorValues.Margin,
+                        "text"   => VerticalAnchorValues.Text,
+                        _ => throw new ArgumentException($"Invalid 'framePr.vAnchor' value: '{value}'. Valid values: page, margin, text."),
+                    };
+                    break;
+                }
+                case "framepr.xalign":
+                {
+                    // OOXML ST_XAlign enum; mirror Add.Text.cs.
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.XAlign = value.ToLowerInvariant() switch
+                    {
+                        "left"    => HorizontalAlignmentValues.Left,
+                        "center"  => HorizontalAlignmentValues.Center,
+                        "right"   => HorizontalAlignmentValues.Right,
+                        "inside"  => HorizontalAlignmentValues.Inside,
+                        "outside" => HorizontalAlignmentValues.Outside,
+                        _ => throw new ArgumentException($"Invalid 'framePr.xAlign' value: '{value}'. Valid values: left, center, right, inside, outside."),
+                    };
+                    break;
+                }
+                case "framepr.yalign":
+                {
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.YAlign = value.ToLowerInvariant() switch
+                    {
+                        "inline"  => VerticalAlignmentValues.Inline,
+                        "top"     => VerticalAlignmentValues.Top,
+                        "center"  => VerticalAlignmentValues.Center,
+                        "bottom"  => VerticalAlignmentValues.Bottom,
+                        "inside"  => VerticalAlignmentValues.Inside,
+                        "outside" => VerticalAlignmentValues.Outside,
+                        _ => throw new ArgumentException($"Invalid 'framePr.yAlign' value: '{value}'. Valid values: inline, top, center, bottom, inside, outside."),
+                    };
+                    break;
+                }
+                case "framepr.dropcap":
+                {
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.DropCap = value.ToLowerInvariant() switch
+                    {
+                        "none"   => DropCapLocationValues.None,
+                        "drop"   => DropCapLocationValues.Drop,
+                        "margin" => DropCapLocationValues.Margin,
+                        _ => throw new ArgumentException($"Invalid 'framePr.dropCap' value: '{value}'. Valid values: none, drop, margin."),
+                    };
+                    break;
+                }
+                case "framepr.lines":
+                {
+                    // Drop-cap line span: Word UI exposes 1..10; mirror
+                    // Add.Text.cs validation so Set rejects the same range.
+                    if (!int.TryParse(value, System.Globalization.NumberStyles.Integer,
+                            System.Globalization.CultureInfo.InvariantCulture, out var fpLinesInt)
+                        || fpLinesInt < 1 || fpLinesInt > 10)
+                        throw new ArgumentException($"Invalid 'framePr.lines' value: '{value}'. Must be an integer 1..10 (drop-cap line span).");
+                    var fp = pProps.FrameProperties ?? (pProps.FrameProperties = new FrameProperties());
+                    fp.Lines = fpLinesInt;
+                    break;
+                }
+                case "ind.firstline":
+                {
+                    // OOXML w:ind firstLine and hanging are mutually exclusive.
+                    // The canonical `firstlineindent` key already cross-clears
+                    // hanging; the ind.* form previously fell through to
+                    // TypedAttributeFallback which left a stale hanging behind.
+                    // Route through ApplyParagraphLevelProperty (its
+                    // "firstlineindent" case nulls hanging and uses
+                    // SpacingConverter for lenient cm/in/pt/twips input).
+                    ApplyParagraphLevelProperty(pProps, "firstlineindent", value, LastSetWarnings);
+                    break;
+                }
+                case "ind.hanging":
+                {
+                    ApplyParagraphLevelProperty(pProps, "hangingindent", value, LastSetWarnings);
+                    break;
+                }
                 default:
                     // Generic dotted "element.attr=value" fallback first.
                     // Probe pPr (where most paragraph attrs live: ind.*,
@@ -1418,7 +1593,11 @@ public partial class WordHandler
                     // Consumed by the cellrevision.type case (sibling lookups).
                     break;
                 case "text":
-                    // Defer text handling until after formatting is applied
+                    // Defer text handling until after formatting is applied.
+                    // Validate up-front though — the deferred run constructor
+                    // below uses `new Text(deferredText)` without a guard so
+                    // an XML-illegal char would otherwise leak to save time.
+                    OfficeCli.Core.ParseHelpers.ValidateXmlText(value, "text");
                     deferredText = value;
                     break;
                 case "font":
@@ -1743,7 +1922,11 @@ public partial class WordHandler
                     // the element entirely so the cell stands alone.
                     var vmLower = value.ToLowerInvariant();
                     bool isRestart = vmLower == "restart";
-                    bool isContinue = vmLower == "continue";
+                    // Accept truthy synonyms (true/yes/on/1) for continue —
+                    // pre-fix code silently coerced anything non-restart/non-
+                    // remove to the bare <w:vMerge/> continuation glyph and
+                    // existing tests / dump→batch use vMerge=true to mean it.
+                    bool isContinue = vmLower is "continue" or "true" or "yes" or "on" or "1";
                     bool isRemove = vmLower is "none" or "clear" or "remove" or "false" or "0" or "no" or "off" or "";
 
                     // BUG-R5-table-merge BUG-9: continuation vMerge in the first
@@ -1764,6 +1947,8 @@ public partial class WordHandler
                             "vmerge=continue on a cell in the first row has no restart anchor above it; Word may render the cell as invisible. Use vmerge=restart if a merge was intended.");
                     }
 
+                    if (!isRestart && !isContinue && !isRemove)
+                        throw new ArgumentException($"Invalid 'vMerge' value: '{value}'. Valid: restart, continue, none.");
                     if (isRemove)
                         tcPr.VerticalMerge = null;
                     else if (isRestart)
@@ -1812,7 +1997,8 @@ public partial class WordHandler
                     }
                     break;
                 case var k when k.StartsWith("border"):
-                    ApplyCellBorders(tcPr, key, value);
+                    if (!ApplyCellBorders(tcPr, key, value))
+                        unsupported.Add(key);
                     break;
                 case "gridspan" or "colspan":
                     var newSpan = ParseHelpers.SafeParseInt(value, "gridspan");
@@ -2330,7 +2516,12 @@ public partial class WordHandler
                 case "layout":
                     tblPr.TableLayout = new TableLayout
                     {
-                        Type = value.ToLowerInvariant() == "fixed" ? TableLayoutValues.Fixed : TableLayoutValues.Autofit
+                        Type = value.ToLowerInvariant() switch
+                        {
+                            "fixed"   => TableLayoutValues.Fixed,
+                            "autofit" or "auto" => TableLayoutValues.Autofit,
+                            _ => throw new ArgumentException($"Invalid 'layout' value: '{value}'. Valid values: fixed, autofit."),
+                        }
                     };
                     break;
                 case "padding":
@@ -2499,18 +2690,27 @@ public partial class WordHandler
                     break;
                 }
                 case "position.hanchor" or "position.horizontalanchor":
+                case "tblp.horzanchor" or "tblp.horizontalanchor":
+                case "tblppr.horzanchor" or "tblppr.horizontalanchor":
                 {
+                    // tblp.horzAnchor is the canonical Get-readback key
+                    // (Navigation.cs:2957). Mirror its vocabulary on Set so
+                    // dump→batch round-trip works without going through the
+                    // generic TypedAttributeFallback (which silently accepts
+                    // any string into the StringValue-typed SDK attribute).
                     var tpp = EnsureTablePositionProperties(tblPr);
                     tpp.HorizontalAnchor = value.ToLowerInvariant() switch
                     {
                         "margin" => HorizontalAnchorValues.Margin,
                         "page" => HorizontalAnchorValues.Page,
                         "text" => HorizontalAnchorValues.Text,
-                        _ => throw new ArgumentException($"Invalid horizontalAnchor: '{value}'. Valid: margin, page, text.")
+                        _ => throw new ArgumentException($"Invalid 'tblp.horzAnchor' value: '{value}'. Valid: margin, page, text.")
                     };
                     break;
                 }
                 case "position.vanchor" or "position.verticalanchor":
+                case "tblp.vertanchor" or "tblp.verticalanchor":
+                case "tblppr.vertanchor" or "tblppr.verticalanchor":
                 {
                     var tpp = EnsureTablePositionProperties(tblPr);
                     tpp.VerticalAnchor = value.ToLowerInvariant() switch
@@ -2518,32 +2718,32 @@ public partial class WordHandler
                         "margin" => VerticalAnchorValues.Margin,
                         "page" => VerticalAnchorValues.Page,
                         "text" => VerticalAnchorValues.Text,
-                        _ => throw new ArgumentException($"Invalid verticalAnchor: '{value}'. Valid: margin, page, text.")
+                        _ => throw new ArgumentException($"Invalid 'tblp.vertAnchor' value: '{value}'. Valid: margin, page, text.")
                     };
                     break;
                 }
                 case "position.leftfromtext" or "position.left":
                 {
                     var tpp = EnsureTablePositionProperties(tblPr);
-                    tpp.LeftFromText = (short)ParseTwips(value);
+                    tpp.LeftFromText = ParseTblpFromTextShort(value, key);
                     break;
                 }
                 case "position.rightfromtext" or "position.right":
                 {
                     var tpp = EnsureTablePositionProperties(tblPr);
-                    tpp.RightFromText = (short)ParseTwips(value);
+                    tpp.RightFromText = ParseTblpFromTextShort(value, key);
                     break;
                 }
                 case "position.topfromtext" or "position.top":
                 {
                     var tpp = EnsureTablePositionProperties(tblPr);
-                    tpp.TopFromText = (short)ParseTwips(value);
+                    tpp.TopFromText = ParseTblpFromTextShort(value, key);
                     break;
                 }
                 case "position.bottomfromtext" or "position.bottom":
                 {
                     var tpp = EnsureTablePositionProperties(tblPr);
-                    tpp.BottomFromText = (short)ParseTwips(value);
+                    tpp.BottomFromText = ParseTblpFromTextShort(value, key);
                     break;
                 }
                 case "overlap":

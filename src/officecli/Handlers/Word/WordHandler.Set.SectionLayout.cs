@@ -21,8 +21,11 @@ public partial class WordHandler
             // ==================== Columns ====================
             case "columns.count":
             {
+                var ccCount = ParseHelpers.SafeParseInt(value, "columns.count");
+                if (ccCount < 1 || ccCount > 45)
+                    throw new ArgumentException($"Invalid 'columns.count' value: '{value}'. cols must be between 1 and 45 (OOXML CT_Columns/@num MaxInclusive=45).");
                 var cols = EnsureColumns();
-                cols.ColumnCount = (short)ParseHelpers.SafeParseInt(value, "columns.count");
+                cols.ColumnCount = (short)ccCount;
                 // No auto-stamp — see `columns` case above. equalWidth is
                 // implicitly true per OOXML when no <w:col> children carry
                 // explicit widths.
@@ -312,8 +315,8 @@ public partial class WordHandler
             {
                 var eqCols = EnsureColumns();
                 var colParts = value.Split(',');
-                if (!short.TryParse(colParts[0], out var colCount) || colCount < 1)
-                    throw new ArgumentException($"Invalid 'columns' value: '{value}'. Expected a positive integer (>= 1), optionally followed by ',space' (e.g. '3' or '3,720').");
+                if (!short.TryParse(colParts[0], out var colCount) || colCount < 1 || colCount > 45)
+                    throw new ArgumentException($"Invalid 'cols' value: '{value}'. cols must be between 1 and 45 (OOXML CT_Columns/@num MaxInclusive=45), optionally followed by ',space' (e.g. '3' or '3,720').");
                 eqCols.ColumnCount = (DocumentFormat.OpenXml.Int16Value)colCount;
                 // Don't auto-stamp equalWidth. Per OOXML spec, equalWidth is
                 // implicitly true when no <w:col> children carry explicit

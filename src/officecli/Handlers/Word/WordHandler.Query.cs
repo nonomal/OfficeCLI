@@ -974,7 +974,16 @@ public partial class WordHandler
 
         var sectType = sectPr.GetFirstChild<SectionType>();
         if (sectType?.Val?.Value != null)
-            secNode.Format["type"] = sectType.Val.InnerText;
+        {
+            // CONSISTENCY(section-type-canonical): expose under both keys so the
+            // Add vocabulary (type=continuous/...) round-trips and the
+            // schema-canonical `sectionType` key (matches Get-side naming for
+            // the inline sectionBreak emit on body paragraphs) is also picked
+            // up by callers that scan for the longer name.
+            var sectTypeStr = sectType.Val.InnerText;
+            secNode.Format["type"] = sectTypeStr;
+            secNode.Format["sectionType"] = sectTypeStr;
+        }
         var pageSize = sectPr.GetFirstChild<PageSize>();
         // Default to A4 size if no explicit page size
         var pgW = pageSize?.Width?.Value ?? WordPageDefaults.A4WidthTwips;

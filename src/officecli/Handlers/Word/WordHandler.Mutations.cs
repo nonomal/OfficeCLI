@@ -415,6 +415,35 @@ public partial class WordHandler
                 }
             }
 
+            // R40: clean up ChartParts referenced by chart drawings nested
+            // inside the removed element. The /chart[N] path above already
+            // handles this for explicit chart removals; mirror the same
+            // reference-counted DeletePart here so removing a wrapping
+            // paragraph / run also drops the backing word/charts/chartN.xml.
+            foreach (var chartRef in element.Descendants<C.ChartReference>())
+            {
+                var chartRid = chartRef.Id?.Value;
+                if (string.IsNullOrEmpty(chartRid)) continue;
+                OpenXmlPart chartHost = mainPart2;
+                if (chartRef.Ancestors<DocumentFormat.OpenXml.Wordprocessing.Header>().FirstOrDefault() is { } chHdr)
+                    chartHost = (OpenXmlPart?)mainPart2.HeaderParts.FirstOrDefault(p => p.Header == chHdr) ?? mainPart2;
+                else if (chartRef.Ancestors<DocumentFormat.OpenXml.Wordprocessing.Footer>().FirstOrDefault() is { } chFtr)
+                    chartHost = (OpenXmlPart?)mainPart2.FooterParts.FirstOrDefault(p => p.Footer == chFtr) ?? mainPart2;
+                // Reference-count across body + headers + footers so a chart
+                // referenced by multiple drawings (unusual but legal) isn't
+                // dropped while a sibling drawing still points at it.
+                int chartRefCount = mainPart2.Document!.Descendants<C.ChartReference>()
+                    .Count(cr => cr.Id?.Value == chartRid);
+                foreach (var hp in mainPart2.HeaderParts)
+                    chartRefCount += hp.Header?.Descendants<C.ChartReference>().Count(cr => cr.Id?.Value == chartRid) ?? 0;
+                foreach (var fp in mainPart2.FooterParts)
+                    chartRefCount += fp.Footer?.Descendants<C.ChartReference>().Count(cr => cr.Id?.Value == chartRid) ?? 0;
+                if (chartRefCount <= 1)
+                {
+                    try { chartHost.DeletePart(chartRid); } catch { }
+                }
+            }
+
             // BUG-R3-09: clean up dead HyperlinkRelationship entries.
             // Each w:hyperlink carries an r:id pointing at a HyperlinkRelationship
             // (an external rel, NOT a part). Deleting the containing element

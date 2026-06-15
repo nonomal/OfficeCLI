@@ -273,6 +273,29 @@ public static partial class PptxBatchEmitter
         }
         catch { /* best-effort */ }
 
+        // External image links on the master (<a:blip r:link="rIdN"> →
+        // TargetMode=External image). GetMasterImageParts covers only embedded
+        // images; without this the external rel dangles.
+        try
+        {
+            foreach (var (relId, relType, uri) in ppt.GetMasterExternalImageLinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideMaster[{idx}]",
+                    Type = "extrel",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["rel-type"] = relType,
+                        ["target"] = uri,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
         // Master <p:custDataLst><p:tags r:id="rIdN"/> (programmability tags) are
         // NOT carried: a UserDefinedTagsPart added to a SlideMasterPart does not
         // survive Save (the SDK prunes it — unlike a slide/layout tag part), so
@@ -347,6 +370,29 @@ public static partial class PptxBatchEmitter
                     {
                         ["rid"] = relId,
                         ["target"] = target,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
+        // External image links on the layout (<a:blip r:link> → external image) —
+        // same as the master external-image-link carrier; the embedded-image
+        // carrier above doesn't cover external links.
+        try
+        {
+            foreach (var (relId, relType, uri) in ppt.GetLayoutExternalImageLinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideLayout[{idx}]",
+                    Type = "extrel",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["rel-type"] = relType,
+                        ["target"] = uri,
                     },
                 });
             }

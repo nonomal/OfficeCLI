@@ -1644,6 +1644,49 @@ public partial class PowerPointHandler : IDocumentHandler
                 return (epRid, parentPartPath);
             }
 
+            case "extrel":
+            {
+                // Re-create an EXTERNAL relationship (TargetMode=External) with a
+                // pinned id and a specified relationship type — used to carry a
+                // master/layout picture's external image link (<a:blip r:link>),
+                // which the embedded-ImagePart carrier doesn't cover. Props:
+                // rid, rel-type, target (the external URI).
+                if (properties == null
+                    || !properties.TryGetValue("rid", out var erRid) || string.IsNullOrEmpty(erRid))
+                    throw new ArgumentException("add-part extrel requires property 'rid'");
+                if (!properties.TryGetValue("rel-type", out var erType) || string.IsNullOrEmpty(erType))
+                    throw new ArgumentException("add-part extrel requires property 'rel-type'");
+                if (!properties.TryGetValue("target", out var erTarget) || string.IsNullOrEmpty(erTarget))
+                    throw new ArgumentException("add-part extrel requires property 'target'");
+                OpenXmlPartContainer erHost;
+                var erSm = Regex.Match(parentPartPath, @"^/slideMaster\[(\d+)\]$");
+                var erSl = erSm.Success ? null : Regex.Match(parentPartPath, @"^/slideLayout\[(\d+)\]$");
+                if (erSm.Success)
+                {
+                    var i = int.Parse(erSm.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.ToList();
+                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = presentationPart.SlideMasterParts.ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideMaster index {i} out of range");
+                    erHost = ps[i - 1];
+                }
+                else if (erSl != null && erSl.Success)
+                {
+                    var i = int.Parse(erSl.Groups[1].Value);
+                    var ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList();
+                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList(); }
+                    if (i < 1 || i > ps.Count) throw new ArgumentException($"slideLayout index {i} out of range");
+                    erHost = ps[i - 1];
+                }
+                else
+                    throw new ArgumentException("add-part extrel: parent must be /slideMaster[N] or /slideLayout[N]");
+                // Idempotent.
+                if (erHost.ExternalRelationships.Any(r => r.Id == erRid)
+                    || erHost.Parts.Any(p => p.RelationshipId == erRid))
+                    return (erRid, parentPartPath);
+                erHost.AddExternalRelationship(erType, new Uri(erTarget, UriKind.RelativeOrAbsolute), erRid);
+                return (erRid, parentPartPath);
+            }
+
             case "theme":
             {
                 // Attach a DISTINCT theme part to a slideMaster / notesMaster with
@@ -2051,6 +2094,48 @@ public partial class PowerPointHandler : IDocumentHandler
         var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<BlipCompanionInfo>();
         return ReadExtendedPartInfos(layouts[layoutIdx - 1]);
+    }
+
+    /// <summary>
+    /// External (TargetMode="External") IMAGE relationships on a slideMaster —
+    /// a master picture can LINK to an external image (<a:blip r:link="rIdN">,
+    /// TargetMode=External) rather than embed it. The master XML is raw-set
+    /// verbatim (keeping r:link="rIdN"), but GetMasterImageParts only re-creates
+    /// embedded ImageParts, so the external relationship was dropped and the
+    /// rebuilt master's r:link dangled. Surfaced as (rId, relationship-type, uri)
+    /// so the emitter pins each via add-part extrel. (The hyperlink carrier
+    /// already covers .../hyperlink external rels; this covers the .../image
+    /// external links.) Empty when the master links no external images.
+    /// </summary>
+    internal IReadOnlyList<(string RelId, string RelType, string Uri)> GetMasterExternalImageLinks(int masterIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string, string)>();
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string, string)>();
+        return ReadExternalImageLinks(masters[masterIdx - 1]);
+    }
+
+    /// <summary>Same as <see cref="GetMasterExternalImageLinks"/> for slideLayouts.</summary>
+    internal IReadOnlyList<(string RelId, string RelType, string Uri)> GetLayoutExternalImageLinks(int layoutIdx)
+    {
+        var pp = _doc.PresentationPart;
+        if (pp == null) return Array.Empty<(string, string, string)>();
+        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string, string)>();
+        return ReadExternalImageLinks(layouts[layoutIdx - 1]);
+    }
+
+    private static IReadOnlyList<(string RelId, string RelType, string Uri)> ReadExternalImageLinks(OpenXmlPart host)
+    {
+        var result = new List<(string, string, string)>();
+        foreach (var rel in host.ExternalRelationships)
+        {
+            // Image external links (r:link). Skip hyperlinks (carried separately).
+            if (rel.RelationshipType.EndsWith("/image", StringComparison.Ordinal))
+                result.Add((rel.Id, rel.RelationshipType, rel.Uri.OriginalString));
+        }
+        return result;
     }
 
     private static IReadOnlyList<BlipCompanionInfo> ReadExtendedPartInfos(OpenXmlPart host)

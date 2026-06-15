@@ -5758,9 +5758,20 @@ public partial class WordHandler
             var parentRow = cell.Parent as TableRow;
             if (parentTbl != null && parentRow != null)
             {
-                var cellIdx = GetRowCellsFlattened(parentRow).IndexOf(cell);
+                // BUG-DUMP-GRIDIDX: the cell's GRID-COLUMN index is NOT its
+                // ordinal position in the row — a preceding cell with
+                // gridSpan>1 occupies multiple grid columns, so the starting
+                // grid column is the SUM of preceding cells' spans. Using the
+                // raw ordinal mis-reads the column width for every cell after
+                // a horizontally-merged one (and made the derived row total
+                // exceed tblGrid, overflowing the page on rebuild).
+                var rowCells = GetRowCellsFlattened(parentRow);
+                var cellPos = rowCells.IndexOf(cell);
+                var cellIdx = 0;
+                for (int ci = 0; ci < cellPos; ci++)
+                    cellIdx += (int)(rowCells[ci].TableCellProperties?.GridSpan?.Val?.Value ?? 1);
                 var gridCols = parentTbl.GetFirstChild<TableGrid>()?.Elements<GridColumn>().ToList();
-                if (gridCols != null && cellIdx >= 0 && cellIdx < gridCols.Count)
+                if (gridCols != null && cellPos >= 0 && cellIdx < gridCols.Count)
                 {
                     // Account for gridSpan — sum spanned cols.
                     var span = (tcPr?.GridSpan?.Val?.Value ?? 1);

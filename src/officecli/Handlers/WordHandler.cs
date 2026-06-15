@@ -787,14 +787,22 @@ public partial class WordHandler : IDocumentHandler
 
     private OpenXmlPart ResolveImageHostPart(OpenXmlElement run)
     {
-        var headerAncestor = run.Ancestors<Header>().FirstOrDefault();
+        // BUG-R14A: self-or-ancestor — `run` may itself BE the part-root (the SDT
+        // carrier in AddSdt passes the Header/Footer element directly as parent
+        // when an `add sdt parent=/footer[N]` lands a rich content control at the
+        // footer root). Ancestors<Footer>() excludes self, so a bare
+        // Ancestors lookup fell through to MainDocumentPart and registered the
+        // SDT's hyperlink/image relationship on document.xml.rels instead of the
+        // footer's — leaving the r:id in word/footerN.xml dangling and the file
+        // unopenable in Word. Mirrors ResolveHostPart's self-or-ancestor walk.
+        var headerAncestor = run as Header ?? run.Ancestors<Header>().FirstOrDefault();
         if (headerAncestor != null)
         {
             var hp = _doc.MainDocumentPart!.HeaderParts
                 .FirstOrDefault(p => ReferenceEquals(p.Header, headerAncestor));
             if (hp != null) return hp;
         }
-        var footerAncestor = run.Ancestors<Footer>().FirstOrDefault();
+        var footerAncestor = run as Footer ?? run.Ancestors<Footer>().FirstOrDefault();
         if (footerAncestor != null)
         {
             var fp = _doc.MainDocumentPart!.FooterParts

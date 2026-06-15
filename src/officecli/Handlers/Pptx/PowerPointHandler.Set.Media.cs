@@ -32,6 +32,18 @@ public partial class PowerPointHandler
             throw new ArgumentException($"Picture {picIdx} not found (total: {pics.Count})");
 
         var pic = pics[picIdx - 1];
+        return ApplyPicturePropertiesCore(slidePart, pic, properties);
+    }
+
+    // Apply picture-set properties to a resolved Picture. Extracted from
+    // SetPictureByPath so the same vocabulary (position/size/src/crop/effects/
+    // link/…) works for a picture nested in a group — SetGroupInnerPictureByPath
+    // resolves the Picture inside the group and delegates here. Without a group
+    // route the deferred picture-effect sets (shadow/glow/brightness/contrast,
+    // schema add:false set:true) that EmitPicture emits for a grouped picture
+    // hit "Element not found" on replay.
+    private List<string> ApplyPicturePropertiesCore(SlidePart slidePart, Picture pic, Dictionary<string, string> properties)
+    {
         var unsupported = new List<string>();
         foreach (var (key, value) in properties)
         {

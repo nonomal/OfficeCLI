@@ -1226,6 +1226,31 @@ public partial class PowerPointHandler
         return (slidePart, innerShapes[shapeIdx - 1]);
     }
 
+    /// <summary>
+    /// /slide[N]/group[M]/picture[K] — resolve a Picture nested directly in a
+    /// group and apply picture-set props via the shared core. Mirrors
+    /// ResolveGroupInnerShape but for Picture children.
+    /// </summary>
+    private List<string> SetGroupInnerPictureByPath(Match m, Dictionary<string, string> properties)
+    {
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var grpIdx = int.Parse(m.Groups[2].Value);
+        var picIdx = int.Parse(m.Groups[3].Value);
+        var slideParts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > slideParts.Count)
+            throw new ArgumentException($"Slide {slideIdx} not found (total: {slideParts.Count})");
+        var slidePart = slideParts[slideIdx - 1];
+        var shapeTree = GetSlide(slidePart).CommonSlideData?.ShapeTree
+            ?? throw new ArgumentException("Slide has no shape tree");
+        var groups = shapeTree.Elements<GroupShape>().ToList();
+        if (grpIdx < 1 || grpIdx > groups.Count)
+            throw new ArgumentException($"Group {grpIdx} not found (total: {groups.Count})");
+        var pics = groups[grpIdx - 1].Elements<Picture>().ToList();
+        if (picIdx < 1 || picIdx > pics.Count)
+            throw new ArgumentException($"Picture {picIdx} not found in group {grpIdx} (total: {pics.Count})");
+        return ApplyPicturePropertiesCore(slidePart, pics[picIdx - 1], properties);
+    }
+
     private (SlidePart slidePart, Shape shape) ResolveGroupInnerShape(int slideIdx, int grpIdx, int shapeIdx)
     {
         var slideParts = GetSlideParts().ToList();

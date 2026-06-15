@@ -427,6 +427,16 @@ public partial class PowerPointHandler
         var grpInnerShapeMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]/shape\[(\d+)\]$");
         if (grpInnerShapeMatch.Success) return SetGroupInnerShapeByPath(grpInnerShapeMatch, properties);
 
+        // Try group inner picture path: /slide[N]/group[M]/picture[K] (or pic[K]).
+        // CONSISTENCY(group-inner-shape): Get/Add support a picture nested in a
+        // group; Set fell through to the XML fallback (LocalName "group" ≠
+        // p:grpSp) and errored "Element not found". EmitPicture defers picture
+        // effects (shadow/glow/brightness/contrast — schema add:false set:true)
+        // as `set /slide[N]/group[K]/picture[M]`, so a grouped picture with any
+        // such effect failed on replay. Route to the same picture-prop core.
+        var grpInnerPicMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]/(?:picture|pic)\[(\d+)\]$");
+        if (grpInnerPicMatch.Success) return SetGroupInnerPictureByPath(grpInnerPicMatch, properties);
+
         // Try group path: /slide[N]/group[M]
         var grpMatch = Regex.Match(path, @"^/slide\[(\d+)\]/group\[(\d+)\]$");
         if (grpMatch.Success) return SetGroupByPath(grpMatch, properties);

@@ -170,6 +170,16 @@ public static partial class WordBatchEmitter
             // cascade a whole-document pagination drift. Capture the markers'
             // formatting as a fallback when no result formatting exists.
             DocumentNode? firstFormattedMarker = c is not null && FieldRunHasFormatting(c) ? c : null;
+            // BUG-DUMP-FIELD-DELTEXT: is the WHOLE field tracked-deleted? The
+            // begin fldChar carries revision.type=del when the entire field sits
+            // inside a <w:del>. In that case the cached display is legitimately
+            // <w:delText> and must be captured (it round-trips as a deleted
+            // field). Only when the field is LIVE do we skip del result runs as
+            // superseded BEFORE-deletion text. See the result-run branch below.
+            bool fieldIsDeleted = c is not null
+                && c.Format.TryGetValue("revision.type", out var beginRevT)
+                && beginRevT is string beginRevStr
+                && string.Equals(beginRevStr, "del", StringComparison.OrdinalIgnoreCase);
             // BUG-DUMP-R26-2: collect EVERY post-separate result run so we can
             // detect a rich (multi-run, heterogeneously-formatted) cached result.
             // AddField's single-rPr model collapses such a result to one run and
@@ -252,6 +262,28 @@ public static partial class WordBatchEmitter
                 }
                 else if ((k.Type == "run" || k.Type == "r") && depth == 1)
                 {
+                    // BUG-DUMP-FIELD-DELTEXT: a deleted run INSIDE a live field's
+                    // result span carries <w:delText> (the BEFORE-deletion text),
+                    // which is NOT part of the field's current displayed value.
+                    // Accumulating it alongside the inserted replacement produced
+                    // concatenated garbage ("2.7" + "2.8" = "2.72.8" where the
+                    // current value is "2.8"). Skip such del runs from the
+                    // cached-display accumulation and result-run capture — Word
+                    // renders only the non-deleted runs as the field result.
+                    // (ins / moveTo runs stay; their text is live.)
+                    //
+                    // BUT only when the FIELD ITSELF is live. If the whole field is
+                    // tracked-deleted (its begin fldChar is del), every run is del
+                    // and the cached display IS the deleted text — it must still be
+                    // captured so the field round-trips as <w:delText>/<w:delInstrText>
+                    // (DelInsFieldHyperlinkRoundTripTests). Skipping there would
+                    // resurrect a deleted field as empty/live. So gate the skip on
+                    // the field not being del-wrapped.
+                    if (!fieldIsDeleted
+                        && k.Format.TryGetValue("revision.type", out var revT)
+                        && revT is string revTStr
+                        && string.Equals(revTStr, "del", StringComparison.OrdinalIgnoreCase))
+                        continue;
                     // Cached display segments after fldChar(separate). Concatenate
                     // their text. At depth>1 the run belongs to the nested
                     // field's cached display and is consumed by its own collapse

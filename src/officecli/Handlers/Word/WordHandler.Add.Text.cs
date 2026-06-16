@@ -691,6 +691,22 @@ public partial class WordHandler
             else
                 pProps.WidowControl = new WidowControl { Val = false };
         }
+        // CONSISTENCY(add-set-symmetry): snapToGrid is valid on BOTH pPr and rPr.
+        // A bare `snapToGrid` key on `add p` is the PARAGRAPH-level property (the
+        // dump emits run-level snapToGrid as a separate `add r` op). Route it to
+        // pPr here — mirrors widowControl/wordWrap above — so it does NOT fall to
+        // the bare-run fallback below (which, since ApplyRunFormatting gained a
+        // snapToGrid case, would otherwise stamp it onto the content run and
+        // change a paragraph-level grid opt-out into a run-level one). Both
+        // true/false write an explicit element; the OFF form is the meaningful
+        // one on a doc with a docGrid. snapToGrid is in bareConsumed so the loop
+        // skips it after this.
+        if (properties.TryGetValue("snaptogrid", out var addSnap) || properties.TryGetValue("snapToGrid", out addSnap))
+        {
+            pProps.SnapToGrid = IsTruthy(addSnap)
+                ? new SnapToGrid()
+                : new SnapToGrid { Val = OnOffValue.FromBoolean(false) };
+        }
         // CONSISTENCY(add-set-symmetry): Set accepts wordWrap via the toggle
         // fallback in WordHandler.Set.cs; Add mirrors it so callers can build
         // CJK right-aligned paragraphs (which need wordWrap=false to preserve
@@ -1112,6 +1128,7 @@ public partial class WordHandler
             "keepnext", "keepwithnext", "keeplines", "keeptogether",
             "pagebreakbefore", "break",
             "widowcontrol", "widowControl",
+            "snaptogrid", "snapToGrid",
             "numid", "numId", "ilvl", "numlevel", "numLevel",
             "liststyle", "listStyle", "start", "level", "listLevel", "listlevel",
             "outlinelevel", "outlineLevel",

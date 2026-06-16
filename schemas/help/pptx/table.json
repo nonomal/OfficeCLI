@@ -114,7 +114,7 @@
         "colwidths"
       ],
       "add": true,
-      "set": false,
+      "set": true,
       "get": true,
       "examples": [
         "--prop colWidths=2cm,3cm,2cm",

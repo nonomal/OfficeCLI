@@ -346,6 +346,27 @@ public partial class PowerPointHandler
         // Actually OOXML: 0 = right, 90 = bottom; CSS: 0 = up, 90 = right
         var cssAngle = angleDeg + 90;
 
+        // scaled="1": the OOXML angle is measured relative to the shape's
+        // bounding box (corner-to-corner), NOT in absolute degrees. A fixed
+        // CSS angle ignores aspect ratio and lands off the corners on a
+        // non-square shape. CSS corner keywords (`to bottom right`, …) are
+        // aspect-aware by spec, so snap a scaled gradient to the corner
+        // matching its quadrant. Unscaled gradients keep the literal angle.
+        if (linear?.Scaled?.Value == true)
+        {
+            // Normalize CSS angle into [0,360); pick the nearest of the four
+            // corner directions (45/135/225/315 → corners).
+            var a = ((cssAngle % 360) + 360) % 360;
+            var corner = a switch
+            {
+                >= 0 and < 90 => "to top right",
+                >= 90 and < 180 => "to bottom right",
+                >= 180 and < 270 => "to bottom left",
+                _ => "to top left",
+            };
+            return $"linear-gradient({corner}, {string.Join(", ", cssStops)})";
+        }
+
         return $"linear-gradient({cssAngle:0.##}deg, {string.Join(", ", cssStops)})";
     }
 

@@ -67,11 +67,29 @@ public partial class WordHandler
             }
             else if (spanStart >= 0)
             {
-                // A non-paragraph body child (table, sdt, …) interrupts an open
-                // field span. Such a field can't be represented as a run of
-                // consecutive paragraphs — abandon the span so its paragraphs
-                // fall back to the normal per-paragraph emit (degraded but
-                // safe) rather than producing a malformed raw slice.
+                // A non-paragraph body child interrupts an open field span.
+                // BUG-DUMP-TOC-SDT: the canonical body-level TOC content control
+                // is exactly this shape — the field opens (begin/instr/separate)
+                // in one paragraph, its cached entries live in a top-level
+                // <w:sdt> (Table-of-Contents docPartObj), and the field closes
+                // (end) in a following paragraph. The interrupting <w:sdt> is
+                // raw-passed verbatim by EmitSdt regardless, so keeping the span
+                // OPEN here lets the opener and closer paragraphs round-trip
+                // verbatim via EmitCrossParagraphFieldMember too — preserving the
+                // whole begin…sdt…end field wrapper. Abandoning the span instead
+                // dropped both fldChar paragraphs' markers (the typed `add toc`
+                // fallback could only model a self-contained field), leaving the
+                // TOC entries present but no longer wrapped in a live field —
+                // Word then renders the cached text as plain paragraphs and the
+                // TOC stops updating. SDTs don't carry their own outer field
+                // begin/end, so they don't affect the begin/end balance; leave
+                // `depth` untouched and let the closing paragraph terminate it.
+                if (el is SdtBlock) continue;
+                // Any other non-paragraph child (table, …) genuinely can't be
+                // represented as a run of consecutive paragraphs — abandon the
+                // span so its paragraphs fall back to the normal per-paragraph
+                // emit (degraded but safe) rather than producing a malformed
+                // raw slice.
                 depth = 0; spanStart = -1;
             }
         }

@@ -918,6 +918,43 @@ public static partial class WordBatchEmitter
                     && iv?.ToString()?.TrimStart().StartsWith("TOC", StringComparison.OrdinalIgnoreCase) == true));
         if (instrChild == null) return false;
         var instr = instrChild.Format["instruction"]!.ToString()!;
+        // BUG-DUMP-TOC-LOSSY: the typed `add toc` path does NOT round-trip an
+        // arbitrary TOC field. AddToc reconstructs a CANONICAL instruction —
+        // it always emits ` TOC \o "{levels}"` (defaulting levels to "1-3"),
+        // always appends ` \u `, and always writes the "Update field to see
+        // table of contents" placeholder as the field result. ParseTocInstruction
+        // only understands \o \h \z \t \b, so any other switch is silently
+        // dropped. Concrete corruptions this caused:
+        //  - ` TOC \h \z \c "Table" ` (a Table-of-Tables / table-of-captions)
+        //    became ` TOC \o "1-3" \h \z \u ` — \c "Table" dropped, a bogus
+        //    \o "1-3" fabricated, so the field switched from a caption index to
+        //    a heading index.
+        //  - ` TOC \h \z \t "Style,1" ` (a custom-style index with no \o) gained
+        //    a fabricated ` \o "1-3"`.
+        //  - A bare ` TOC \o "1-3" ` (no \u) gained a stray ` \u `.
+        // Only fire the typed path for an instruction AddToc reproduces BYTE-FOR-
+        // BYTE from the parsed props (same switch set, in canonical form) that is
+        // self-contained in THIS paragraph. Anything AddToc would reshape — a
+        // missing \o or \u that it fabricates, or any switch it can't represent —
+        // bails to the generic field-emit path (CollapseFieldChains →
+        // BuildFieldAddProps default arm), which preserves the full instruction
+        // verbatim via `instr=`. A cross-paragraph TOC (the canonical Word shape,
+        // whose begin/instr/separate open here, whose cached entries live in
+        // following paragraphs or a top-level <w:sdt>, and whose end closes
+        // elsewhere) is routed verbatim by the cross-paragraph field-span
+        // machinery (GetCrossParagraphFieldSpanRanges → EmitCrossParagraphFieldMember)
+        // and never reaches this method; the self-contained guard here is a safety
+        // net for a span that escapes that detection. The authored `add toc`
+        // shape (` TOC \o "1-3" \h \u ` + placeholder, all in one paragraph)
+        // round-trips byte-for-byte through AddToc and stays on the typed path.
+        if (!TocInstructionRoundTripsThroughAddToc(instr)) return false;
+        var fldCharTypes = pNode.Children
+            .Where(c => c.Type == "fieldChar")
+            .Select(c => c.Format.TryGetValue("fieldCharType", out var fv) ? fv?.ToString() : null)
+            .ToList();
+        bool selfContained = fldCharTypes.Any(t => string.Equals(t, "begin", StringComparison.OrdinalIgnoreCase))
+            && fldCharTypes.Any(t => string.Equals(t, "end", StringComparison.OrdinalIgnoreCase));
+        if (!selfContained) return false;
         var tocProps = ParseTocInstruction(instr);
         items.Add(new BatchItem
         {
@@ -927,6 +964,65 @@ public static partial class WordBatchEmitter
             Props = tocProps
         });
         return true;
+    }
+
+    // True when AddToc would reproduce this TOC instruction BYTE-FOR-BYTE from
+    // the props ParseTocInstruction extracts. AddToc emits a fixed canonical
+    // shape — ` TOC \o "{levels}"` (+ ` \h` if hyperlinks, + ` \z` if page
+    // numbers suppressed, + ` \t "{cs}"`, + ` \b "{bm}"`) and ALWAYS appends
+    // ` \u `. So the typed path is faithful only when the source instruction
+    // already has \o and \u, optionally h/z/t/b, and nothing else (any switch
+    // ParseTocInstruction can't represent — \c \f \a \n \p \s \d \l \w \x \# —
+    // or a missing \o / \u that AddToc would fabricate, makes it lossy).
+    // Reconstruct AddToc's exact output from the parsed props and compare,
+    // normalizing only inter-token whitespace so source switch ORDER doesn't
+    // matter (AddToc emits o,h,z,t,b,u; the source may list them differently).
+    private static bool TocInstructionRoundTripsThroughAddToc(string instruction)
+    {
+        var props = ParseTocInstruction(instruction);
+        // ParseTocInstruction sets levels only when \o is present; AddToc would
+        // default it to "1-3" and so fabricate an \o the source lacks.
+        if (!props.ContainsKey("levels")) return false;
+        // AddToc always appends \u; a source without \u would gain one.
+        if (!System.Text.RegularExpressions.Regex.IsMatch(instruction, "\\\\u\\b")) return false;
+        // Reject any switch AddToc can't represent (would be silently dropped).
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(instruction, "\\\\([A-Za-z#])"))
+        {
+            if (!"ohztbu".Contains(m.Groups[1].Value, StringComparison.Ordinal)) return false;
+        }
+        // Rebuild AddToc's canonical instruction (mirrors AddToc in
+        // WordHandler.Add.Structure.cs) and compare on a whitespace-normalized,
+        // switch-sorted basis so ordering differences alone don't force a bail.
+        var rebuilt = new System.Text.StringBuilder($" TOC \\o \"{props["levels"]}\"");
+        if (props.TryGetValue("hyperlinks", out var h) && h == "true") rebuilt.Append(" \\h");
+        if (props.TryGetValue("pageNumbers", out var z) && z == "false") rebuilt.Append(" \\z");
+        if (props.TryGetValue("customStyles", out var cs) && !string.IsNullOrEmpty(cs))
+            rebuilt.Append($" \\t \"{cs}\"");
+        if (props.TryGetValue("bookmark", out var bm) && !string.IsNullOrEmpty(bm))
+            rebuilt.Append($" \\b \"{bm}\"");
+        rebuilt.Append(" \\u ");
+        return TocCanonicalForm(rebuilt.ToString()) == TocCanonicalForm(instruction);
+    }
+
+    // Canonical comparison form for a TOC instruction: collapse runs of
+    // whitespace to a single space, trim, and sort the switch tokens (each a
+    // `\x` optionally followed by its quoted/bare argument) so two instructions
+    // that differ only in switch order compare equal.
+    private static string TocCanonicalForm(string instruction)
+    {
+        var collapsed = System.Text.RegularExpressions.Regex
+            .Replace(instruction.Trim(), "\\s+", " ");
+        // Split into the leading "TOC" token plus each `\x [arg]` switch.
+        var m = System.Text.RegularExpressions.Regex.Match(collapsed, "^TOC\\b");
+        if (!m.Success) return collapsed;
+        var rest = collapsed[m.Length..];
+        var switches = System.Text.RegularExpressions.Regex
+            .Matches(rest, "\\\\[A-Za-z#](?:\\s+(?:\"[^\"]*\"|[^\\\\\\s]+))?")
+            .Select(s => System.Text.RegularExpressions.Regex.Replace(s.Value.Trim(), "\\s+", " "))
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+        return "TOC " + string.Join(" ", switches);
     }
 
     private static bool ShouldCollapseSingleRun(WordHandler word, List<DocumentNode> runs, int breaksCount, int bookmarksCount, int inlineSdtsCount)

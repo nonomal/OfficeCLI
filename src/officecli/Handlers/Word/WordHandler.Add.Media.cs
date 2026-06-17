@@ -1063,6 +1063,24 @@ public partial class WordHandler
             => parent.AddNewPart<ChartColorStylePart>(ct, relId),
         "application/vnd.ms-office.chartstyle+xml"
             => parent.AddNewPart<ChartStylePart>(ct, relId),
+        // BUG-DUMP-VMLCHART-THEMEOVERRIDE: a DrawingML chart child of a VML
+        // shape can carry a <c:themeOverride> part (the chart's own theme
+        // overrides — colours/fonts that differ from the document theme). It
+        // reaches here as part{N}.child{M} with themeOverride+xml. Without this
+        // arm CreateInlinedChildPart returned null, aborting the whole
+        // `add vmlshape` step and dropping the shape's enclosed text runs.
+        "application/vnd.openxmlformats-officedocument.themeOverride+xml"
+            => parent.AddNewPart<ThemeOverridePart>(ct, relId),
+        // BUG-DUMP-VMLCHART-EMBEDPKG: a chart child of a VML shape can also be
+        // the chart's embedded data workbook (spreadsheetml.sheet, the live
+        // chart source) or a legacy OLE object. CreateInlinedPart already routes
+        // these at the top level; mirror it for the child slot so the embedded
+        // package round-trips instead of aborting the shape (and dropping its
+        // text). Same content-type predicates so the two factories stay in sync.
+        _ when IsEmbeddedPackageContentType(ct)
+            => parent.AddNewPart<EmbeddedPackagePart>(ct, relId),
+        _ when IsEmbeddedOleObjectContentType(ct)
+            => parent.AddNewPart<EmbeddedObjectPart>(ct, relId),
         _ when ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             => parent.AddNewPart<ImagePart>(ct, relId),
         _ => null,

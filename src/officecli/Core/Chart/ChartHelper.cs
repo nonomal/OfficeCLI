@@ -233,7 +233,10 @@ internal static partial class ChartHelper
 
             foreach (var seriesPart in seriesParts)
             {
-                var colonIdx = seriesPart.IndexOf(':');
+                // Split on the LAST colon: the value list is colon-free, so the
+                // rightmost colon separates a (possibly colon-containing) series
+                // name from its values, e.g. "Persons (Data year: 2021):1,2,3".
+                var colonIdx = seriesPart.LastIndexOf(':');
                 if (colonIdx < 0) continue;
                 var name = seriesPart[..colonIdx].Trim();
                 var valStr = seriesPart[(colonIdx + 1)..].Trim();
@@ -291,7 +294,10 @@ internal static partial class ChartHelper
                 result.Add(($"Series {i}", Array.Empty<double>()));
                 continue;
             }
-            var colonIdx = seriesStr.IndexOf(':');
+            // Split on the LAST colon: values are colon-free comma numbers, so
+            // the rightmost colon separates a (possibly colon-containing) series
+            // name from its values (e.g. "Persons (Data year: 2021):1,2,3").
+            var colonIdx = seriesStr.LastIndexOf(':');
             if (colonIdx < 0)
             {
                 var vals = ParseSeriesValues(seriesStr, $"series{i}");

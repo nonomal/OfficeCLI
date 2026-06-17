@@ -3148,7 +3148,13 @@ internal static partial class ChartHelper
                         if (seriesIdx < 1 || seriesIdx > allSer.Count) { unsupported.Add(key); break; }
                         var ser = allSer[seriesIdx - 1];
 
-                        var colonIdx = value.IndexOf(':');
+                        // Split the trailing "Name:v1,v2,..." form on the LAST
+                        // colon: the value list is colon-free (comma-separated
+                        // finite numbers), so the rightmost colon is always the
+                        // name/value separator. A series name that itself
+                        // contains a colon (e.g. "Persons (Data year: 2021)")
+                        // round-trips intact instead of splitting inside the name.
+                        var colonIdx = value.LastIndexOf(':');
                         double[] vals;
                         if (colonIdx >= 0)
                         {

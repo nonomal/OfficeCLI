@@ -735,13 +735,61 @@ public partial class PowerPointHandler
             };
         }
 
+        // Parametric snip rectangles honoring avLst. The snipped corner size is
+        // adj/100000 of the shorter side (matches roundRect's adj semantics).
+        // Default adj for snip presets is 16667 (16.667%); the old code hardcoded
+        // 8%/92% and ignored avLst entirely, so a custom adj never moved the
+        // corner. Read adj1 (and adj2 for snip2Same/DiagRect) like roundRect does.
+        if (preset is "snip1Rect" or "snip2SameRect" or "snip2DiagRect")
+        {
+            var avList = presetGeom?.GetFirstChild<Drawing.AdjustValueList>();
+            var gds = avList?.Elements<Drawing.ShapeGuide>().ToList() ?? new List<Drawing.ShapeGuide>();
+            long ReadAdj(int i, long dflt)
+            {
+                if (i < gds.Count && gds[i].Formula?.Value is string f && f.StartsWith("val ")
+                    && long.TryParse(f.AsSpan(4), out var v)) return v;
+                return dflt;
+            }
+            // adj is a fraction of the shorter side; convert to per-axis percent so
+            // the snip is square (a 50% adj on a non-square box snips minSide/2 on
+            // both axes). Clamp to [0,50] — a corner snip cannot exceed half a side.
+            long minSideEmu = Math.Min(widthEmu, heightEmu);
+            double AdjPct(long adj, bool horizontal)
+            {
+                var snipEmu = minSideEmu * adj / 100000.0;
+                var axis = horizontal ? widthEmu : heightEmu;
+                var pct = axis > 0 ? snipEmu / axis * 100.0 : adj / 100000.0 * 100.0;
+                return Math.Clamp(pct, 0, 50);
+            }
+            var a1 = ReadAdj(0, 16667);
+            var hx = AdjPct(a1, true);   // horizontal inset %
+            var vy = AdjPct(a1, false);  // vertical inset %
+            string P(double d) => d.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            switch (preset)
+            {
+                case "snip1Rect":
+                    // top-right corner snipped
+                    return $"clip-path:polygon(0 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% 100%,0 100%)";
+                case "snip2SameRect":
+                {
+                    // top-left + top-right snipped (adj1 = top corners)
+                    return $"clip-path:polygon({P(hx)}% 0,{P(100 - hx)}% 0,100% {P(vy)}%,100% 100%,0 100%,0 {P(vy)}%)";
+                }
+                case "snip2DiagRect":
+                {
+                    // top-left + bottom-right snipped (diagonal)
+                    var a2 = ReadAdj(1, 0);
+                    var hx2 = AdjPct(a2 == 0 ? a1 : a2, true);
+                    var vy2 = AdjPct(a2 == 0 ? a1 : a2, false);
+                    return $"clip-path:polygon({P(hx)}% 0,100% 0,100% {P(100 - vy2)}%,{P(100 - hx2)}% 100%,0 100%,0 {P(vy)}%)";
+                }
+            }
+        }
+
         return preset switch
         {
             // Rectangles
             "rect" => "",
-            "snip1Rect" => "clip-path:polygon(0 0,92% 0,100% 8%,100% 100%,0 100%)",
-            "snip2SameRect" => "clip-path:polygon(8% 0,92% 0,100% 8%,100% 100%,0 100%,0 8%)",
-            "snip2DiagRect" => "clip-path:polygon(8% 0,100% 0,100% 92%,92% 100%,0 100%,0 8%)",
 
             // Ellipses
             "ellipse" => "border-radius:50%",

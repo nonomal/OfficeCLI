@@ -396,9 +396,14 @@ public partial class PowerPointHandler
             // When wrapped in a link, add cursor:pointer to the shape <div> itself
             if (!string.IsNullOrEmpty(shapeHrefUrl)) outerStyles.Add("cursor:pointer");
             sb.Append($"    <div class=\"{shapeClass}\"{dataPathAttr} style=\"{string.Join(";", outerStyles)}\">");
-            // Fill layer (clipped)
+            // Fill layer (clipped). Emit even when the shape has no explicit fill
+            // background so the clip-path silhouette is still present in the HTML
+            // (a snip/clip shape with no fill must still show its clipped outline;
+            // previously the clip-path was dropped entirely when fillStyles was empty).
             if (fillStyles.Count > 0)
                 sb.Append($"<div style=\"position:absolute;inset:0;{clipPathCss};{string.Join(";", fillStyles)}\"></div>");
+            else
+                sb.Append($"<div style=\"position:absolute;inset:0;{clipPathCss}\"></div>");
             // Border layer for clip-path shapes: always use SVG polygon stroke
             if (parsedOutline != null && clipPathCss.StartsWith("clip-path:polygon("))
             {
@@ -1759,7 +1764,7 @@ public partial class PowerPointHandler
     /// the slide canvas is not silently empty and selection has a data-path
     /// to bind to.
     /// </summary>
-    private static void RenderOlePlaceholder(StringBuilder sb, GraphicFrame gf, string? dataPath = null)
+    private static void RenderOlePlaceholder(StringBuilder sb, GraphicFrame gf, OpenXmlPart slidePart, string? dataPath = null)
     {
         var xfrm = gf.Transform;
         var x = xfrm?.Offset?.X?.Value ?? 0;
@@ -1776,6 +1781,21 @@ public partial class PowerPointHandler
         var label = HtmlEncode($"OLE: {progId}");
         var dpAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
 
+        // RR5: PowerPoint stores the OLE's rendered preview as an embedded p:pic
+        // blip (inside p:oleObj, or in an mc:AlternateContent/mc:Fallback wrapper
+        // around the graphicFrame). Surface that thumbnail as an inline <img>
+        // data-uri — mirroring RenderPicture's blip → base64 emission — instead
+        // of only showing the dashed-box "OLE: {progId}" text placeholder.
+        var oleImgSrc = TryExtractOlePreviewDataUri(gf, slidePart);
+        if (oleImgSrc != null)
+        {
+            sb.AppendLine($"    <img class=\"ole-preview\"{dpAttr} src=\"{oleImgSrc}\" alt=\"{label}\" style=\"position:absolute;" +
+                $"left:{leftPt:0.##}pt;top:{topPt:0.##}pt;" +
+                $"width:{widthPt:0.##}pt;height:{heightPt:0.##}pt;" +
+                $"object-fit:contain;box-sizing:border-box;\"/>");
+            return;
+        }
+
         sb.AppendLine($"    <div class=\"ole-placeholder\"{dpAttr} style=\"position:absolute;" +
             $"left:{leftPt:0.##}pt;top:{topPt:0.##}pt;" +
             $"width:{widthPt:0.##}pt;height:{heightPt:0.##}pt;" +
@@ -1784,5 +1804,30 @@ public partial class PowerPointHandler
             $"font:11pt sans-serif;color:#495057;background:rgba(248,249,250,0.7);" +
             $"overflow:hidden;text-align:center;padding:4px;box-sizing:border-box;\">" +
             $"{label}</div>");
+    }
+
+    // RR5: locate the OLE preview blip (any a:blip with an r:embed under the
+    // graphicFrame — covers p:oleObj/p:pic and the mc:Fallback variant) and
+    // return its image bytes as a data-uri, or null when none is present.
+    private static string? TryExtractOlePreviewDataUri(GraphicFrame gf, OpenXmlPart slidePart)
+    {
+        const string rNs = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        foreach (var blip in gf.Descendants().Where(d => d.LocalName == "blip"))
+        {
+            var embedId = blip.GetAttribute("embed", rNs).Value;
+            if (string.IsNullOrEmpty(embedId)) continue;
+            try
+            {
+                var imgPart = slidePart.GetPartById(embedId!);
+                using var stream = imgPart.GetStream();
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                var base64 = Convert.ToBase64String(ms.ToArray());
+                var contentType = SanitizeContentType(imgPart.ContentType ?? "image/png");
+                return $"data:{contentType};base64,{base64}";
+            }
+            catch { /* unresolved rel — try the next blip */ }
+        }
+        return null;
     }
 }

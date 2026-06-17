@@ -586,7 +586,7 @@ public partial class PowerPointHandler
                     else if (gf.Descendants<DocumentFormat.OpenXml.Presentation.OleObject>().Any())
                     {
                         oleIdx++;
-                        RenderOlePlaceholder(sb, gf, dataPath: PathFor("ole", gf, oleIdx));
+                        RenderOlePlaceholder(sb, gf, slidePart, dataPath: PathFor("ole", gf, oleIdx));
                     }
                     break;
                 case ConnectionShape cxn:

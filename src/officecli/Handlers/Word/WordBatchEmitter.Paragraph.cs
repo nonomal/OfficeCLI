@@ -705,11 +705,34 @@ public static partial class WordBatchEmitter
             if (carrierRuns.Count > 0)
             {
                 var carrierPath = $"/body/p[last()]";
+                // BUG-DUMP-SECTHL: a hyperlink hosted in the section-carrier
+                // paragraph (e.g. a List-of-Figures entry whose paragraph also
+                // carries the <w:sectPr>) must round-trip through the same
+                // structured path the main run loop uses. Coalesce consecutive
+                // hyperlink runs (text + leader tabs + page number sharing one
+                // <w:hyperlink> wrapper) into a single synthetic node so
+                // EmitPlainOrHyperlinkRun emits the `add hyperlink` wrapper before
+                // its trailing runs — without this the carrier loop emitted each
+                // run as a bare `add r`, the wrapper was never created, and the
+                // trailing tab/page-number runs (which target .../hyperlink[1])
+                // were dropped. Capture the prior-paragraph hyperlink count so the
+                // wrapper re-indexes from 1 (BUG-R14B), same as the main loop.
+                carrierRuns = CoalesceHyperlinkRuns(carrierRuns);
+                int carrierHlBaseline = items.Count(it => it.Type == "hyperlink"
+                    && string.Equals(it.Parent, carrierPath, StringComparison.Ordinal));
                 foreach (var run in carrierRuns)
                 {
                     if (run.Type == "bookmark" || run.Type == "bookmarkEnd")
                     {
                         TryEmitBookmarkRun(run, carrierPath, items, ctx);
+                        continue;
+                    }
+                    // Coalesced hyperlink run (or a lone hyperlink-wrapped run):
+                    // emit the structured wrapper, not a bare `add r`.
+                    if ((run.Type == "run" || run.Type == "r")
+                        && (run.Format.ContainsKey("url") || run.Format.ContainsKey("anchor")))
+                    {
+                        EmitPlainOrHyperlinkRun(run, carrierPath, items, ctx, carrierHlBaseline);
                         continue;
                     }
                     // BUG-R12C: tab / positional-tab runs round-trip through the

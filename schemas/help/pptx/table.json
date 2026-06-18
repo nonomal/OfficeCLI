@@ -19,7 +19,7 @@
       "/slide[N]/table[M]"
     ]
   },
-  "note": "GraphicFrame wrapping Drawing.Table. Seed data inline via `data` (semicolons split rows, commas split cells) or per-cell via `r{R}c{C}` props. `get /slide[N]/table[K]` defaults to --depth=1 (table + row stubs only; large tables at depth=2 dominate the response). Use --depth 2 or address cells directly via `/slide[N]/table[K]/row[R]/cell[C]`.",
+  "note": "GraphicFrame wrapping Drawing.Table. Seed data inline via `data` (semicolons split rows, commas split cells) or per-cell via `r{R}c{C}` props. `get /slide[N]/table[K]` defaults to --depth=1 (table + row stubs only; large tables at depth=2 dominate the response). Use --depth 2 or address cells directly via `/slide[N]/table[K]/row[R]/cell[C]`. A table-level `fill=COLOR` fans the fill out to every cell (there is no separate table-level fill readback — read the per-cell fill).",
   "children": [
     {
       "element": "row",

@@ -167,7 +167,7 @@
     },
     "slideSize": {
       "type": "string",
-      "description": "slide size preset name derived from <p:sldSz/@type>. Set accepts any preset name and rewrites @cx/@cy + @type accordingly.",
+      "description": "slide size preset name derived from <p:sldSz/@type>. Set accepts one of the listed preset names (widescreen | standard | 16:10 | a4 | a3 | letter | b4 | b5 | 35mm | overhead | banner | ledger | custom) and rewrites @cx/@cy + @type accordingly; unlisted names are rejected (use slideWidth/slideHeight for an arbitrary custom size).",
       "add": false,
       "set": true,
       "get": true,

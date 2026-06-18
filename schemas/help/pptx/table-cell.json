@@ -38,8 +38,9 @@
     },
     "rowspan": {
       "type": "number",
-      "description": "vertical cell span (a:tc @rowSpan). Surfaces only when the cell spans more than one row. Read-only — set spans by structuring the table at Add time.",
-      "add": false, "set": false, "get": true,
+      "description": "vertical cell span (a:tc @rowSpan). Settable: rowspan=N writes rowSpan=N on this anchor cell and vMerge=true on the (N-1) continuation cells directly below. Surfaces on Get only when the cell spans more than one row.",
+      "add": false, "set": true, "get": true,
+      "examples": ["--prop rowspan=2"],
       "readback": "integer ≥ 2",
       "enforcement": "report"
     },
@@ -121,7 +122,7 @@
     },
     "merge.right": {
       "type": "number",
-      "description": "convenience for horizontal merge — stamps gridSpan=N on this cell and hMerge=true on the next N-1 cells in the same row.",
+      "description": "convenience for horizontal merge — merges N neighbor cells to the right into this one, so the total span becomes N+1 (writes gridSpan=N+1 on this cell and hMerge=true on the next N cells in the same row).",
       "add": false, "set": true, "get": false,
       "examples": ["--prop merge.right=2"],
       "enforcement": "report"

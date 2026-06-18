@@ -176,6 +176,36 @@
       "readback": "rtl (ltr is the default and is suppressed; clearing direction removes the attribute)",
       "enforcement": "report"
     },
+    "margin": {
+      "type": "length",
+      "description": "uniform internal padding (text inset) for shape body (a:bodyPr lIns/tIns/rIns/bIns). Also accepts a 4-value 'l,t,r,b' form on Set.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop margin=4",
+        "--prop margin=0.1in"
+      ],
+      "readback": "unit-qualified length (e.g. '14.4pt' / '0.36cm') when all four insets are equal; otherwise 'l,t,r,b' with '-' for unset sides",
+      "enforcement": "report"
+    },
+    "textDirection": {
+      "type": "string",
+      "description": "shape text rotation (a:bodyPr @vert) — works on shapes/textboxes, not just table cells. horizontal|vertical90|vertical270|eaVert|stacked. Round-trips through the same canonical vocabulary as table-cell textDirection.",
+      "aliases": [
+        "textdir",
+        "vert"
+      ],
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop textDirection=vertical270",
+        "--prop textDirection=stacked"
+      ],
+      "readback": "horizontal|vertical90|vertical270|stacked",
+      "enforcement": "report"
+    },
     "strike": {
       "type": "enum",
       "description": "strikethrough on shape text. Single and double are distinct OOXML tokens (sngStrike / dblStrike); Word splits these into `strike` + `dstrike`, PowerPoint folds both into one attribute.",

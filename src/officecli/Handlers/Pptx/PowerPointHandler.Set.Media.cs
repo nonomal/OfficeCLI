@@ -143,6 +143,23 @@ public partial class PowerPointHandler
                     xfrm.Rotation = (int)(ParseHelpers.SafeParseDouble(value, "rotation") * 60000);
                     break;
                 }
+                case "fliph":
+                {
+                    // CONSISTENCY(shape-picture-parity): mirror ShapeProperties
+                    // flip cases — set/clear xfrm @flipH on the picture's
+                    // Transform2D. Setting false clears the attribute.
+                    var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    xfrm.HorizontalFlip = IsTruthy(value);
+                    break;
+                }
+                case "flipv":
+                {
+                    var spPr = pic.ShapeProperties ?? (pic.ShapeProperties = new ShapeProperties());
+                    var xfrm = spPr.Transform2D ?? (spPr.Transform2D = new Drawing.Transform2D());
+                    xfrm.VerticalFlip = IsTruthy(value);
+                    break;
+                }
                 case "geometry" or "shape":
                 {
                     // CONSISTENCY(add-set-parity): Add.Media writes spPr/prstGeom

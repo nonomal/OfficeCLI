@@ -414,6 +414,16 @@ public partial class PowerPointHandler
                         (int)(ParseHelpers.SafeParseDouble(picRotStr, "rotation") * 60000);
                 }
 
+                // CONSISTENCY(shape-picture-parity): flip lives on the same
+                // Transform2D @flipH/@flipV as shape/connector. ShapeProperties
+                // Set handles these for shapes; mirror on Add for pictures so
+                // Add and Set agree on the property surface. Read via
+                // TryGetValue (handler-as-truth) — do NOT copy into a fresh dict.
+                if (properties.TryGetValue("flipH", out var picFlipH) || properties.TryGetValue("fliph", out picFlipH))
+                    picture.ShapeProperties.Transform2D!.HorizontalFlip = IsTruthy(picFlipH);
+                if (properties.TryGetValue("flipV", out var picFlipV) || properties.TryGetValue("flipv", out picFlipV))
+                    picture.ShapeProperties.Transform2D!.VerticalFlip = IsTruthy(picFlipV);
+
                 // bt-2: blip-level filters. Set.Media accepts opacity and
                 // biLevel on a picture; Add must mirror so dump→replay
                 // round-trips the alphaModFix / biLevel children that

@@ -1106,6 +1106,16 @@ public partial class PowerPointHandler
         if (xfrm.Rotation != null && xfrm.Rotation.Value != 0)
             picTransforms.Add($"rotate({xfrm.Rotation.Value / 60000.0:0.##}deg)");
 
+        // Flip — CONSISTENCY(shape-picture-parity): mirror RenderShape's flip
+        // block (rotate before scale). A flipH/flipV picture mirrors in real
+        // PowerPoint, so view html must do the same.
+        if (xfrm.HorizontalFlip?.Value == true && xfrm.VerticalFlip?.Value == true)
+            picTransforms.Add("scale(-1,-1)");
+        else if (xfrm.HorizontalFlip?.Value == true)
+            picTransforms.Add("scaleX(-1)");
+        else if (xfrm.VerticalFlip?.Value == true)
+            picTransforms.Add("scaleY(-1)");
+
         // 3D rotation (scene3d camera rotation) → CSS perspective transform.
         // CONSISTENCY(shape-picture-parity): mirror RenderShape's scene3d block.
         var picScene3d = pic.ShapeProperties?.GetFirstChild<Drawing.Scene3DType>();
@@ -1647,6 +1657,24 @@ public partial class PowerPointHandler
 
     // ==================== Group Rendering ====================
 
+    // CONSISTENCY(shape-group-parity): build the group container transform from
+    // rotation + flip, mirroring RenderShape (rotate before scale). A flipped
+    // group mirrors all its children in real PowerPoint, so the container div
+    // must carry the flip too. Returns "" or ";transform:...".
+    private static string BuildGroupTransform(Drawing.TransformGroup? grpXfrm)
+    {
+        var parts = new List<string>();
+        if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
+            parts.Add($"rotate({grpXfrm.Rotation.Value / 60000.0:0.##}deg)");
+        if (grpXfrm?.HorizontalFlip?.Value == true && grpXfrm.VerticalFlip?.Value == true)
+            parts.Add("scale(-1,-1)");
+        else if (grpXfrm?.HorizontalFlip?.Value == true)
+            parts.Add("scaleX(-1)");
+        else if (grpXfrm?.VerticalFlip?.Value == true)
+            parts.Add("scaleY(-1)");
+        return parts.Count > 0 ? $";transform:{string.Join(" ", parts)}" : "";
+    }
+
     private void RenderGroup(StringBuilder sb, GroupShape grp, OpenXmlPart slidePart, Dictionary<string, string> themeColors, string? dataPath = null)
     {
         var grpXfrm = grp.GroupShapeProperties?.TransformGroup;
@@ -1674,9 +1702,7 @@ public partial class PowerPointHandler
         // (transform:rotate(Ndeg)). OOXML group rotation rotates children as a composite
         // around the group's bounding-box center; CSS default transform-origin (50% 50%)
         // matches this.
-        var grpTransform = "";
-        if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
-            grpTransform = $";transform:rotate({grpXfrm.Rotation.Value / 60000.0:0.##}deg)";
+        var grpTransform = BuildGroupTransform(grpXfrm);
         sb.AppendLine($"    <div class=\"group\"{dataPathAttr} style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt{grpTransform}\">");
 
         foreach (var child in grp.ChildElements)
@@ -1807,9 +1833,7 @@ public partial class PowerPointHandler
         var offY = childOff?.Y?.Value ?? 0;
 
         // CONSISTENCY(group-rotation): same idiom as RenderGroup
-        var grpTransform = "";
-        if (grpXfrm?.Rotation != null && grpXfrm.Rotation.Value != 0)
-            grpTransform = $";transform:rotate({grpXfrm.Rotation.Value / 60000.0:0.##}deg)";
+        var grpTransform = BuildGroupTransform(grpXfrm);
         sb.AppendLine($"    <div class=\"group\" style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(cx)}pt;height:{Units.EmuToPt(cy)}pt{grpTransform}\">");
 
         foreach (var child in grp.ChildElements)

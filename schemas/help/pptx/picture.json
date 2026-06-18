@@ -106,6 +106,32 @@
       "readback": "decimal degrees (e.g. 45 or 22.5)",
       "enforcement": "report"
     },
+    "flipH": {
+      "type": "boolean",
+      "description": "mirror the picture horizontally (left-right). Mirrors shape/connector flip — stored on the same a:xfrm @flipH attribute. Pass false to clear.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop flipH=true",
+        "--prop flipH=false"
+      ],
+      "readback": "true when @flipH is set (omitted otherwise)",
+      "enforcement": "report"
+    },
+    "flipV": {
+      "type": "boolean",
+      "description": "mirror the picture vertically (top-bottom). Mirrors shape/connector flip — stored on the same a:xfrm @flipV attribute. Pass false to clear.",
+      "add": true,
+      "set": true,
+      "get": true,
+      "examples": [
+        "--prop flipV=true",
+        "--prop flipV=false"
+      ],
+      "readback": "true when @flipV is set (omitted otherwise)",
+      "enforcement": "report"
+    },
     "link": {
       "type": "string",
       "description": "click-hyperlink target attached to the picture's cNvPr (so the whole image is clickable). Accepts absolute URI (https://, mailto:), slide[N] for in-deck jumps, or named actions (firstslide, lastslide, nextslide, previousslide). Pass 'none' or empty to clear.",

@@ -2609,6 +2609,10 @@ public partial class PowerPointHandler
         if (picXfrm?.Rotation != null && picXfrm.Rotation.Value != 0)
             node.Format["rotation"] = $"{picXfrm.Rotation.Value / 60000.0:0.######}";
 
+        // Flip — CONSISTENCY(shape-picture-parity): mirror ShapeToNode.
+        if (picXfrm?.HorizontalFlip?.Value == true) node.Format["flipH"] = true;
+        if (picXfrm?.VerticalFlip?.Value == true) node.Format["flipV"] = true;
+
         // CONSISTENCY(zorder): mirror shape/connector — emit for any
         // ShapeTree-rooted picture so Add(picture, zorder=N) round-trips.
         if (pic.Parent is ShapeTree picZTree)

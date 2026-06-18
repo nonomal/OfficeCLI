@@ -139,6 +139,15 @@ public partial class PowerPointHandler
 
         // Fill
         var fillCss = GetShapeFillCss(shape.ShapeProperties, part, themeColors);
+        // R12-5: a slide PLACEHOLDER with no own fill inherits the matching
+        // layout (then master) placeholder's fill. Parallels the R7
+        // ResolveInheritedPosition walk. Explicit slide fill still wins.
+        if (string.IsNullOrEmpty(fillCss))
+        {
+            var inheritedPh = ResolveInheritedPlaceholderShape(shape, part);
+            if (inheritedPh != null)
+                fillCss = GetShapeFillCss(inheritedPh.ShapeProperties, part, themeColors);
+        }
         // Style-matrix fallback (R11-1): when spPr carries no fill element, resolve the
         // shape's <p:style>/<a:fillRef> against the theme FormatScheme. Explicit spPr
         // fill always wins — only consult fillRef when GetShapeFillCss returned "".
@@ -650,6 +659,39 @@ public partial class PowerPointHandler
                         cxfrm.Extents.Cy?.Value ?? 0
                     );
                 }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// R12-5: find the layout (then master) placeholder shape that the given
+    /// slide placeholder inherits from. Same ph type/idx matching as
+    /// ResolveInheritedPosition, but returns the whole shape so callers can
+    /// read inherited spPr fill/etc. Returns null for non-placeholders.
+    /// </summary>
+    private static Shape? ResolveInheritedPlaceholderShape(Shape shape, OpenXmlPart part)
+    {
+        var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>();
+        if (ph == null) return null;
+
+        var slidePart = part as SlidePart;
+        if (slidePart == null) return null;
+
+        var layoutShapeTree = slidePart.SlideLayoutPart?.SlideLayout?.CommonSlideData?.ShapeTree;
+        var masterShapeTree = slidePart.SlideLayoutPart?.SlideMasterPart?.SlideMaster?.CommonSlideData?.ShapeTree;
+
+        foreach (var tree in new[] { layoutShapeTree, masterShapeTree })
+        {
+            if (tree == null) continue;
+            foreach (var candidate in tree.Elements<Shape>())
+            {
+                var candidatePh = candidate.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+                    ?.GetFirstChild<PlaceholderShape>();
+                if (candidatePh == null) continue;
+                if (PlaceholderMatches(ph, candidatePh)) return candidate;
             }
         }
 
@@ -1555,7 +1597,7 @@ public partial class PowerPointHandler
 
     // ==================== Group Rendering ====================
 
-    private void RenderGroup(StringBuilder sb, GroupShape grp, SlidePart slidePart, Dictionary<string, string> themeColors, string? dataPath = null)
+    private void RenderGroup(StringBuilder sb, GroupShape grp, OpenXmlPart slidePart, Dictionary<string, string> themeColors, string? dataPath = null)
     {
         var grpXfrm = grp.GroupShapeProperties?.TransformGroup;
         if (grpXfrm?.Offset == null || grpXfrm?.Extents == null) return;
@@ -1663,7 +1705,7 @@ public partial class PowerPointHandler
     /// Render a nested group with pre-calculated position (from parent group transform).
     /// Recursively handles arbitrary nesting depth.
     /// </summary>
-    private void RenderNestedGroup(StringBuilder sb, GroupShape grp, SlidePart slidePart,
+    private void RenderNestedGroup(StringBuilder sb, GroupShape grp, OpenXmlPart slidePart,
         Dictionary<string, string> themeColors, long x, long y, long cx, long cy, int depth = 0)
     {
         // CONSISTENCY(dos-hardening): nested-group recursion is unbounded; a

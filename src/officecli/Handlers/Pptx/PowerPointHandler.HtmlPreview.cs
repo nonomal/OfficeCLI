@@ -683,9 +683,13 @@ public partial class PowerPointHandler
         if (layoutPart != null)
             RenderInheritedShapes(sb, layoutPart.SlideLayout?.CommonSlideData?.ShapeTree, layoutPart, slidePlaceholders, themeColors);
 
-        // Render shapes from SlideMaster (lower priority, only if not in layout)
+        // Render shapes from SlideMaster (lower priority, only if not in layout).
+        // R12-2: <p:sld showMasterSp="0"> suppresses master-level decoration.
+        // (Layout placeholders above still render — matches PowerPoint, where
+        // the flag only governs the master's own shapes.)
+        var showMasterSp = GetSlide(slidePart).ShowMasterShapes?.Value ?? true;
         var masterPart = layoutPart?.SlideMasterPart;
-        if (masterPart != null)
+        if (masterPart != null && showMasterSp)
             RenderInheritedShapes(sb, masterPart.SlideMaster?.CommonSlideData?.ShapeTree, masterPart, slidePlaceholders, themeColors);
     }
 
@@ -712,40 +716,30 @@ public partial class PowerPointHandler
 
         foreach (var element in shapeTree.ChildElements)
         {
-            if (element is not Shape shape) continue;
-
-            var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
-                ?.GetFirstChild<PlaceholderShape>();
-
-            bool suppressText = false;
-            if (ph != null)
+            switch (element)
             {
-                // Slide already supplies this slot — slide content wins.
-                if (ph.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
-                    continue;
-                if (ph.Type?.HasValue == true && skipIndices.Contains($"type:{ph.Type.InnerText}"))
-                    continue;
-
-                // ECMA-376 default: absent type == obj. Without this, a body
-                // placeholder authored without an explicit type sneaks past
-                // every type-based check.
-                var type = ph.Type?.HasValue == true ? ph.Type.Value : PlaceholderValues.Object;
-                suppressText = !IsLayoutSuppliedTextPlaceholder(type);
+                case Shape shape:
+                    RenderInheritedShape(sb, shape, part, skipIndices, themeColors);
+                    break;
+                // R12-1: PowerPoint renders group/connector/graphic-frame
+                // decoration from the layout/master tree too. The old code
+                // (`if (element is not Shape shape) continue;`) dropped them.
+                // These are never placeholders, so no skip-index logic applies.
+                case GroupShape grp:
+                    RenderGroup(sb, grp, part, themeColors);
+                    break;
+                case ConnectionShape cxn:
+                    RenderConnector(sb, cxn, themeColors);
+                    break;
+                case GraphicFrame gf:
+                    // Only tables are cheap to inherit here; RenderChart needs a
+                    // SlidePart (chart-part relationship lookup) which the
+                    // layout/master tree doesn't provide. Layout/master charts
+                    // are rare, so leave them out (R12-1 scope).
+                    if (gf.Descendants<Drawing.Table>().Any())
+                        RenderTable(sb, gf, themeColors);
+                    break;
             }
-
-            // Skip shapes with no visual content. When text is suppressed, treat
-            // it as empty: a content placeholder with only prompt text and no
-            // fill/outline isn't worth an empty box on the slide.
-            var text = suppressText ? "" : GetShapeText(shape);
-            var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
-                || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
-                || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
-            var hasLine = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>()?.GetFirstChild<Drawing.SolidFill>() != null;
-
-            if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
-                continue;
-
-            RenderShape(sb, shape, part, themeColors, suppressText: suppressText);
         }
 
         // Also render pictures from layout/master (logos, decorative images)
@@ -753,6 +747,43 @@ public partial class PowerPointHandler
         {
             RenderPicture(sb, pic, part, themeColors);
         }
+    }
+
+    private void RenderInheritedShape(StringBuilder sb, Shape shape, OpenXmlPart part,
+        HashSet<string> skipIndices, Dictionary<string, string> themeColors)
+    {
+        var ph = shape.NonVisualShapeProperties?.ApplicationNonVisualDrawingProperties
+            ?.GetFirstChild<PlaceholderShape>();
+
+        bool suppressText = false;
+        if (ph != null)
+        {
+            // Slide already supplies this slot — slide content wins.
+            if (ph.Index?.HasValue == true && skipIndices.Contains($"idx:{ph.Index.Value}"))
+                return;
+            if (ph.Type?.HasValue == true && skipIndices.Contains($"type:{ph.Type.InnerText}"))
+                return;
+
+            // ECMA-376 default: absent type == obj. Without this, a body
+            // placeholder authored without an explicit type sneaks past
+            // every type-based check.
+            var type = ph.Type?.HasValue == true ? ph.Type.Value : PlaceholderValues.Object;
+            suppressText = !IsLayoutSuppliedTextPlaceholder(type);
+        }
+
+        // Skip shapes with no visual content. When text is suppressed, treat
+        // it as empty: a content placeholder with only prompt text and no
+        // fill/outline isn't worth an empty box on the slide.
+        var text = suppressText ? "" : GetShapeText(shape);
+        var hasFill = shape.ShapeProperties?.GetFirstChild<Drawing.SolidFill>() != null
+            || shape.ShapeProperties?.GetFirstChild<Drawing.GradientFill>() != null
+            || shape.ShapeProperties?.GetFirstChild<Drawing.BlipFill>() != null;
+        var hasLine = shape.ShapeProperties?.GetFirstChild<Drawing.Outline>()?.GetFirstChild<Drawing.SolidFill>() != null;
+
+        if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
+            return;
+
+        RenderShape(sb, shape, part, themeColors, suppressText: suppressText);
     }
 
     private static bool IsLayoutSuppliedTextPlaceholder(PlaceholderValues type) =>

@@ -190,8 +190,16 @@ public partial class PowerPointHandler
                 }
                 paraStyles.Add($"text-indent:{indentPt}pt");
             }
+            // marL fallback chain: explicit slide marL wins; else inherited
+            // master/layout bodyStyle lvlNpPr marL (R45 — paragraph relies on the
+            // master's marL for indentation); else the level*36pt default cascade.
+            long? inheritedMarL = (inheritedLvlPpr as Drawing.TextParagraphPropertiesType)?.LeftMargin?.Value;
             if (pProps?.LeftMargin?.HasValue == true)
                 paraStyles.Add($"padding-left:{Units.EmuToPt(pProps.LeftMargin.Value)}pt");
+            else if (inheritedMarL.HasValue)
+                // R45: marL inherited from master bodyStyle lvlNpPr. PowerPoint reads
+                // this so the bullet hangs and text is indented to the inherited marL.
+                paraStyles.Add($"padding-left:{Units.EmuToPt(inheritedMarL.Value)}pt");
             else if ((pProps?.Level?.Value ?? 0) > 0)
                 // R10b: no explicit marL but lvl>0 — approximate the default
                 // lstStyle cascade. PowerPoint's built-in body text styles use
@@ -355,7 +363,9 @@ public partial class PowerPointHandler
                 // We do NOT use text-indent here — text-indent on the para offsets
                 // the line into the shape's outer padding box, putting the bullet
                 // physically outside the shape's content area.
-                long indentEmu = pProps?.Indent?.Value ?? 0;
+                long indentEmu = pProps?.Indent?.Value
+                    ?? (inheritedLvlPpr as Drawing.TextParagraphPropertiesType)?.Indent?.Value
+                    ?? 0;
                 if (indentEmu < 0)
                 {
                     var gapPt = Units.EmuToPt(-indentEmu);

@@ -779,6 +779,18 @@ public partial class PowerPointHandler
         if (slidePh.Type?.HasValue == true && layoutPh.Type?.HasValue == true)
             return slidePh.Type.Value == layoutPh.Type.Value;
 
+        // R26-5: slide ph has idx but NO type, layout ph has type but NO idx.
+        // OOXML: a <p:ph idx=N/> with no type defaults to type=body, so it
+        // should inherit from a type=body (or object) layout/master placeholder.
+        // Without this branch all inheritance silently drops for idx-only slide
+        // placeholders bound to a typed layout placeholder.
+        if (slidePh.Index?.HasValue == true && slidePh.Type?.HasValue != true
+            && layoutPh.Type?.HasValue == true && layoutPh.Index?.HasValue != true)
+        {
+            var lt = layoutPh.Type.Value;
+            return lt == PlaceholderValues.Body || lt == PlaceholderValues.Object;
+        }
+
         // If slide ph has no type/idx, match by name or consider it a body placeholder
         // Default placeholder type (when type is omitted) is "body" per OOXML spec
         if (slidePh.Type?.HasValue != true && slidePh.Index?.HasValue != true)

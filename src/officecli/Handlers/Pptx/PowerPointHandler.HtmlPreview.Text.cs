@@ -55,12 +55,24 @@ public partial class PowerPointHandler
             string? defaultRunColor = null;
             // R7-3: inherited default line-spacing CSS fragment from the cascade.
             string? inheritedLineSpacing = null;
+            // R26: inherited level-paragraph-properties (lvlNpPr) from the
+            // placeholder/master cascade. Used to fill bullet (R26-1), paragraph
+            // spacing (R26-2), bold/italic (R26-3), and alignment (R26-4) when the
+            // slide paragraph itself declares none. The GET path already reports
+            // these as effective.* — mirror it in the RENDER path.
+            OpenXmlElement? inheritedLvlPpr = null;
+            Drawing.DefaultRunProperties? inheritedDefRp = null;
             if (placeholderShape != null && placeholderPart != null)
             {
                 int level = para.ParagraphProperties?.Level?.Value ?? 0;
                 defaultFontSizeHundredths = ResolvePlaceholderFontSize(placeholderShape, placeholderPart, level);
                 defaultRunColor = ResolvePlaceholderDefaultColor(placeholderShape, placeholderPart, themeColors, level);
                 inheritedLineSpacing = ResolvePlaceholderLineSpacing(placeholderShape, placeholderPart, level);
+                // Any inherited lvlNpPr (for alignment/spacing/bullet); take the
+                // first level pPr that carries ANY content in the chain.
+                inheritedLvlPpr = ResolvePlaceholderLevelPpr(placeholderShape, placeholderPart, level, _ => true);
+                inheritedDefRp = ResolvePlaceholderDefRp(placeholderShape, placeholderPart, level,
+                    dr => dr.Bold?.HasValue == true || dr.Italic?.HasValue == true);
             }
             // R11-3: style-matrix fontRef schemeClr is the FINAL fallback run color
             // when no explicit run color and no inherited placeholder color is found.
@@ -68,9 +80,16 @@ public partial class PowerPointHandler
             var paraStyles = new List<string>();
 
             var pProps = para.ParagraphProperties;
-            if (pProps?.Alignment?.HasValue == true)
+            // R26-4: alignment — explicit slide pPr@algn wins; otherwise inherit
+            // the master/layout lvlNpPr@algn via the placeholder cascade.
+            var algnInner = pProps?.Alignment?.HasValue == true
+                ? pProps.Alignment.InnerText
+                : (inheritedLvlPpr as Drawing.TextParagraphPropertiesType)?.Alignment?.HasValue == true
+                    ? ((Drawing.TextParagraphPropertiesType)inheritedLvlPpr!).Alignment!.InnerText
+                    : null;
+            if (algnInner != null)
             {
-                var align = pProps.Alignment.InnerText switch
+                var align = algnInner switch
                 {
                     "l" => "left",
                     "ctr" => "center",
@@ -91,7 +110,10 @@ public partial class PowerPointHandler
             // chain (first run size > placeholder/default > 18pt body default).
             var spcFontHundredths = para.Elements<Drawing.Run>().FirstOrDefault()?.RunProperties?.FontSize?.Value
                 ?? defaultFontSizeHundredths ?? 1800;
-            var sbElem = pProps?.GetFirstChild<Drawing.SpaceBefore>();
+            // R26-2: spaceBefore — explicit slide pPr wins; otherwise inherit the
+            // master/layout lvlNpPr spcBef via the placeholder cascade.
+            var sbElem = pProps?.GetFirstChild<Drawing.SpaceBefore>()
+                ?? inheritedLvlPpr?.GetFirstChild<Drawing.SpaceBefore>();
             var sbPts = sbElem?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (sbPts.HasValue && !isFirstPara) paraStyles.Add($"margin-top:{sbPts.Value / 100.0:0.##}pt");
             else
@@ -102,7 +124,8 @@ public partial class PowerPointHandler
                 if (sbPct.HasValue && !isFirstPara)
                     paraStyles.Add($"margin-top:{sbPct.Value / 100000.0 * (spcFontHundredths / 100.0):0.##}pt");
             }
-            var saElem = pProps?.GetFirstChild<Drawing.SpaceAfter>();
+            var saElem = pProps?.GetFirstChild<Drawing.SpaceAfter>()
+                ?? inheritedLvlPpr?.GetFirstChild<Drawing.SpaceAfter>();
             var saPts = saElem?.GetFirstChild<Drawing.SpacingPoints>()?.Val?.Value;
             if (saPts.HasValue) paraStyles.Add($"margin-bottom:{saPts.Value / 100.0:0.##}pt");
             else
@@ -175,12 +198,27 @@ public partial class PowerPointHandler
             if (pProps?.RightToLeft?.Value == true)
                 paraStyles.Add("direction:rtl;unicode-bidi:embed");
 
-            // Bullet
-            var bulletChar = pProps?.GetFirstChild<Drawing.CharacterBullet>()?.Char?.Value;
-            var bulletAuto = pProps?.GetFirstChild<Drawing.AutoNumberedBullet>();
+            // Bullet. R26-1: the slide paragraph may declare no bullet element at
+            // all, in which case the bullet (buChar / buAutoNum / buNone / buBlip
+            // with buFont / buSzPct / buClr) is INHERITED from the master/layout
+            // bodyStyle lvlNpPr via the placeholder cascade. An explicit slide
+            // bullet element (including <a:buNone/>) always wins. Determine the
+            // source element to read all bullet sub-properties from.
+            // Detect bullet child elements by LocalName so raw-injected elements
+            // (buNone / buBlip with no typed SDK class in this context) also count.
+            bool slideHasExplicitBullet = pProps?.ChildElements.Any(e =>
+                e.LocalName is "buChar" or "buAutoNum" or "buNone" or "buBlip") == true;
+            // The element we read bullet sub-properties from: the slide pPr if it
+            // declared any bullet element, otherwise the inherited lvlNpPr.
+            var bulletSource = slideHasExplicitBullet ? (OpenXmlElement?)pProps : inheritedLvlPpr;
+            // Respect an explicit <a:buNone/> at the chosen source level (slide
+            // override OR inherited) — it suppresses any bullet.
+            bool buNone = bulletSource?.ChildElements.Any(e => e.LocalName == "buNone") == true;
+            var bulletChar = buNone ? null : bulletSource?.GetFirstChild<Drawing.CharacterBullet>()?.Char?.Value;
+            var bulletAuto = buNone ? null : bulletSource?.GetFirstChild<Drawing.AutoNumberedBullet>();
             // Image bullet (<a:buBlip>). SDK 3.x has no typed BulletBlip in this
             // context; detect by local name so a raw-injected buBlip also counts.
-            var bulletBlip = pProps?.ChildElements
+            var bulletBlip = buNone ? null : bulletSource?.ChildElements
                 .FirstOrDefault(e => e.LocalName == "buBlip");
             var hasBullet = bulletChar != null || bulletAuto != null || bulletBlip != null;
 
@@ -224,12 +262,12 @@ public partial class PowerPointHandler
 
                 // Bullet font (<a:buFont typeface="..."/>) \u2014 apply font-family so a
                 // symbol-font glyph (e.g. Wingdings "l") renders with the right face.
-                var buFontTypeface = pProps?.GetFirstChild<Drawing.BulletFont>()?.Typeface?.Value;
+                var buFontTypeface = bulletSource?.GetFirstChild<Drawing.BulletFont>()?.Typeface?.Value;
                 if (!string.IsNullOrEmpty(buFontTypeface))
                     buStyles.Add($"font-family:{buFontTypeface}");
 
                 // Bullet color: explicit buClr > first run color > default (inherit)
-                var buClrFill = pProps?.GetFirstChild<Drawing.BulletColor>()
+                var buClrFill = bulletSource?.GetFirstChild<Drawing.BulletColor>()
                     ?.GetFirstChild<Drawing.SolidFill>();
                 var bulletColor = ResolveFillColor(buClrFill, themeColors);
                 if (bulletColor == null)
@@ -242,8 +280,8 @@ public partial class PowerPointHandler
                 if (bulletColor != null) buStyles.Add($"color:{bulletColor}");
 
                 // Bullet size: explicit buSzPts/buSzPct > first run size > default size
-                var buSzPts = pProps?.GetFirstChild<Drawing.BulletSizePoints>();
-                var buSzPct = pProps?.GetFirstChild<Drawing.BulletSizePercentage>();
+                var buSzPts = bulletSource?.GetFirstChild<Drawing.BulletSizePoints>();
+                var buSzPct = bulletSource?.GetFirstChild<Drawing.BulletSizePercentage>();
                 if (buSzPts?.Val?.HasValue == true)
                 {
                     buStyles.Add($"font-size:{buSzPts.Val.Value / 100.0:0.##}pt");
@@ -331,9 +369,13 @@ public partial class PowerPointHandler
             }
             else
             {
+                // R26-3: inherited default bold/italic from the master/layout
+                // defRPr, applied as a fallback when the run sets neither.
+                bool? inhBold = inheritedDefRp?.Bold?.HasValue == true ? inheritedDefRp.Bold.Value : null;
+                bool? inhItalic = inheritedDefRp?.Italic?.HasValue == true ? inheritedDefRp.Italic.Value : null;
                 foreach (var run in runs)
                 {
-                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor);
+                    RenderRun(sb, run, themeColors, defaultFontSizeHundredths, placeholderPart, themeFontFallback, fontScale, defaultRunColor, inhBold, inhItalic);
                 }
             }
 
@@ -348,7 +390,8 @@ public partial class PowerPointHandler
 
     private static void RenderRun(StringBuilder sb, Drawing.Run run, Dictionary<string, string> themeColors,
         int? defaultFontSizeHundredths = null, OpenXmlPart? part = null, string? themeFontFallback = null,
-        double fontScale = 1.0, string? defaultRunColor = null)
+        double fontScale = 1.0, string? defaultRunColor = null,
+        bool? inheritedBold = null, bool? inheritedItalic = null)
     {
         var text = run.Text?.Text ?? "";
         if (string.IsNullOrEmpty(text)) return;
@@ -410,12 +453,20 @@ public partial class PowerPointHandler
         if (rp != null)
         {
 
-            // Bold
-            if (rp.Bold?.Value == true)
+            // Bold — explicit run bold wins; else inherit master/layout defRPr b.
+            if (rp.Bold?.HasValue == true)
+            {
+                if (rp.Bold.Value) styles.Add("font-weight:bold");
+            }
+            else if (inheritedBold == true)
                 styles.Add("font-weight:bold");
 
-            // Italic
-            if (rp.Italic?.Value == true)
+            // Italic — explicit run italic wins; else inherit defRPr i.
+            if (rp.Italic?.HasValue == true)
+            {
+                if (rp.Italic.Value) styles.Add("font-style:italic");
+            }
+            else if (inheritedItalic == true)
                 styles.Add("font-style:italic");
 
             // Underline + Strikethrough — both map to CSS text-decoration, which
@@ -624,8 +675,14 @@ public partial class PowerPointHandler
             }
         }
         // R7-2: run with no <a:rPr> at all — still inherit the cascade default color.
-        else if (hlinkClick == null && defaultRunColor != null)
-            styles.Add($"color:{defaultRunColor}");
+        else
+        {
+            if (hlinkClick == null && defaultRunColor != null)
+                styles.Add($"color:{defaultRunColor}");
+            // R26-3: inherit master/layout defRPr bold/italic for a run with no rPr.
+            if (inheritedBold == true) styles.Add("font-weight:bold");
+            if (inheritedItalic == true) styles.Add("font-style:italic");
+        }
 
         // Auto-style hyperlink runs that lack explicit color/underline. Uses
         // theme-less fallback #0563C1 (PowerPoint default hyperlink color).

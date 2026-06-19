@@ -122,16 +122,29 @@ public partial class WordHandler
                 + "table-row / table-cell / section elements; other element kinds are not yet implemented.");
 
         // ---- guard 2: RTL cascade props would smear the snapshot ----
+        // The guard exists because applying complex-script (.cs) props mutates
+        // the element BEFORE the *PrChange snapshot is auto-derived from current
+        // state, smearing the recorded "before". But when the caller supplies an
+        // explicit prior-state snapshot via revision.beforeXml (the dump→batch
+        // replay path for a pPrChange/rPrChange that legitimately changed a .cs
+        // property), the snapshot is the verbatim beforeXml — NOT the post-mutation
+        // current state — so there is nothing to smear and the .cs props apply
+        // safely. Only enforce the guard when no explicit snapshot is provided.
+        bool hasBeforeXmlSnapshot = false;
         foreach (var k in properties.Keys)
-        {
-            var lk = k.ToLowerInvariant();
-            if (lk is "font.cs" or "font.complexscript" or "font.complex"
-                  or "bold.cs" or "italic.cs" or "size.cs"
-                  or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
-                  or "boldcs" or "italiccs" or "sizecs")
-                throw new InvalidOperationException(
-                    "RTL cascade properties are not supported with trackChange yet");
-        }
+            if (k.Equals("revision.beforeXml", StringComparison.OrdinalIgnoreCase))
+            { hasBeforeXmlSnapshot = true; break; }
+        if (!hasBeforeXmlSnapshot)
+            foreach (var k in properties.Keys)
+            {
+                var lk = k.ToLowerInvariant();
+                if (lk is "font.cs" or "font.complexscript" or "font.complex"
+                      or "bold.cs" or "italic.cs" or "size.cs"
+                      or "font.bold.cs" or "font.italic.cs" or "font.size.cs"
+                      or "boldcs" or "italiccs" or "sizecs")
+                    throw new InvalidOperationException(
+                        "RTL cascade properties are not supported with trackChange yet");
+            }
 
         // ---- extract revision.* sub-keys (case-insensitive) ----
         string? tcAuthor = null, tcDate = null, tcId = null, tcType = null, tcBeforeXml = null;

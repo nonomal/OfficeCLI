@@ -843,6 +843,50 @@ public partial class PowerPointHandler
     /// Radial:  "radial:C1-C2", "radial:C1-C2-tl" (focus: tl/tr/bl/br/center)
     /// Path:    "path:C1-C2", "path:C1-C2-tl"
     /// </summary>
+    /// <summary>
+    /// The lineGradient (outline) grammar documented in shape.json is a
+    /// COMMA-separated stop list ("color@pos,color@pos,...") with an optional
+    /// "angle=Ndeg" segment — distinct from the fill gradient's DASH-separated
+    /// form ("C1-C2" / "C@pos-C@pos[:angle]"). BuildGradientFill only speaks
+    /// the dash form, so a comma list arrived as a single token and collapsed
+    /// every stop onto the first color. Translate the comma form into the dash
+    /// form here, then hand off to the shared builder. A value that already
+    /// uses the dash form (no comma) — or the semicolon round-trip form, or a
+    /// radial:/path: prefix — passes through unchanged.
+    /// </summary>
+    internal static string NormalizeLineGradientSpec(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return value;
+        // Forms the dash builder already owns: leave them alone.
+        if (value.IndexOf(',') < 0) return value;
+        if (value.StartsWith("linear;", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("radial:", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("path:", StringComparison.OrdinalIgnoreCase))
+            return value;
+
+        var segs = value.Split(',', StringSplitOptions.TrimEntries
+            | StringSplitOptions.RemoveEmptyEntries);
+        string? angleSeg = null;
+        var stops = new List<string>();
+        foreach (var seg in segs)
+        {
+            if (seg.StartsWith("angle=", StringComparison.OrdinalIgnoreCase))
+            {
+                // "angle=90deg" / "angle=90" → trailing dash-form angle token
+                var a = seg["angle=".Length..].Trim();
+                angleSeg = a.EndsWith("deg", StringComparison.OrdinalIgnoreCase)
+                    ? a : a + "deg";
+            }
+            else
+            {
+                stops.Add(seg);
+            }
+        }
+        var dash = string.Join('-', stops);
+        if (angleSeg != null) dash = dash + "-" + angleSeg;
+        return dash;
+    }
+
     internal static Drawing.GradientFill BuildGradientFill(string value)
     {
         // ReadGradientString emits semicolon-separated form

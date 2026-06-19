@@ -764,7 +764,7 @@ public partial class PowerPointHandler
                     outline.RemoveAllChildren<Drawing.SolidFill>();
                     outline.RemoveAllChildren<Drawing.NoFill>();
                     outline.RemoveAllChildren<Drawing.GradientFill>();
-                    var cxnGrad = BuildGradientFill(value);
+                    var cxnGrad = BuildGradientFill(NormalizeLineGradientSpec(value));
                     var cxnPrstDash = outline.GetFirstChild<Drawing.PresetDash>();
                     if (cxnPrstDash != null)
                         outline.InsertBefore(cxnGrad, cxnPrstDash);

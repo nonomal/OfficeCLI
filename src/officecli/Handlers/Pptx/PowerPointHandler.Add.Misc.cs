@@ -250,7 +250,7 @@ public partial class PowerPointHandler
                 if (properties.TryGetValue("line.gradient", out var cxnLineGrad)
                     || properties.TryGetValue("linegradient", out cxnLineGrad))
                 {
-                    cxnOutline.AppendChild(BuildGradientFill(cxnLineGrad));
+                    cxnOutline.AppendChild(BuildGradientFill(NormalizeLineGradientSpec(cxnLineGrad)));
                 }
                 else if (properties.TryGetValue("lineColor", out var cxnColor2) || properties.TryGetValue("linecolor", out cxnColor2)
                     || properties.TryGetValue("line", out cxnColor2) || properties.TryGetValue("color", out cxnColor2)
@@ -1222,7 +1222,7 @@ public partial class PowerPointHandler
         // sufficient — real PowerPoint does not always resolve geometry purely by
         // inheritance on this Add path, so a slide placeholder with empty spPr can
         // render at (0,0) and overlap a sibling (e.g. title over subtitle on the
-        // Title Slide layout — caught by officeshot in real Office). When the
+        // Title Slide layout — caught when rendered in real Office). When the
         // placeholder binds to a layout slot, copy that slot's resolved off/ext;
         // otherwise fall back to the standard slot rectangle below.
         shape.ShapeProperties = new ShapeProperties();

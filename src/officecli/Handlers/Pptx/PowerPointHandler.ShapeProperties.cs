@@ -1076,7 +1076,7 @@ public partial class PowerPointHandler
                     outline.RemoveAllChildren<Drawing.SolidFill>();
                     outline.RemoveAllChildren<Drawing.NoFill>();
                     outline.RemoveAllChildren<Drawing.GradientFill>();
-                    var grad = BuildGradientFill(value);
+                    var grad = BuildGradientFill(NormalizeLineGradientSpec(value));
                     // CT_LineProperties schema: fill (solidFill/noFill/gradFill/pattFill) → prstDash → ...
                     var prstDashAnchor = outline.GetFirstChild<Drawing.PresetDash>();
                     if (prstDashAnchor != null)

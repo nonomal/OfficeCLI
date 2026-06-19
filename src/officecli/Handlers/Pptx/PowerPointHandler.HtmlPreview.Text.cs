@@ -588,10 +588,37 @@ public partial class PowerPointHandler
         // also pick up the fallback so a /theme bodyFont / headingFont change
         // is visible in HTML preview.
         var runFont = rp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
-            ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
-        string? resolvedRunFont = (runFont != null && !runFont.StartsWith("+", StringComparison.Ordinal))
-            ? runFont
-            : themeFontFallback;
+            ?? rp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value
+            ?? rp?.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value;
+        string? resolvedRunFont;
+        if (runFont == null)
+        {
+            // No explicit font child at all — inherit the placeholder default
+            // (title→major, body→minor) resolved once per textbody.
+            resolvedRunFont = themeFontFallback;
+        }
+        else if (runFont.StartsWith("+", StringComparison.Ordinal))
+        {
+            // Theme reference token: resolve the EXACT slot. The prefix selects
+            // major (+mj) vs minor (+mn); the suffix selects the script slot
+            // (-lt Latin, -ea EastAsian, -cs ComplexScript). Mapping each token
+            // to its own theme font keeps the major-vs-minor and Latin-vs-EA-vs-CS
+            // distinctions PowerPoint honors (TF-01/02/03), instead of collapsing
+            // every "+" token onto the single placeholder fallback.
+            var slotFont = ResolveThemeFontToken(part, runFont);
+            // Latin tokens (-lt) may fall back to the placeholder default when the
+            // theme slot is unreadable. EastAsian/ComplexScript tokens (-ea/-cs)
+            // must NOT fall back to the Latin themeFontFallback — when their slot
+            // is empty (the common blank-deck case) we emit no explicit override
+            // and let the document-level CJK fallback chain apply.
+            resolvedRunFont = slotFont
+                ?? (runFont.EndsWith("-lt", StringComparison.Ordinal) ? themeFontFallback : null);
+        }
+        else
+        {
+            // Literal font name — emit it verbatim.
+            resolvedRunFont = runFont;
+        }
         if (!string.IsNullOrEmpty(resolvedRunFont))
             styles.Add(CssFontFamilyWithFallback(resolvedRunFont));
 
@@ -977,6 +1004,29 @@ public partial class PowerPointHandler
     // Returns null when no theme is reachable (e.g. orphan text body, or a part
     // whose master->theme chain is incomplete). kind is "major" or "minor".
     private static string? ResolveThemeFontTypeface(OpenXmlPart? part, string kind)
+        => ResolveThemeFont(part, major: kind == "major", slot: "lt");
+
+    // Resolve a theme font reference token of the form "+{mj|mn}-{lt|ea|cs}"
+    // (e.g. "+mj-lt", "+mn-ea") to its concrete typeface. The prefix picks
+    // major vs minor; the suffix picks the script slot (Latin / EastAsian /
+    // ComplexScript). Unrecognized tokens return null.
+    private static string? ResolveThemeFontToken(OpenXmlPart? part, string token)
+    {
+        if (token.Length < 6 || token[0] != '+') return null;
+        bool major;
+        if (token.StartsWith("+mj-", StringComparison.Ordinal)) major = true;
+        else if (token.StartsWith("+mn-", StringComparison.Ordinal)) major = false;
+        else return null;
+        var slot = token.Substring(4); // "lt" | "ea" | "cs"
+        if (slot != "lt" && slot != "ea" && slot != "cs") return null;
+        return ResolveThemeFont(part, major, slot);
+    }
+
+    // Read a single script slot (lt/ea/cs) of the major or minor theme font,
+    // walking the SlidePart→Layout→Master→Theme chain. Returns null when no
+    // theme is reachable, the slot is empty, or the slot is self-referential
+    // (a theme declaring "+mj-lt" as its own typeface).
+    private static string? ResolveThemeFont(OpenXmlPart? part, bool major, string slot)
     {
         var theme = part switch
         {
@@ -986,9 +1036,13 @@ public partial class PowerPointHandler
             _ => null,
         };
         var fontScheme = theme?.ThemeElements?.FontScheme;
-        var typeface = kind == "major"
-            ? fontScheme?.MajorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
-            : fontScheme?.MinorFont?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value;
+        var fontGroup = major ? (OpenXmlElement?)fontScheme?.MajorFont : fontScheme?.MinorFont;
+        var typeface = slot switch
+        {
+            "ea" => fontGroup?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value,
+            "cs" => fontGroup?.GetFirstChild<Drawing.ComplexScriptFont>()?.Typeface?.Value,
+            _ => fontGroup?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value,
+        };
         if (string.IsNullOrEmpty(typeface)) return null;
         // Theme entries are sometimes self-referential ("+mj-lt"); skip those.
         if (typeface.StartsWith("+", StringComparison.Ordinal)) return null;

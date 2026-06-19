@@ -316,8 +316,21 @@ public partial class PowerPointHandler
                 // `continue` without rendering their own <td>; the anchor already
                 // accounted for their columns. vMerge continuation cells are a
                 // single-column rowspan body, so they DO advance colIndex by 1.
+                //
+                // BUT a cell that is BOTH hMerge AND vMerge (the lower continuation
+                // rows of a 2-D merge block, e.g. the bottom-right of a 2x2 merge)
+                // lives in a row whose horizontal-span anchor is in a DIFFERENT row
+                // (the merge's top row), so THIS row never sees an anchor `colIndex
+                // += gridSpan` to account for it. Such a cell still occupies exactly
+                // one grid column in its own row and must advance colIndex by 1,
+                // mirroring the pure-vMerge body case. Failing to advance shifted
+                // the column-band fill of every cell after the merge by one column.
                 if (cell.HorizontalMerge?.Value == true)
+                {
+                    if (cell.VerticalMerge?.Value == true)
+                        colIndex++;
                     continue;
+                }
                 if (cell.VerticalMerge?.Value == true)
                 {
                     colIndex++;

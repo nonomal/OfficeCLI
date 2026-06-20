@@ -111,7 +111,8 @@ internal partial class ChartSvgRenderer
         bool showDataLabels = false, string? valNumFmt = null, string? plotFillColor = null,
         List<(string Name, double Value, string Color, double WidthPt, string Dash)>? referenceLines = null,
         bool isWaterfall = false, List<ErrorBarInfo?>? errorBars = null,
-        bool labelAsPercent = false, string? dataLabelNumFmt = null, int? ooxmlOverlap = null)
+        bool labelAsPercent = false, string? dataLabelNumFmt = null, int? ooxmlOverlap = null,
+        bool isReversed = false)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -235,19 +236,35 @@ internal partial class ChartSvgRenderer
                 gap = (groupH - clusterH) / 2;
             }
 
+            // Value→X mapping. Normal: niceMin at left (plotOx), niceMax at right.
+            // Reversed (<c:scaling><c:orientation val="maxMin"/>): niceMin at right,
+            // niceMax at left, mirroring the line renderer's value→Y reversal so the
+            // value axis flips while categories stay put. Non-reversed expression is
+            // byte-identical to the prior inline `plotOx + ((v-niceMin)/span)*plotPw`.
+            double ValToX(double v)
+            {
+                var frac = (v - niceMin) / span;
+                return isReversed ? plotOx + plotPw - frac * plotPw : plotOx + frac * plotPw;
+            }
             // Zero-baseline X coordinate within the plot (== plotOx when niceMin==0).
-            var plotZeroX = plotOx + zeroFrac * plotPw;
+            var plotZeroX = ValToX(0);
+            // Tick fraction → X. Reversed flips the fraction so tick 0 sits at the
+            // right edge and the last tick at the left, keeping gridlines/labels
+            // aligned with the reversed bars.
+            double TickX(double tFrac) => isReversed
+                ? plotOx + (double)plotPw * (1 - tFrac)
+                : plotOx + (double)plotPw * tFrac;
             if (ShowValMinorGridlines && ValAxisVisible)
             for (int t = 0; t < nTicks; t++)
                 for (int m = 1; m < MinorGridlineCount; m++)
                 {
-                    var gx = plotOx + (double)plotPw * (t + (double)m / MinorGridlineCount) / nTicks;
+                    var gx = TickX((t + (double)m / MinorGridlineCount) / nTicks);
                     sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
                 }
             if (ShowValGridlines && ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
-                var gx = plotOx + (double)plotPw * t / nTicks;
+                var gx = TickX((double)t / nTicks);
                 sb.AppendLine($"        <line x1=\"{gx:0.#}\" y1=\"{oy}\" x2=\"{gx:0.#}\" y2=\"{oy + ph}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             sb.AppendLine($"        <line x1=\"{plotOx}\" y1=\"{oy}\" x2=\"{plotOx}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
@@ -274,12 +291,14 @@ internal partial class ChartSvgRenderer
                         double bx;
                         if (val >= 0)
                         {
-                            bx = plotOx + ((posCursor - niceMin) / span) * plotPw;
+                            // Left edge of the positive segment = the smaller-value end.
+                            // Normal: posCursor; reversed: posCursor+val (mirrored).
+                            bx = isReversed ? ValToX(posCursor + val) : ValToX(posCursor);
                             posCursor += val;
                         }
                         else
                         {
-                            bx = plotOx + ((negCursor + val - niceMin) / span) * plotPw;
+                            bx = isReversed ? ValToX(negCursor) : ValToX(negCursor + val);
                             negCursor += val;
                         }
                         var by = oy + c * groupH + gap;
@@ -298,7 +317,10 @@ internal partial class ChartSvgRenderer
                         // extends left. Always emit a non-negative width using the
                         // absolute magnitude (a negative width would clip to zero).
                         var barW = Math.Abs(val) / span * plotPw;
-                        var bx = val >= 0 ? plotZeroX : plotZeroX - barW;
+                        // Bar spans from the zero baseline to the value. Left edge is the
+                        // smaller X of the two endpoints. Reversed flips which end that is.
+                        var valX = ValToX(val);
+                        var bx = Math.Min(plotZeroX, valX);
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * pitchH;
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"{FillOpacity(s)}\"/>");
                         // Data label at the bar's end (grouped horizontal bars).
@@ -369,12 +391,12 @@ internal partial class ChartSvgRenderer
                         var rawVal = dataIdx < series[s].values.Length ? series[s].values[dataIdx] : 0;
                         var by = oy + c * groupH + gap + (serCount - 1 - s) * pitchH;
                         var cy = by + barH / 2;
-                        var bxTip = plotOx + ((rawVal - niceMin) / span) * plotPw;
+                        var bxTip = ValToX(rawVal);
                         double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
                         var showPlus = eb.BarType is "both" or "plus";
                         var showMinus = eb.BarType is "both" or "minus";
-                        var xPlus = showPlus ? plotOx + ((rawVal + plusErr - niceMin) / span) * plotPw : bxTip;
-                        var xMinus = showMinus ? plotOx + ((rawVal - plusErr - niceMin) / span) * plotPw : bxTip;
+                        var xPlus = showPlus ? ValToX(rawVal + plusErr) : bxTip;
+                        var xMinus = showMinus ? ValToX(rawVal - plusErr) : bxTip;
                         // Horizontal whisker line
                         sb.AppendLine($"        <line x1=\"{xMinus:0.#}\" y1=\"{cy:0.#}\" x2=\"{xPlus:0.#}\" y2=\"{cy:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                         // Short VERTICAL cap lines at each end (y1==y2 false → these
@@ -402,7 +424,7 @@ internal partial class ChartSvgRenderer
                 var val = niceMin + tickStep * t;
                 if (val > niceMax + 1e-9) continue; // BUG1(R25): no label past axisMax
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
-                var tx = plotOx + (double)plotPw * t / nTicks;
+                var tx = TickX((double)t / nTicks);
                 sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
             }
             // Reference-line overlays: horizontal bars → vertical line at value position on the X (value) axis.
@@ -412,7 +434,7 @@ internal partial class ChartSvgRenderer
                 {
                     var v = percentStacked ? rl.Value * 100 : rl.Value;
                     if (v < niceMin || v > niceMax) continue;
-                    var rx = plotOx + ((v - niceMin) / span) * plotPw;
+                    var rx = ValToX(v);
                     var strokeColor = rl.Color.StartsWith("#") ? rl.Color : "#" + rl.Color;
                     var dashArray = RefLineDashArray(rl.Dash);
                     sb.AppendLine($"        <line x1=\"{rx:0.#}\" y1=\"{oy}\" x2=\"{rx:0.#}\" y2=\"{oy + ph}\" stroke=\"{strokeColor}\" stroke-width=\"{rl.WidthPt:0.##}\" stroke-dasharray=\"{dashArray}\"/>");
@@ -436,19 +458,33 @@ internal partial class ChartSvgRenderer
                 gap = (groupW - clusterW) / 2;
             }
 
+            // Value→Y mapping. Normal: niceMin at the bottom (oy+ph), niceMax at the
+            // top (oy). Reversed (<c:scaling><c:orientation val="maxMin"/>): niceMin at
+            // the TOP, niceMax at the BOTTOM — the same inversion the line renderer's
+            // MapY applies. Non-reversed expression is byte-identical to the prior
+            // inline `oy + ph - ((v-niceMin)/span)*ph`, so unreversed output is unchanged.
+            double ValToY(double v)
+            {
+                var frac = (v - niceMin) / span;
+                return isReversed ? oy + frac * ph : oy + ph - frac * ph;
+            }
+            // Tick fraction → Y. Reversed flips so tick 0 sits at the top.
+            double TickY(double tFrac) => isReversed
+                ? oy + (double)ph * tFrac
+                : oy + ph - (double)ph * tFrac;
             // Zero-baseline Y coordinate within the plot (== oy+ph when niceMin==0).
-            var plotZeroY = oy + ph - zeroFrac * ph;
+            var plotZeroY = ValToY(0);
             if (ShowValGridlines && ValAxisVisible)
             for (int t = 0; t <= nTicks; t++)
             {
-                var gy = oy + ph - (double)ph * t / nTicks;
+                var gy = TickY((double)t / nTicks);
                 sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\"/>");
             }
             if (ShowValMinorGridlines && ValAxisVisible)
             for (int t = 0; t < nTicks; t++)
                 for (int m = 1; m < MinorGridlineCount; m++)
                 {
-                    var gy = oy + ph - (double)ph * (t + (double)m / MinorGridlineCount) / nTicks;
+                    var gy = TickY((t + (double)m / MinorGridlineCount) / nTicks);
                     sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.25\" opacity=\"0.5\"/>");
                 }
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
@@ -515,12 +551,15 @@ internal partial class ChartSvgRenderer
                             double by;
                             if (val >= 0)
                             {
-                                by = oy + ph - ((posCursor + val - niceMin) / span) * ph;
+                                // Top edge of the rect = the higher-value end. Normal: the
+                                // far end (posCursor+val) is higher up; reversed it is lower,
+                                // so the rect top is at the near end (posCursor).
+                                by = isReversed ? ValToY(posCursor) : ValToY(posCursor + val);
                                 posCursor += val;
                             }
                             else
                             {
-                                by = oy + ph - ((negCursor - niceMin) / span) * ph;
+                                by = isReversed ? ValToY(negCursor + val) : ValToY(negCursor);
                                 negCursor += val;
                             }
                             if (segH > 0.5)
@@ -539,12 +578,18 @@ internal partial class ChartSvgRenderer
                         // absolute magnitude (a negative height would clip to zero).
                         var bh = Math.Abs(val) / span * ph;
                         var bx = ox + c * groupW + gap + s * pitchW;
-                        var by = val >= 0 ? plotZeroY - bh : plotZeroY;
+                        // Bar spans from the zero baseline to the value. Top edge is the
+                        // smaller Y of the two endpoints; reversed flips which end that is
+                        // (with maxMin the baseline is at the TOP so bars grow downward).
+                        var valY = ValToY(val);
+                        var by = Math.Min(plotZeroY, valY);
                         sb.AppendLine($"        <rect x=\"{bx:0.#}\" y=\"{by:0.#}\" width=\"{barW:0.#}\" height=\"{bh:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"{FillOpacity(s)}\"/>");
                         if (showDataLabels)
                         {
                             var vlabel = LabelText(rawVal, val);
-                            var ly = val >= 0 ? by - 3 : by + bh + DataLabelFontPx;
+                            // Place the label just past the bar's value-end tip.
+                            var labelAbove = isReversed ? val < 0 : val >= 0;
+                            var ly = labelAbove ? by - 3 : by + bh + DataLabelFontPx;
                             sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{bx + barW / 2:0.#}\" y=\"{ly:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                         }
                     }
@@ -575,13 +620,13 @@ internal partial class ChartSvgRenderer
                     {
                         var rawVal = c < series[s].values.Length ? series[s].values[c] : 0;
                         var bx = ox + c * groupW + gap + s * pitchW + barW / 2;
-                        var byTop = oy + ph - ((rawVal - niceMin) / span) * ph;
+                        var byTop = ValToY(rawVal);
                         double plusErr = eb.ValueType == "percentage" ? Math.Abs(rawVal) * eb.Value / 100.0 : errAmount;
                         double minusErr = plusErr;
                         var showPlus = eb.BarType is "both" or "plus";
                         var showMinus = eb.BarType is "both" or "minus";
-                        var yTop = showPlus ? oy + ph - ((rawVal + plusErr - niceMin) / span) * ph : byTop;
-                        var yBot = showMinus ? oy + ph - ((rawVal - minusErr - niceMin) / span) * ph : byTop;
+                        var yTop = showPlus ? ValToY(rawVal + plusErr) : byTop;
+                        var yBot = showMinus ? ValToY(rawVal - minusErr) : byTop;
                         sb.AppendLine($"        <line x1=\"{bx:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx:0.#}\" y2=\"{yBot:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
                         if (showPlus && !eb.NoEndCap)
                             sb.AppendLine($"        <line x1=\"{bx - capW:0.#}\" y1=\"{yTop:0.#}\" x2=\"{bx + capW:0.#}\" y2=\"{yTop:0.#}\" stroke=\"{ebColor}\" stroke-width=\"{eb.Width:0.#}\"/>");
@@ -606,7 +651,7 @@ internal partial class ChartSvgRenderer
                 // omits any label past the axis top. Skip it.
                 if (val > niceMax + 1e-9) continue;
                 var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
-                var ty = oy + ph - (double)ph * t / nTicks;
+                var ty = TickY((double)t / nTicks);
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
             // Reference-line overlays: vertical bars/columns → horizontal line at value position on the Y (value) axis.
@@ -615,7 +660,7 @@ internal partial class ChartSvgRenderer
                 {
                     var v = percentStacked ? rl.Value * 100 : rl.Value;
                     if (v < niceMin || v > niceMax) continue;
-                    var ry = oy + ph - ((v - niceMin) / span) * ph;
+                    var ry = ValToY(v);
                     var strokeColor = rl.Color.StartsWith("#") ? rl.Color : "#" + rl.Color;
                     var dashArray = RefLineDashArray(rl.Dash);
                     sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{ry:0.#}\" x2=\"{ox + pw}\" y2=\"{ry:0.#}\" stroke=\"{strokeColor}\" stroke-width=\"{rl.WidthPt:0.##}\" stroke-dasharray=\"{dashArray}\"/>");
@@ -3141,7 +3186,7 @@ internal partial class ChartSvgRenderer
                     isHorizontal ? info.PlotFillColor : null, info.ReferenceLines,
                     info.IsWaterfall, info.ErrorBars,
                     info.IsPercent && info.ShowDataLabelPercent && !info.ShowDataLabelVal,
-                    info.DataLabelsNumFmt, info.Overlap);
+                    info.DataLabelsNumFmt, info.Overlap, info.IsReversed);
         }
 
         // Axis titles inside SVG — for horizontal bar charts, value axis is on bottom and category axis is on left

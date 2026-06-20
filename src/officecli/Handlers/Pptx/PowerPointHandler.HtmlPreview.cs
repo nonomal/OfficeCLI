@@ -664,7 +664,7 @@ public partial class PowerPointHandler
                     if (gf.Descendants<Drawing.Table>().Any())
                     {
                         tableIdx++;
-                        RenderTable(sb, gf, themeColors, dataPath: PathFor("table", gf, tableIdx));
+                        RenderTable(sb, gf, themeColors, dataPath: PathFor("table", gf, tableIdx), part: slidePart);
                     }
                     else if (gf.Descendants().Any(e => e.LocalName == "chart" && e.NamespaceUri.Contains("chart")))
                     {
@@ -791,7 +791,7 @@ public partial class PowerPointHandler
                     // layout/master tree doesn't provide. Layout/master charts
                     // are rare, so leave them out (R12-1 scope).
                     if (gf.Descendants<Drawing.Table>().Any())
-                        RenderTable(sb, gf, themeColors);
+                        RenderTable(sb, gf, themeColors, part: part);
                     break;
             }
         }

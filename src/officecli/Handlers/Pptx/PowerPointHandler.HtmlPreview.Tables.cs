@@ -3,6 +3,7 @@
 
 using System.Text;
 using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using OfficeCli.Core;
 using OfficeCli.Core.TableStyles;
@@ -15,7 +16,7 @@ public partial class PowerPointHandler
     // ==================== Table Rendering ====================
 
     private static void RenderTable(StringBuilder sb, GraphicFrame gf, Dictionary<string, string> themeColors, string? dataPath = null,
-        (long x, long y, long cx, long cy)? overridePos = null)
+        (long x, long y, long cx, long cy)? overridePos = null, OpenXmlPart? part = null)
     {
         var dataPathAttr = string.IsNullOrEmpty(dataPath) ? "" : $" data-path=\"{HtmlEncode(dataPath)}\"";
         var table = gf.Descendants<Drawing.Table>().FirstOrDefault();
@@ -117,6 +118,27 @@ public partial class PowerPointHandler
                 {
                     cellStyles.Add($"background:{GradientToCss(cellGrad, themeColors)}");
                     hasExplicitFill = true;
+                }
+
+                // Picture fill (<a:tcPr><a:blipFill>): resolve the blip r:embed
+                // against the part the table lives in (same rels as the slide).
+                // PowerPoint stretches the image to fill the cell when <a:stretch>
+                // is present (the common authoring case); mirror with
+                // background-size:100% 100%. Without a part to resolve the rel,
+                // skip silently (no regression for blip-less cells).
+                var cellBlip = tcPr?.GetFirstChild<Drawing.BlipFill>();
+                if (cellBlip != null && part != null)
+                {
+                    var dataUri = BlipToDataUri(cellBlip, part);
+                    if (dataUri != null)
+                    {
+                        var sizeCss = cellBlip.GetFirstChild<Drawing.Stretch>() != null
+                            ? "100% 100%" : "cover";
+                        cellStyles.Add($"background-image:url('{dataUri}')");
+                        cellStyles.Add($"background-size:{sizeCss}");
+                        cellStyles.Add("background-position:center");
+                        hasExplicitFill = true;
+                    }
                 }
 
                 // Explicit <a:noFill/> is an intentional "transparent" declaration

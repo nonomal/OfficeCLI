@@ -2102,7 +2102,7 @@ public partial class PowerPointHandler
                     if (pos.HasValue)
                     {
                         if (gf.Descendants<Drawing.Table>().Any())
-                            RenderTable(sb, gf, themeColors, dataPath: null, overridePos: pos);
+                            RenderTable(sb, gf, themeColors, dataPath: null, overridePos: pos, part: slidePart);
                         else if (slidePart is SlidePart sp)
                             RenderChart(sb, gf, sp, themeColors, dataPath: null, overridePos: pos);
                     }
@@ -2226,7 +2226,7 @@ public partial class PowerPointHandler
                     if (pos.HasValue)
                     {
                         if (gf.Descendants<Drawing.Table>().Any())
-                            RenderTable(sb, gf, themeColors, dataPath: null, overridePos: pos);
+                            RenderTable(sb, gf, themeColors, dataPath: null, overridePos: pos, part: slidePart);
                         else if (slidePart is SlidePart sp)
                             RenderChart(sb, gf, sp, themeColors, dataPath: null, overridePos: pos);
                     }

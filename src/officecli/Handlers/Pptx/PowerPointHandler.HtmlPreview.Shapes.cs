@@ -1528,6 +1528,16 @@ public partial class PowerPointHandler
                     ? "image/svg+xml"
                     : SanitizeContentType(imgPart.ContentType ?? "image/png");
 
+                // EMF/WMF are vector metafiles browsers cannot display via <img> or
+                // background-image — emitting a data:image/x-emf URI shows a broken-image
+                // icon. Emit the graceful placeholder used for other unrenderable images.
+                if (contentType is "image/x-emf" or "image/x-wmf" or "image/emf" or "image/wmf")
+                {
+                    sb.Append("<div style=\"width:100%;height:100%;background:rgba(128,128,128,0.15);display:flex;align-items:center;justify-content:center;color:rgba(128,128,128,0.5);font-size:12px\">Image</div>");
+                }
+                else
+                {
+
                 // Crop — PowerPoint srcRect semantics: select a rectangular region of the
                 // source image, then scale that region to fill the container.
                 // CSS equivalent: render as a <div> with background-image, setting
@@ -1636,6 +1646,7 @@ public partial class PowerPointHandler
                 {
                     sb.Append($"<img src=\"data:{contentType};base64,{base64}\" loading=\"lazy\">");
                 }
+                } // end else (renderable content type)
             }
             catch
             {

@@ -856,69 +856,28 @@ public partial class WordHandler
     // rels — and the run XML's r:id refs are rewritten to match. Child parts
     // keep their SOURCE rel ids: they are scoped to the freshly created parent
     // part, so the verbatim part bytes' internal refs resolve untouched.
-    private string AddActiveX(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
-    {
-        properties ??= new Dictionary<string, string>();
-        if (!properties.TryGetValue("runXml", out var axMarker) || string.IsNullOrEmpty(axMarker)
-            || !axMarker.Contains("<w:control", StringComparison.Ordinal))
-            throw new ArgumentException("activex requires --prop runXml containing a <w:control> element");
-        return AddInlinedPartsRun(parent, parentPath, properties, "activex");
-    }
-
-    // SmartArt diagram run — same self-contained carrier as `add activex`:
-    // verbatim run XML (the <w:drawing> whose <dgm:relIds> references the
-    // data / layout / quickStyle / colors parts via r:dm/r:lo/r:qs/r:cs) plus
-    // part{N}.* payloads, including the data part's nested rendered-drawing
-    // child (diagramDrawing+xml, what Word actually rasterizes).
-    private string AddDiagram(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
-    {
-        properties ??= new Dictionary<string, string>();
-        if (!properties.TryGetValue("runXml", out var dgMarker) || string.IsNullOrEmpty(dgMarker)
-            || !dgMarker.Contains("relIds", StringComparison.Ordinal))
-            throw new ArgumentException("diagram requires --prop runXml containing a <dgm:relIds> element");
-        return AddInlinedPartsRun(parent, parentPath, properties, "diagram");
-    }
-
-    // Native DrawingML chart run carried VERBATIM — supersedes the lossy typed
-    // `add chart` rebuild. The runXml is the run's <w:drawing> referencing
-    // <c:chart r:id>; part{N} payloads carry chart1.xml + its style / colors /
-    // themeOverride / userShapes / embedded-workbook children (and any external
-    // workbook relationship). Same self-contained carrier as `add diagram`.
-    private string AddChartVerbatim(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
-    {
-        properties ??= new Dictionary<string, string>();
-        if (!properties.TryGetValue("runXml", out var cMarker) || string.IsNullOrEmpty(cMarker)
-            || !cMarker.Contains("c:chart", StringComparison.Ordinal))
-            throw new ArgumentException("chartpart requires --prop runXml containing a <c:chart> reference");
-        return AddInlinedPartsRun(parent, parentPath, properties, "chartpart");
-    }
-
-    // Legacy VML shape run (<w:pict>) — textboxes whose content carries
-    // hyperlinks (external rels) or v:imagedata image parts. Same carrier.
-    private string AddVmlShape(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
-    {
-        properties ??= new Dictionary<string, string>();
-        if (!properties.TryGetValue("runXml", out var vmlMarker) || string.IsNullOrEmpty(vmlMarker)
-            || !vmlMarker.Contains("<w:pict", StringComparison.Ordinal))
-            throw new ArgumentException("vmlshape requires --prop runXml containing a <w:pict> element");
-        return AddInlinedPartsRun(parent, parentPath, properties, "vmlshape");
-    }
-
-    // Modern DrawingML shape run (<w:drawing> hosting wps:wsp) whose spPr /
-    // blipFill references image parts (a cover-page fern graphic). Same
-    // carrier; previously the emitter scrubbed the blipFill to a neutral
-    // solid fill and the bitmap was lost.
-    private string AddDrawingShape(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties)
-    {
-        properties ??= new Dictionary<string, string>();
-        if (!properties.TryGetValue("runXml", out var dsMarker) || string.IsNullOrEmpty(dsMarker)
-            || !dsMarker.Contains("<w:drawing", StringComparison.Ordinal))
-            throw new ArgumentException("drawingshape requires --prop runXml containing a <w:drawing> element");
-        return AddInlinedPartsRun(parent, parentPath, properties, "drawingshape");
-    }
-
+    // Unified verbatim part-owning carrier (`add inlinedparts`) — supersedes the
+    // former per-element carrier verbs (chartpart / diagram / vmlshape /
+    // drawingshape / activex), which differed ONLY in a runXml marker check and
+    // all delegated here. The runXml is the verbatim run whose drawing/pict/control
+    // references its parts via r:id / r:dm / r:embed / ...; part{N}.* payloads carry
+    // every part the element owns (and their children + external rels). The element
+    // kind is self-evident from runXml + the part content types — CreateInlinedPart
+    // routes by content type, never by verb — so a single verb covers all of them.
+    // Used only by dump→batch (machine-produced); the old verb names stay accepted
+    // as input aliases. The marker check is now the union of the former per-verb ones.
     private string AddInlinedPartsRun(OpenXmlElement parent, string parentPath, Dictionary<string, string> properties, string opName)
     {
+        properties ??= new Dictionary<string, string>();
+        if (!properties.TryGetValue("runXml", out var marker) || string.IsNullOrEmpty(marker)
+            || !(marker.Contains("c:chart", StringComparison.Ordinal)
+                 || marker.Contains("relIds", StringComparison.Ordinal)
+                 || marker.Contains("<w:pict", StringComparison.Ordinal)
+                 || marker.Contains("<w:drawing", StringComparison.Ordinal)
+                 || marker.Contains("<w:control", StringComparison.Ordinal)))
+            throw new ArgumentException(
+                "inlinedparts requires --prop runXml containing a part-owning element "
+                + "(<c:chart>, <dgm:relIds>, <w:pict>, <w:drawing> or <w:control>)");
         var runXml = properties["runXml"];
         var mainPart = _doc.MainDocumentPart!;
         // CONSISTENCY(host-part-rel): same routing as AddOle — parts referenced

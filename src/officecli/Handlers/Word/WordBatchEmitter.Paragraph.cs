@@ -848,7 +848,7 @@ public static partial class WordBatchEmitter
                             {
                                 Command = "add",
                                 Parent = carrierPath,
-                                Type = "drawingshape",
+                                Type = "inlinedparts",
                                 Props = PackInlinedPartsProps(csData),
                             });
                             continue;
@@ -859,7 +859,7 @@ public static partial class WordBatchEmitter
                             {
                                 Command = "add",
                                 Parent = carrierPath,
-                                Type = "vmlshape",
+                                Type = "inlinedparts",
                                 Props = PackInlinedPartsProps(cvData),
                             });
                             continue;
@@ -2567,7 +2567,7 @@ public static partial class WordBatchEmitter
                 {
                     Command = "add",
                     Parent = sharedAttachPara ?? paraTargetPath,
-                    Type = "vmlshape",
+                    Type = "inlinedparts",
                     Props = PackInlinedPartsProps(vmlImgData),
                 });
                 return true;
@@ -2611,7 +2611,7 @@ public static partial class WordBatchEmitter
                     {
                         Command = "add",
                         Parent = paraTargetPath,
-                        Type = "drawingshape",
+                        Type = "inlinedparts",
                         Props = PackInlinedPartsProps(shpData),
                     });
                     return true;
@@ -2800,7 +2800,7 @@ public static partial class WordBatchEmitter
                 {
                     Command = "add",
                     Parent = paraTargetPath,
-                    Type = "chartpart",
+                    Type = "inlinedparts",
                     Props = PackInlinedPartsProps(chartVerbatim),
                 });
                 return true;
@@ -2931,7 +2931,7 @@ public static partial class WordBatchEmitter
             {
                 Command = "add",
                 Parent = paraTargetPath,
-                Type = "diagram",
+                Type = "inlinedparts",
                 Props = PackInlinedPartsProps(dgmData),
             });
             return true;
@@ -3278,7 +3278,7 @@ public static partial class WordBatchEmitter
                     {
                         Command = "add",
                         Parent = vmlParent,
-                        Type = "vmlshape",
+                        Type = "inlinedparts",
                         Props = PackInlinedPartsProps(vmlData),
                     });
                     return true;
@@ -3738,7 +3738,7 @@ public static partial class WordBatchEmitter
             {
                 Command = "add",
                 Parent = paraTargetPath,
-                Type = "activex",
+                Type = "inlinedparts",
                 Props = PackInlinedPartsProps(axData),
             });
             return true;

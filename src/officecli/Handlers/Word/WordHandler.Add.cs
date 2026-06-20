@@ -182,13 +182,16 @@ public partial class WordHandler
             "tab" or "tabstop" => AddTab(parent, parentPath, index, properties),
             "ptab" or "positionaltab" => AddPtab(parent, parentPath, index, properties),
             "chart" => AddChart(parent, parentPath, index, properties),
-            "chartpart" => AddChartVerbatim(parent, parentPath, properties),
             "picture" or "image" or "img" => AddPicture(parent, parentPath, index, properties),
             "ole" or "oleobject" or "object" or "embed" => AddOle(parent, parentPath, index, properties),
-            "activex" => AddActiveX(parent, parentPath, properties),
-            "diagram" or "smartart" => AddDiagram(parent, parentPath, properties),
-            "vmlshape" => AddVmlShape(parent, parentPath, properties),
-            "drawingshape" => AddDrawingShape(parent, parentPath, properties),
+            // Unified verbatim part-owning carrier (dump→batch only). The former
+            // per-element verbs (chartpart/diagram/smartart/vmlshape/drawingshape/
+            // activex) differed only in a marker check and all delegated to the
+            // same routine; they remain accepted as input aliases for hand-written
+            // batches, but the emitter now emits the single canonical `inlinedparts`.
+            "inlinedparts" or "chartpart" or "activex" or "diagram" or "smartart"
+                or "vmlshape" or "drawingshape"
+                => AddInlinedPartsRun(parent, parentPath, properties, "inlinedparts"),
             "comment" => AddComment(parent, parentPath, index, properties),
             "bookmark" => AddBookmark(parent, parentPath, index, properties),
             "permstart" or "permend" => AddPerm(parent, parentPath, index, properties, type),
@@ -419,8 +422,10 @@ public partial class WordHandler
                 case "oleobject":
                 case "object":
                 case "embed":
-                // AddActiveX/AddDiagram wrap the run in a cell paragraph, same
-                // as AddOle — block-level schema requirement satisfied.
+                // The inlined-parts carrier wraps the run in a cell paragraph, same
+                // as AddOle — block-level schema requirement satisfied. Old verb
+                // aliases kept alongside the unified `inlinedparts`.
+                case "inlinedparts":
                 case "activex":
                 case "diagram":
                 case "smartart":

@@ -1904,6 +1904,19 @@ public partial class WordHandler
             brk.Clear = new EnumValue<BreakTextRestartLocationValues>(new BreakTextRestartLocationValues(clearCanon));
         }
         var brkRun = new Run(brk);
+        // BUG-DUMP-BREAKRPR: a break-only run (<w:r><w:rPr>…</w:rPr><w:br/></w:r>)
+        // carries an rPr whose font/size sets the height of the line the break
+        // starts. The verbatim raw-set fallback in TryEmitBreakRun only fires for
+        // /body hosts, so a break inside a table cell rebuilt as a bare
+        // <w:r><w:br/></w:r> and the broken line collapsed to the default font
+        // size — inflating cell/row height and drifting the table. Re-apply the
+        // forwarded rPr here so it round-trips in every container.
+        if (properties.TryGetValue("breakRunRpr", out var brkRpr)
+            && !string.IsNullOrWhiteSpace(brkRpr)
+            && brkRpr.Contains("rPr", StringComparison.Ordinal))
+        {
+            try { brkRun.PrependChild(new RunProperties(brkRpr)); } catch { /* malformed: skip */ }
+        }
 
         string resultPath;
         if (parent is Paragraph brkPara)

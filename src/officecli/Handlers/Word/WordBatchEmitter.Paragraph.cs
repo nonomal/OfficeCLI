@@ -1441,6 +1441,27 @@ public static partial class WordBatchEmitter
         if (run.Format.TryGetValue("breakClear", out var brkClear)
             && brkClear?.ToString() is { Length: > 0 } brkClearS)
             brkProps["breakClear"] = brkClearS;
+        // BUG-DUMP-BREAKRPR: the verbatim raw-set fallback above only runs for
+        // /body hosts. For breaks in other containers (table cells, header/
+        // footer) the typed `add pagebreak` builds a bare <w:r><w:br/></w:r> and
+        // drops the run's rPr — whose font/size sets the height of the line the
+        // break starts, so the line collapsed to the default size and inflated
+        // cell/row height. Forward the source run's <w:rPr> so AddBreak re-applies
+        // it. Extract from the raw run XML (Navigation strips typography keys off
+        // break nodes, so there is no scalar Format to read).
+        var brkRawXml = word.RawElementXml(run.Path);
+        if (!string.IsNullOrEmpty(brkRawXml))
+        {
+            try
+            {
+                var brkRunEl = System.Xml.Linq.XElement.Parse(brkRawXml!);
+                var wNsBrk = (System.Xml.Linq.XNamespace)"http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                var brkRPrEl = brkRunEl.Element(wNsBrk + "rPr");
+                if (brkRPrEl != null)
+                    brkProps["breakRunRpr"] = brkRPrEl.ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+            }
+            catch { /* bare break: no rPr to forward */ }
+        }
         // BUG-DUMP-DELBREAK: forward the tracked-change attribution so AddBreak
         // re-wraps the rebuilt break run in <w:del>/<w:ins>/move. Without this a
         // deleted (invisible) page break replays as a live break and inflates the

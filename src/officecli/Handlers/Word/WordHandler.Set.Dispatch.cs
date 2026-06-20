@@ -606,6 +606,13 @@ public partial class WordHandler
             // (AddFootnote/AddEndnote rebuild the reference runs from them).
             if (key.Equals("referenceRPr", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("referenceMarkRPr", StringComparison.OrdinalIgnoreCase)) continue;
+            // referenceCustomMark / referenceCustomMarkFollows are likewise
+            // consumed at note-creation time (AddFootnote/AddEndnote stamp the
+            // body ref run's w:customMarkFollows + sibling <w:t> glyph). The dump
+            // forwards both on every custom-mark note, so without this skip a
+            // round-trip falsely reports them as unsupported_property.
+            if (key.Equals("referenceCustomMark", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("referenceCustomMarkFollows", StringComparison.OrdinalIgnoreCase)) continue;
             // Explicit paragraph-mark-only formatting (the dotted markRPr.* form
             // the dump forwards from the note's first paragraph) writes ONLY to
             // the ¶ mark, never to the content runs — mirrors ApplyCommentFormatKeys.

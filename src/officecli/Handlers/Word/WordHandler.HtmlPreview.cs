@@ -1812,14 +1812,15 @@ public partial class WordHandler
         int? currentNumId = null; // track numId for cross-numId nesting
         int prevOoxmlIlvl = 0; // previous list item's RAW (pre-offset) ilvl — nesting depth follows ilvl, not numId indent
         var numIdLevelOffset = new Dictionary<int, int>(); // numId → effective ilvl offset for cross-numId nesting
-        var olCountPerLevel = new Dictionary<int, int>(); // ilvl → running <ol> item count for `start` attribute
-        // Per-(abstractNumId, ilvl) running counter. Persists across numId
-        // changes so that two num instances pointing at the same abstractNum
-        // share a counter (Word's "continue" behavior) UNLESS the new num
-        // carries an explicit <w:lvlOverride><w:startOverride/></w:lvlOverride>,
-        // in which case we reset to the override value.
-        var absNumLevelCounters = new Dictionary<int, Dictionary<int, int>>();
-        var multiLevelCounters = new Dictionary<int, int>(); // ilvl → counter for multi-level numbering
+        // Ordered-list counters shared with the plain-text walker via
+        // SeedOrderedStart / AdvanceOrderedCounter / RenderOrderedMarker
+        // (CONSISTENCY(list-marker)). olState.OlCountPerLevel holds the running
+        // <ol> item count per ilvl; .MultiLevelCounters feeds the lvlText
+        // template; .AbsNumLevelCounters persists across numId changes so two
+        // num instances on the same abstractNum continue numbering (Word's
+        // "continue" behavior) unless a <w:lvlOverride><w:startOverride/>
+        // resets it. The HTML path keeps currentNumId locally for nesting.
+        var olState = new OrderedListNumberingState();
         var headingCounters = new Dictionary<int, int>(); // ilvl → counter for heading auto-numbering from style numPr
         bool pendingLiClose = false; // defer </li> to allow nested lists inside
         bool inMultiColumn = false; // track whether we're inside a multi-column div
@@ -2061,15 +2062,15 @@ public partial class WordHandler
                             else
                             {
                                 CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
-                                olCountPerLevel.Clear();
-                                multiLevelCounters.Clear();
+                                olState.OlCountPerLevel.Clear();
+                                olState.MultiLevelCounters.Clear();
                             }
                         }
                         else if (listStack.Count == 0)
                         {
                             // Previous list was closed by non-list content — reset counters for new list
-                            olCountPerLevel.Clear();
-                            multiLevelCounters.Clear();
+                            olState.OlCountPerLevel.Clear();
+                            olState.MultiLevelCounters.Clear();
                             numIdLevelOffset.Clear();
                         }
                     }
@@ -2141,28 +2142,10 @@ public partial class WordHandler
                     }
                     var indentStyle = $" style=\"{listStyleParts}\"";
 
-                    // Seed per-level counter. Three-way precedence:
-                    //   1. olCountPerLevel survives within the current <ol> stack.
-                    //   2. lvlOverride/startOverride on this num → restart from value.
-                    //   3. abstractNum-level running counter → continuation across
-                    //      sibling num instances on the same abstractNum (the
-                    //      `continue=true` path through the API; matches Word's
-                    //      default "list continues from previous list using the
-                    //      same template" behavior).
-                    //   4. Otherwise, abstractNum's level start (typically 1).
+                    // Counter seeding precedence (in-run → startOverride →
+                    // abstractNum continuation → level start) lives in
+                    // SeedOrderedStart, shared with the text walker.
                     var seedAbsId = GetAbstractNumId(numId);
-                    int SeedStart(int forIlvl)
-                    {
-                        if (olCountPerLevel.TryGetValue(forIlvl, out var prev) && prev > 0)
-                            return prev;
-                        var ovr = GetNumStartOverride(numId, forIlvl);
-                        if (ovr.HasValue) return ovr.Value - 1;
-                        if (seedAbsId.HasValue
-                            && absNumLevelCounters.TryGetValue(seedAbsId.Value, out var byIlvl)
-                            && byIlvl.TryGetValue(forIlvl, out var running) && running > 0)
-                            return running;
-                        return (GetStartValue(numId, forIlvl) ?? 1) - 1;
-                    }
 
                     while (listStack.Count < ilvl + 1)
                     {
@@ -2200,35 +2183,11 @@ public partial class WordHandler
                         listStack.Push(tag);
                     }
 
-                    // Track counters
+                    // Advance the ordered counter (increment level, reset
+                    // deeper levels, mirror to the abstractNum store) via the
+                    // shared state machine — identical to the text walker.
                     if (tag == "ol")
-                    {
-                        var seed = SeedStart(ilvl);
-                        olCountPerLevel[ilvl] = olCountPerLevel.GetValueOrDefault(ilvl, seed) + 1;
-                        multiLevelCounters[ilvl] = olCountPerLevel[ilvl];
-                        // Reset deeper level counters
-                        for (int lk = ilvl + 1; lk <= 8; lk++)
-                        {
-                            if (olCountPerLevel.ContainsKey(lk)) olCountPerLevel[lk] = 0;
-                            if (multiLevelCounters.ContainsKey(lk)) multiLevelCounters[lk] = 0;
-                        }
-                        // Mirror the running count into the per-abstractNum
-                        // store so a later sibling num on the same template
-                        // can pick it up (continuation). Reset the deeper
-                        // levels there too — Word resets all sub-levels when
-                        // a shallower level ticks.
-                        if (seedAbsId.HasValue)
-                        {
-                            if (!absNumLevelCounters.TryGetValue(seedAbsId.Value, out var byIlvl))
-                            {
-                                byIlvl = new Dictionary<int, int>();
-                                absNumLevelCounters[seedAbsId.Value] = byIlvl;
-                            }
-                            byIlvl[ilvl] = olCountPerLevel[ilvl];
-                            for (int lk = ilvl + 1; lk <= 8; lk++)
-                                if (byIlvl.ContainsKey(lk)) byIlvl[lk] = 0;
-                        }
-                    }
+                        AdvanceOrderedCounter(olState, numId, seedAbsId, ilvl);
 
                     currentListType = listStyle;
                     currentListLevel = ilvl;
@@ -2274,14 +2233,7 @@ public partial class WordHandler
                     string? olMarkerSpan = null;
                     if (tag == "ol")
                     {
-                        var template = string.IsNullOrEmpty(lvlText) ? $"%{ilvl + 1}" : lvlText!;
-                        var marker = System.Text.RegularExpressions.Regex.Replace(template, @"%(\d)", m =>
-                        {
-                            var k = int.Parse(m.Groups[1].Value) - 1;
-                            var lvlFmt = GetNumberingFormat(numId, k);
-                            var counter = multiLevelCounters.GetValueOrDefault(k, 0);
-                            return OfficeCli.Core.WordNumFmtRenderer.Render(counter, lvlFmt);
-                        });
+                        var marker = RenderOrderedMarker(olState, numId, ilvl, lvlText);
                         var suff = GetLevelSuffix(numId, ilvl);
                         var jc = GetLevelJustification(numId, ilvl);
                         var markerWidth = hangingPt > 0 ? $"{hangingPt:0.#}pt" : "3em";

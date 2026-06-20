@@ -861,20 +861,102 @@ public partial class WordHandler
         return numFmtR.ToLowerInvariant() == "bullet" ? "bullet" : "ordered";
     }
 
+    // ---- Shared ordered-list numbering (text + HTML preview) -------------
+    //
+    // CONSISTENCY(list-marker): the plain-text walker (WordHandler.View.cs) and
+    // the HTML preview (WordHandler.HtmlPreview.cs) compute ordered-list markers
+    // through this ONE state machine, so the two views can never diverge on
+    // auto-numbering (the bug behind GitHub #161, where text fell back to "• ").
+    // The HTML path additionally owns its <ol>/<ul> nesting + CSS; only the
+    // counter seeding / advancing / glyph rendering lives here.
+
     /// <summary>
-    /// Running list-counter state for the plain-text view walkers. One
-    /// instance per top-level walk (ViewAsText / ViewAsAnnotated /
-    /// ViewAsTextJson); threaded into <see cref="GetListPrefix"/> so ordered
-    /// items increment 1,2,3 across paragraphs. Without an instance the prefix
-    /// renders from the level's start value (stateless fallback).
+    /// Running ordered-list counter state for one render walk. Holds the same
+    /// three dictionaries the HTML preview has always used:
+    ///   • <see cref="OlCountPerLevel"/> — running item count per ilvl in the
+    ///     active list run (cleared when the list breaks to a different numId).
+    ///   • <see cref="MultiLevelCounters"/> — the values fed into the lvlText
+    ///     template ("%1.%2.") when rendering a marker.
+    ///   • <see cref="AbsNumLevelCounters"/> — per-abstractNum running counts
+    ///     that survive a numId change, so sibling num instances sharing one
+    ///     abstractNum continue numbering (Word's default list continuation).
+    /// <see cref="CurrentNumId"/> drives the text path's break detection; the
+    /// HTML path tracks its own currentNumId alongside its nesting state.
     /// </summary>
-    private sealed class ListMarkerCounter
+    private sealed class OrderedListNumberingState
     {
         public int? CurrentNumId;
-        public readonly Dictionary<int, int> Counters = new();
+        public readonly Dictionary<int, int> OlCountPerLevel = new();
+        public readonly Dictionary<int, int> MultiLevelCounters = new();
+        public readonly Dictionary<int, Dictionary<int, int>> AbsNumLevelCounters = new();
     }
 
-    private string GetListPrefix(Paragraph para, ListMarkerCounter? counter = null)
+    /// <summary>
+    /// Seed value (one BELOW the first rendered number) for an ordered level,
+    /// using the four-way precedence Word follows: in-run running count →
+    /// explicit startOverride → abstractNum continuation → level start value.
+    /// </summary>
+    private int SeedOrderedStart(OrderedListNumberingState st, int numId, int? absId, int forIlvl)
+    {
+        if (st.OlCountPerLevel.TryGetValue(forIlvl, out var prev) && prev > 0)
+            return prev;
+        var ovr = GetNumStartOverride(numId, forIlvl);
+        if (ovr.HasValue) return ovr.Value - 1;
+        if (absId.HasValue
+            && st.AbsNumLevelCounters.TryGetValue(absId.Value, out var byIlvl)
+            && byIlvl.TryGetValue(forIlvl, out var running) && running > 0)
+            return running;
+        return (GetStartValue(numId, forIlvl) ?? 1) - 1;
+    }
+
+    /// <summary>
+    /// Advance the counter for an ordered item at (numId, ilvl): increment this
+    /// level, reset every deeper level (Word restarts sub-levels when a
+    /// shallower one ticks), and mirror the running count into the per-abstractNum
+    /// store so a later sibling num can continue from it.
+    /// </summary>
+    private void AdvanceOrderedCounter(OrderedListNumberingState st, int numId, int? absId, int ilvl)
+    {
+        var seed = SeedOrderedStart(st, numId, absId, ilvl);
+        st.OlCountPerLevel[ilvl] = st.OlCountPerLevel.GetValueOrDefault(ilvl, seed) + 1;
+        st.MultiLevelCounters[ilvl] = st.OlCountPerLevel[ilvl];
+        for (int lk = ilvl + 1; lk <= 8; lk++)
+        {
+            if (st.OlCountPerLevel.ContainsKey(lk)) st.OlCountPerLevel[lk] = 0;
+            if (st.MultiLevelCounters.ContainsKey(lk)) st.MultiLevelCounters[lk] = 0;
+        }
+        if (absId.HasValue)
+        {
+            if (!st.AbsNumLevelCounters.TryGetValue(absId.Value, out var byIlvl))
+            {
+                byIlvl = new Dictionary<int, int>();
+                st.AbsNumLevelCounters[absId.Value] = byIlvl;
+            }
+            byIlvl[ilvl] = st.OlCountPerLevel[ilvl];
+            for (int lk = ilvl + 1; lk <= 8; lk++)
+                if (byIlvl.ContainsKey(lk)) byIlvl[lk] = 0;
+        }
+    }
+
+    /// <summary>
+    /// Expand a level's lvlText template ("%1、", "%1.%2.") against the current
+    /// multi-level counters, rendering each %N through WordNumFmtRenderer so
+    /// every numFmt (decimal, chineseCounting, decimalEnclosedCircle, …) maps to
+    /// the same glyphs in both views. An empty template defaults to "%N".
+    /// </summary>
+    private string RenderOrderedMarker(OrderedListNumberingState st, int numId, int ilvl, string? lvlText)
+    {
+        var template = string.IsNullOrEmpty(lvlText) ? $"%{ilvl + 1}" : lvlText!;
+        return System.Text.RegularExpressions.Regex.Replace(template, @"%(\d)", m =>
+        {
+            var k = int.Parse(m.Groups[1].Value) - 1;
+            var lvlFmt = GetNumberingFormat(numId, k);
+            var counter = st.MultiLevelCounters.GetValueOrDefault(k, 0);
+            return OfficeCli.Core.WordNumFmtRenderer.Render(counter, lvlFmt);
+        });
+    }
+
+    private string GetListPrefix(Paragraph para, OrderedListNumberingState? state = null)
     {
         var numProps = para.ParagraphProperties?.NumberingProperties;
         if (numProps == null) return "";
@@ -892,52 +974,24 @@ public partial class WordHandler
         if (numFmt.Equals("bullet", StringComparison.OrdinalIgnoreCase))
             return $"{indent}• ";
 
-        // Ordered list: render EVERY numFmt (decimal, chineseCounting, …)
-        // through the same WordNumFmtRenderer the HTML path uses, expanding
-        // the level's lvlText template ("%1、", "%1.%2.") against a running
-        // per-level counter. Mirrors the HTML marker logic at
-        // WordHandler.HtmlPreview.cs (CONSISTENCY(list-marker)) so text and
-        // HTML never diverge on auto-numbering. The previous static map only
-        // knew 6 ordered formats and fell back to "• " for the rest — Chinese
-        // counting etc. silently became a bullet.
-        int CounterFor(int lvl)
+        // Stateless fallback: no walk context → render from the level start.
+        var st = state ?? new OrderedListNumberingState();
+
+        // A different numId breaks the active run: clear the in-run counters
+        // (but NOT AbsNumLevelCounters — that carries continuation across
+        // sibling nums sharing an abstractNum). Mirrors the HTML reset at
+        // WordHandler.HtmlPreview.cs. Same numId continues across intervening
+        // non-list paragraphs, exactly as Word does.
+        if (st.CurrentNumId != numId.Value)
         {
-            if (counter != null && counter.Counters.TryGetValue(lvl, out var v)) return v;
-            return GetStartValue(numId.Value, lvl) ?? 1;
+            st.OlCountPerLevel.Clear();
+            st.MultiLevelCounters.Clear();
+            st.CurrentNumId = numId.Value;
         }
 
-        if (counter != null)
-        {
-            // A different numId is a different list instance → restart. Same
-            // numId persists across intervening non-list paragraphs (Word
-            // continues the list), so the counter is only reset here.
-            if (counter.CurrentNumId != numId.Value)
-            {
-                counter.Counters.Clear();
-                counter.CurrentNumId = numId.Value;
-            }
-            var start = GetStartValue(numId.Value, ilvl) ?? 1;
-            counter.Counters[ilvl] = counter.Counters.TryGetValue(ilvl, out var prev) ? prev + 1 : start;
-            // Word restarts every deeper level when a shallower level ticks.
-            foreach (var k in counter.Counters.Keys.Where(k => k > ilvl).ToList())
-                counter.Counters.Remove(k);
-        }
-
-        var template = GetLevelText(numId.Value, ilvl);
-        string marker;
-        if (string.IsNullOrEmpty(template))
-        {
-            marker = OfficeCli.Core.WordNumFmtRenderer.Render(CounterFor(ilvl), numFmt);
-        }
-        else
-        {
-            marker = System.Text.RegularExpressions.Regex.Replace(template, @"%(\d)", m =>
-            {
-                var k = int.Parse(m.Groups[1].Value) - 1;
-                var fmt = GetNumberingFormat(numId.Value, k);
-                return OfficeCli.Core.WordNumFmtRenderer.Render(CounterFor(k), fmt);
-            });
-        }
+        var absId = GetAbstractNumId(numId.Value);
+        AdvanceOrderedCounter(st, numId.Value, absId, ilvl);
+        var marker = RenderOrderedMarker(st, numId.Value, ilvl, GetLevelText(numId.Value, ilvl));
 
         // Separator after the marker: honor <w:suff> (nothing → none; tab/space
         // both collapse to a single space in plain text).

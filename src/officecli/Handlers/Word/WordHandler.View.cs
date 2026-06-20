@@ -325,7 +325,7 @@ public partial class WordHandler
 
         // Track which SdtBlocks we've seen for indexing
         var sdtIndexMap = new Dictionary<SdtBlock, int>();
-        var listCounter = new ListMarkerCounter();
+        var listCounter = new OrderedListNumberingState();
 
         foreach (var item in bodyElements)
         {
@@ -487,7 +487,7 @@ public partial class WordHandler
 
         // Track which SdtBlocks we've seen for indexing
         var sdtIndexMap = new Dictionary<SdtBlock, int>();
-        var listCounter = new ListMarkerCounter();
+        var listCounter = new OrderedListNumberingState();
 
         foreach (var item in bodyElements)
         {
@@ -999,7 +999,7 @@ public partial class WordHandler
         int emitted = 0;
         var bodyElements = GetBodyElementsWithSdtContext(body).ToList();
         var sdtIndexMap = new Dictionary<SdtBlock, int>();
-        var listCounter = new ListMarkerCounter();
+        var listCounter = new OrderedListNumberingState();
 
         foreach (var item in bodyElements)
         {

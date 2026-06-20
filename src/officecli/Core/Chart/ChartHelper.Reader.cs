@@ -1717,6 +1717,28 @@ internal static partial class ChartHelper
                 .ToArray();
         }
 
+        // Numeric category axes: Excel/PowerPoint emit <c:numRef>/<c:numLit> when
+        // the category labels are numbers (years, quarters, etc). Without these
+        // branches the axis labels render blank. Mirror ReadNumericData's chain.
+        var numRef = catData.GetFirstChild<C.NumberReference>();
+        var numCache = numRef?.GetFirstChild<C.NumberingCache>();
+        if (numCache != null)
+        {
+            return numCache.Elements<C.NumericPoint>()
+                .OrderBy(p => p.Index?.Value ?? 0)
+                .Select(p => p.GetFirstChild<C.NumericValue>()?.Text ?? "")
+                .ToArray();
+        }
+
+        var numLit = catData.GetFirstChild<C.NumberLiteral>();
+        if (numLit != null)
+        {
+            return numLit.Elements<C.NumericPoint>()
+                .OrderBy(p => p.Index?.Value ?? 0)
+                .Select(p => p.GetFirstChild<C.NumericValue>()?.Text ?? "")
+                .ToArray();
+        }
+
         // StringReference without cache — return null (data lives in cells)
         // The formula is read separately via ReadFormulaRef
         return null;

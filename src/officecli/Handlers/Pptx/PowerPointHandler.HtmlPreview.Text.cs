@@ -378,11 +378,13 @@ public partial class PowerPointHandler
                 {
                     // Determine base font size from first run or default
                     var firstRun = para.Elements<Drawing.Run>().FirstOrDefault();
-                    var baseSizeHundredths = firstRun?.RunProperties?.FontSize?.Value ?? defaultFontSizeHundredths;
-                    if (baseSizeHundredths.HasValue)
+                    // Terminal 1800 (18pt) fallback mirrors RenderRun: when no size is
+                    // set anywhere in the chain, the run renders at the 18pt spec default,
+                    // so the bullet must match it (else the bullet shrinks to browser default).
+                    var baseSizeHundredths = firstRun?.RunProperties?.FontSize?.Value ?? defaultFontSizeHundredths ?? 1800;
                     {
                         var pct = buSzPct?.Val?.HasValue == true ? buSzPct.Val.Value / 100000.0 : 1.0;
-                        buStyles.Add($"font-size:{baseSizeHundredths.Value / 100.0 * pct:0.##}pt");
+                        buStyles.Add($"font-size:{baseSizeHundredths / 100.0 * pct:0.##}pt");
                     }
                 }
 

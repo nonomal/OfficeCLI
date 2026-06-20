@@ -861,7 +861,20 @@ public partial class WordHandler
         return numFmtR.ToLowerInvariant() == "bullet" ? "bullet" : "ordered";
     }
 
-    private string GetListPrefix(Paragraph para)
+    /// <summary>
+    /// Running list-counter state for the plain-text view walkers. One
+    /// instance per top-level walk (ViewAsText / ViewAsAnnotated /
+    /// ViewAsTextJson); threaded into <see cref="GetListPrefix"/> so ordered
+    /// items increment 1,2,3 across paragraphs. Without an instance the prefix
+    /// renders from the level's start value (stateless fallback).
+    /// </summary>
+    private sealed class ListMarkerCounter
+    {
+        public int? CurrentNumId;
+        public readonly Dictionary<int, int> Counters = new();
+    }
+
+    private string GetListPrefix(Paragraph para, ListMarkerCounter? counter = null)
     {
         var numProps = para.ParagraphProperties?.NumberingProperties;
         if (numProps == null) return "";
@@ -873,17 +886,63 @@ public partial class WordHandler
         var indent = new string(' ', ilvl * 2);
         var numFmt = GetNumberingFormat(numId.Value, ilvl);
 
-        return numFmt.ToLowerInvariant() switch
+        // Bullet lists render a plain "• " in text mode — the lvlText for a
+        // bullet level is a private-use Wingdings code point that is garbage
+        // as plain text.
+        if (numFmt.Equals("bullet", StringComparison.OrdinalIgnoreCase))
+            return $"{indent}• ";
+
+        // Ordered list: render EVERY numFmt (decimal, chineseCounting, …)
+        // through the same WordNumFmtRenderer the HTML path uses, expanding
+        // the level's lvlText template ("%1、", "%1.%2.") against a running
+        // per-level counter. Mirrors the HTML marker logic at
+        // WordHandler.HtmlPreview.cs (CONSISTENCY(list-marker)) so text and
+        // HTML never diverge on auto-numbering. The previous static map only
+        // knew 6 ordered formats and fell back to "• " for the rest — Chinese
+        // counting etc. silently became a bullet.
+        int CounterFor(int lvl)
         {
-            "bullet" => $"{indent}• ",
-            "decimal" => $"{indent}1. ",
-            "decimalzero" => $"{indent}01. ",
-            "lowerletter" => $"{indent}a. ",
-            "upperletter" => $"{indent}A. ",
-            "lowerroman" => $"{indent}i. ",
-            "upperroman" => $"{indent}I. ",
-            _ => $"{indent}• "
-        };
+            if (counter != null && counter.Counters.TryGetValue(lvl, out var v)) return v;
+            return GetStartValue(numId.Value, lvl) ?? 1;
+        }
+
+        if (counter != null)
+        {
+            // A different numId is a different list instance → restart. Same
+            // numId persists across intervening non-list paragraphs (Word
+            // continues the list), so the counter is only reset here.
+            if (counter.CurrentNumId != numId.Value)
+            {
+                counter.Counters.Clear();
+                counter.CurrentNumId = numId.Value;
+            }
+            var start = GetStartValue(numId.Value, ilvl) ?? 1;
+            counter.Counters[ilvl] = counter.Counters.TryGetValue(ilvl, out var prev) ? prev + 1 : start;
+            // Word restarts every deeper level when a shallower level ticks.
+            foreach (var k in counter.Counters.Keys.Where(k => k > ilvl).ToList())
+                counter.Counters.Remove(k);
+        }
+
+        var template = GetLevelText(numId.Value, ilvl);
+        string marker;
+        if (string.IsNullOrEmpty(template))
+        {
+            marker = OfficeCli.Core.WordNumFmtRenderer.Render(CounterFor(ilvl), numFmt);
+        }
+        else
+        {
+            marker = System.Text.RegularExpressions.Regex.Replace(template, @"%(\d)", m =>
+            {
+                var k = int.Parse(m.Groups[1].Value) - 1;
+                var fmt = GetNumberingFormat(numId.Value, k);
+                return OfficeCli.Core.WordNumFmtRenderer.Render(CounterFor(k), fmt);
+            });
+        }
+
+        // Separator after the marker: honor <w:suff> (nothing → none; tab/space
+        // both collapse to a single space in plain text).
+        var sep = GetLevelSuffix(numId.Value, ilvl) == "nothing" ? "" : " ";
+        return $"{indent}{marker}{sep}";
     }
 
     private string GetNumberingFormat(int numId, int ilvl)

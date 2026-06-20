@@ -5165,9 +5165,34 @@ public partial class WordHandler
                 if (recoveredText.Length == 0 && inWrapper
                     && wrapperRunOrdinal >= 0 && wrapperRunOrdinal < rawWrapperTexts.Count)
                     recoveredText = rawWrapperTexts[wrapperRunOrdinal];
-                // Drop only when there is genuinely no text to carry. A
-                // whitespace-only run is meaningful and must be kept.
-                if (recoveredText.Length == 0) continue;
+                // BUG-DUMP-SMARTTAG-BR: a wrapper run whose only content is a
+                // <w:br/> / <w:cr/> (a line break between two nested smartTags —
+                // e.g. the <br/> separating "123 Main St." from "Olympia, WA" in
+                // a multi-line address) carries no text, so the recovery above
+                // left it empty. Dropping it (the bare continue below) joined the
+                // two lines and compressed the block, drifting the page.
+                // Synthesize a typed break node so the inline line break survives
+                // the wrapper flatten; insert it at the wrapper run's true
+                // document position like the text-run synth path does.
+                if (recoveredText.Length == 0)
+                {
+                    var brkSep = unkRun.ChildElements.FirstOrDefault(c =>
+                        c.NamespaceUri == wNs && (c.LocalName == "br" || c.LocalName == "cr"));
+                    if (brkSep != null)
+                    {
+                        var brkNode = new DocumentNode { Type = "break", Path = $"{path}/r[{runIdx + 1}]" };
+                        var brkT = brkSep.GetAttributes()
+                            .FirstOrDefault(a => a.LocalName == "type" && a.NamespaceUri == wNs).Value;
+                        brkNode.Format["breakType"] = string.IsNullOrEmpty(brkT) ? "line" : brkT;
+                        var brkPos = descendantPos.TryGetValue(unkRun, out var bp) ? bp : int.MaxValue;
+                        int brkIdx = childPositions.FindIndex(cp => cp > brkPos);
+                        if (brkIdx < 0) brkIdx = node.Children.Count;
+                        node.Children.Insert(brkIdx, brkNode);
+                        childPositions.Insert(brkIdx, brkPos);
+                        runIdx++;
+                    }
+                    continue;
+                }
                 var synthNode = new DocumentNode
                 {
                     Type = "run",

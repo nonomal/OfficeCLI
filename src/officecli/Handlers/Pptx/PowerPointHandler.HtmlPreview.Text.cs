@@ -956,6 +956,15 @@ public partial class PowerPointHandler
             {
                 var runShadowCss = EffectListToShadowCss(runEffects, themeColors);
                 if (!string.IsNullOrEmpty(runShadowCss)) styles.Add(runShadowCss);
+                // Run-level glow halo (<a:glow>) — same drop-shadow-based filter the
+                // shape renderer uses; merge into any existing filter from the shadow.
+                var runGlowCss = EffectListToGlowCss(runEffects, themeColors);
+                if (!string.IsNullOrEmpty(runGlowCss))
+                {
+                    int fIdx = styles.FindIndex(s => s.StartsWith("filter:"));
+                    if (fIdx >= 0) styles[fIdx] += " " + runGlowCss["filter:".Length..];
+                    else styles.Add(runGlowCss);
+                }
             }
 
             // Superscript/subscript. OOXML baseline is a raw integer where

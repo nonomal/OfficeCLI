@@ -258,7 +258,15 @@ internal partial class ChartSvgRenderer
             }
             else
             {
-                (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
+                // Min-aware nice axis (parity with line/area path): explicit
+                // non-zero axis min, no explicit max/majorUnit → derive step/top
+                // from the VISIBLE range [axisMin, dataMax] instead of [0,
+                // dataMax], so the top doesn't overshoot. Zero/absent min falls
+                // through to the unchanged ComputeNiceAxis path.
+                if (ooxmlMin.HasValue && ooxmlMin.Value > 0 && !ooxmlMax.HasValue)
+                    (niceMax, tickStep, nTicks) = ComputeNiceAxisFromMin(ooxmlMin.Value, maxVal);
+                else
+                    (niceMax, tickStep, nTicks) = ComputeNiceAxis(ooxmlMax ?? maxVal);
                 // An explicit axis max with no major unit must be honored exactly
                 // (PowerPoint pins the top to the entered value); ComputeNiceAxis
                 // would round it up. Mirrors the line/area-chart fix (R25).
@@ -1078,7 +1086,15 @@ internal partial class ChartSvgRenderer
         else
         {
             var computeMax = axisMax ?? dataMax;
-            (niceMax, tickStep, nTicks) = ComputeNiceAxis(computeMax);
+            // Min-aware nice axis: when an explicit non-zero axis min is set and
+            // no explicit axis max, derive step/top from the VISIBLE range
+            // [axisMin, dataMax] so the top doesn't overshoot (e.g. min=50,
+            // dataMax=200 → step 20, top 210, not a 0-based 0..300). When
+            // axisMin is 0/absent this falls through to the unchanged path.
+            if (axisMin.HasValue && axisMin.Value > 0 && !axisMax.HasValue && !majorUnit.HasValue)
+                (niceMax, tickStep, nTicks) = ComputeNiceAxisFromMin(axisMin.Value, dataMax);
+            else
+                (niceMax, tickStep, nTicks) = ComputeNiceAxis(computeMax);
             if (axisMax.HasValue) niceMax = axisMax.Value;
             // R12b: floor the axis at a nice value ≤ 0 when data has negatives,
             // instead of hard-coding 0 (which clamped negative points to the
@@ -1132,6 +1148,7 @@ internal partial class ChartSvgRenderer
         for (int t = 1; t <= nTicks; t++)
         {
             double tickVal = isLog ? niceMin + t : niceMin + tickStep * t;
+            if (!isLog && tickVal > niceMax + 1e-9) continue; // no gridline past axisMax
             var gy = MapY(isLog ? Math.Pow(logBase!.Value, tickVal) : tickVal);
             sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{gy:0.#}\" x2=\"{ox + pw}\" y2=\"{gy:0.#}\" stroke=\"{GridColor}\" stroke-width=\"0.5\" stroke-dasharray=\"none\"/>");
         }
@@ -1326,6 +1343,7 @@ internal partial class ChartSvgRenderer
             else
             {
                 tickVal = niceMin + tickStep * t;
+                if (tickVal > niceMax + 1e-9) continue; // no label past axisMax
                 label = FormatAxisValue(tickVal, valNumFmt);
             }
             var ty = MapY(tickVal);
@@ -2417,6 +2435,32 @@ internal partial class ChartSvgRenderer
         var niceMax = Math.Ceiling(maxVal / tickStep) * tickStep;
         if (niceMax < maxVal * 1.05) niceMax += tickStep;
         var nTicks = (int)Math.Round(niceMax / tickStep);
+        if (nTicks < 2) nTicks = 2;
+        return (niceMax, tickStep, nTicks);
+    }
+
+    // Min-aware nice axis: used only when an explicit non-zero axis min is set
+    // and no explicit axis max. PowerPoint derives the tick step from the
+    // VISIBLE range [niceMin, dataMax] (not [0, dataMax]) and snaps the top to
+    // the smallest niceMin + k*step >= dataMax. e.g. min=50, dataMax=200 →
+    // step 20, top 210 (ticks 50,70,...,210). Falls back to the zero-based
+    // ComputeNiceAxis when niceMin <= 0 so the common case is byte-identical.
+    public static (double niceMax, double tickStep, int nTicks) ComputeNiceAxisFromMin(double niceMin, double dataMax)
+    {
+        if (niceMin <= 0) return ComputeNiceAxis(dataMax);
+        var range = dataMax - niceMin;
+        if (range <= 0 || !double.IsFinite(range)) return ComputeNiceAxis(dataMax);
+        var mag = Math.Pow(10, Math.Floor(Math.Log10(range)));
+        if (!double.IsFinite(mag) || mag == 0) mag = 1;
+        var res = range / mag;
+        var tickStep = res <= 1.5 ? 0.2 * mag : res <= 4 ? 0.5 * mag : res <= 8 ? 1.0 * mag : 2.0 * mag;
+        // smallest tick >= dataMax above the min; add a step of headroom only
+        // when dataMax lands exactly on a tick (PowerPoint keeps a gap above the
+        // top data point).
+        var steps = Math.Ceiling((dataMax - niceMin) / tickStep);
+        if (Math.Abs(niceMin + steps * tickStep - dataMax) < 1e-9) steps += 1;
+        var niceMax = niceMin + steps * tickStep;
+        var nTicks = (int)Math.Round(steps);
         if (nTicks < 2) nTicks = 2;
         return (niceMax, tickStep, nTicks);
     }

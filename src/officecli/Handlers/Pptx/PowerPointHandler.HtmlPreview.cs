@@ -470,7 +470,28 @@ public partial class PowerPointHandler
         var bgRef = bg.GetFirstChild<BackgroundStyleReference>();
         if (bgRef != null)
         {
+            // The bgRef idx selects an entry in the theme's <a:bgFillStyleLst>
+            // (idx 1001..1003 -> entries 0..2). When that entry is a GRADIENT whose
+            // stops reference phClr, the background is a tinted theme gradient — not a
+            // flat color. Inject phClr = the bgRef's resolved color and emit the
+            // gradient, exactly like shape fillRef (GetStyleFillRefCss). Previously the
+            // idx was ignored, so every themed gradient background rendered as a solid.
+            var idx = (int)(bgRef.Index?.Value ?? 0);
+            var bgFill = idx >= 1001
+                ? ResolveFormatScheme(part)?.BackgroundFillStyleList?.ChildElements
+                    .OfType<OpenXmlElement>().ElementAtOrDefault(idx - 1001)
+                : null;
             var bgRefColor = ResolveStyleMatrixRefColor(bgRef, themeColors);
+            if (bgFill is Drawing.GradientFill gf)
+            {
+                var phHex = bgRefColor != null && bgRefColor.StartsWith('#') ? bgRefColor[1..] : null;
+                var patched = phHex != null
+                    ? new Dictionary<string, string>(themeColors) { ["phClr"] = phHex }
+                    : themeColors;
+                var css = GradientToCss(gf, patched);
+                if (!string.IsNullOrEmpty(css) && css != "transparent")
+                    return $"background:{css};";
+            }
             if (bgRefColor != null) return $"background:{bgRefColor};";
         }
         return null;

@@ -1116,6 +1116,10 @@ public partial class WordHandler
         // regardless of each referenced level's own numFmt — e.g. an
         // upperRoman level 0 referenced as "%1" inside an isLgl level renders
         // "1" not "I". Read off the current (ilvl) level definition.
+        // EXCEPTION: decimalZero is already a decimal format; isLgl only changes
+        // the number SYSTEM, so Word preserves decimalZero's zero-padding ("05"
+        // stays "05", not "5"). Only non-decimal systems collapse to plain
+        // decimal.
         var legal = GetLevel(numId, ilvl)?.GetFirstChild<IsLegalNumberingStyle>();
         var isLgl = legal != null &&
             (legal.Val == null || legal.Val.Value); // CT_OnOff default-true
@@ -1128,7 +1132,11 @@ public partial class WordHandler
         return System.Text.RegularExpressions.Regex.Replace(template, @"%([1-9])", m =>
         {
             var k = int.Parse(m.Groups[1].Value) - 1;
-            var lvlFmt = isLgl ? "decimal" : GetNumberingFormat(numId, k);
+            var actualFmt = GetNumberingFormat(numId, k);
+            var lvlFmt = isLgl
+                ? (actualFmt.Equals("decimalZero", StringComparison.OrdinalIgnoreCase)
+                    ? "decimalZero" : "decimal")
+                : actualFmt;
             // A placeholder referencing an UNDEFINED level (or one whose fmt
             // resolves to "bullet") must emit nothing for an ordered marker —
             // Word renders an unstarted/undefined level as empty, NOT a bullet

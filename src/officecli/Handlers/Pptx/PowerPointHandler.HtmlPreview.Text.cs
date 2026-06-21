@@ -372,7 +372,16 @@ public partial class PowerPointHandler
                 // symbol-font glyph (e.g. Wingdings "l") renders with the right face.
                 var buFontTypeface = bulletSource?.GetFirstChild<Drawing.BulletFont>()?.Typeface?.Value;
                 if (!string.IsNullOrEmpty(buFontTypeface))
-                    buStyles.Add($"font-family:{buFontTypeface}");
+                {
+                    // A "+mn-lt"/"+mj-lt"/… typeface is a THEME font token, not a literal
+                    // family — resolve it to the theme typeface (as runs do) instead of
+                    // emitting the invalid CSS `font-family:+mn-lt` the browser ignores.
+                    var resolvedBuFont = buFontTypeface.StartsWith("+", StringComparison.Ordinal)
+                        ? (ResolveThemeFontToken(placeholderPart, buFontTypeface) ?? themeFontFallback)
+                        : buFontTypeface;
+                    if (!string.IsNullOrEmpty(resolvedBuFont))
+                        buStyles.Add(CssFontFamilyWithFallback(resolvedBuFont));
+                }
 
                 // Bullet color: explicit buClr > first run color > default (inherit).
                 // <a:buClr> is a CT_Color whose color child (srgbClr/schemeClr) sits

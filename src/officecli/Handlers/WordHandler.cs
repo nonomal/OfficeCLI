@@ -1879,6 +1879,37 @@ public partial class WordHandler : IDocumentHandler
             EnsureBookmarkIds();
         }
         catch { /* id normalization is best-effort; never block the flush */ }
+        try { NormalizeAllRunPropsSchemaOrder(); }
+        catch { /* schema-order normalization is best-effort; never block the flush */ }
+    }
+
+    // BUG-DUMP-R71-RPR-ORDER: document-wide CT_RPr / CT_ParaRPr child-order
+    // normalization, run once at batch finalization (after the raw-set flush so
+    // it also catches verbatim-injected runs). A run/paragraph-mark rPr can be
+    // assembled across the curated Add path, ApplyRunFormatting, raw AppendChild,
+    // TypedAttributeFallback tail-appends, and verbatim raw-set — any of which
+    // can leave a child out of CT_RPr order (sz after u, ins after rStyle),
+    // which strict OOXML validation rejects. Re-seat every standard (non-w14)
+    // rPr child into its schema slot. Content-preserving (pure reorder); only
+    // touches rPr that were already out of order. Covers the main document plus
+    // header/footer/footnote/endnote parts.
+    private void NormalizeAllRunPropsSchemaOrder()
+    {
+        var main = _doc.MainDocumentPart;
+        if (main == null) return;
+        IEnumerable<OpenXmlElement?> roots = new OpenXmlElement?[] { main.Document?.Body }
+            .Concat(main.HeaderParts.Select(h => (OpenXmlElement?)h.Header))
+            .Concat(main.FooterParts.Select(f => (OpenXmlElement?)f.Footer))
+            .Append(main.FootnotesPart?.Footnotes)
+            .Append(main.EndnotesPart?.Endnotes);
+        foreach (var root in roots)
+        {
+            if (root == null) continue;
+            foreach (var rPr in root.Descendants<RunProperties>().ToList())
+                NormalizeRunPropsSchemaOrder(rPr);
+            foreach (var pmRpr in root.Descendants<ParagraphMarkRunProperties>().ToList())
+                NormalizeRunPropsSchemaOrder(pmRpr);
+        }
     }
 
     /// <summary>

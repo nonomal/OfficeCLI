@@ -1195,6 +1195,25 @@ public partial class WordHandler
     /// (kern, w, position, …) to "append at end", producing out-of-order rPr
     /// that strict validators reject.
     /// </summary>
+    // BUG-DUMP-R71-RPR-ORDER: re-seat every standard (non-w14) child of a
+    // run-property container (CT_RPr / CT_ParaRPr) into its schema slot. The
+    // rPr is built across mixed paths — SDK typed setters, ApplyRunFormatting
+    // (schema-ordered), but also raw AppendChild (e.g. AddRun's rFonts/sz) and
+    // TypedAttributeFallback (appends at the tail) — so a child can land out of
+    // CT_RPr order (sz after u, ins after rStyle). Running each standard child
+    // back through InsertRunPropInSchemaOrder once at the end converges on the
+    // correct order regardless of how it got there; its Place + w14 hoist also
+    // keep the w14 extension block last. Content-preserving (only reorders).
+    private static void NormalizeRunPropsSchemaOrder(OpenXmlCompositeElement? props)
+    {
+        if (props == null) return;
+        foreach (var child in props.ChildElements.Where(c => c.NamespaceUri != W14Ns).ToList())
+        {
+            child.Remove();
+            InsertRunPropInSchemaOrder(props, child);
+        }
+    }
+
     private static void InsertRunPropInSchemaOrder(OpenXmlCompositeElement props, OpenXmlElement elem)
     {
         props.AppendChild(elem);

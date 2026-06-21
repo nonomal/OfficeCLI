@@ -808,6 +808,25 @@ public partial class PowerPointHandler
     }
 
     /// <summary>
+    /// Resolve a style-matrix ref's schemeClr to a bare 6-hex (no '#'), applying the
+    /// ref's own transforms. Used as the "phClr" (placeholder color) base when an
+    /// indexed theme fill (gradient) uses phClr stops — the gradient's own stop
+    /// transforms (lumMod/tint/satMod) then layer on top of this value.
+    /// </summary>
+    private static string? ResolveStyleRefBareHex(OpenXmlCompositeElement? styleRef, Dictionary<string, string> themeColors)
+    {
+        var sc = styleRef?.GetFirstChild<Drawing.SchemeColor>();
+        if (sc?.Val?.HasValue != true) return null;
+        var name = sc.Val!.InnerText;
+        if (name == null || !themeColors.TryGetValue(name, out var hex)) return null;
+        var css = ApplyColorTransforms(hex, sc);
+        // ApplyColorTransforms normally yields "#RRGGBB"; reduce to bare hex so the
+        // gradient stop resolver (which expects a bare theme hex) can re-transform it.
+        if (css.StartsWith("#") && css.Length >= 7) return css.Substring(1, 6);
+        return hex; // rgba()/unexpected — fall back to the untransformed base hex
+    }
+
+    /// <summary>
     /// Style-matrix fill fallback: resolve <p:style>/<a:fillRef idx=N> against
     /// FormatScheme.FillStyleList[N] (1-based), blending the fillRef's schemeClr into
     /// the indexed fill style. Returns a "background:..." CSS string, or "" if none.
@@ -831,11 +850,21 @@ public partial class PowerPointHandler
         if (fillStyle is Drawing.SolidFill && refColor != null)
             return $"background:{refColor}";
 
-        // Gradient/other indexed fill: render via GradientToCss but substitute phClr.
+        // Gradient indexed fill: the theme gradient's stops reference phClr (the
+        // placeholder color = the fillRef's own schemeClr). themeColors has no
+        // "phClr" key, so without substitution every stop resolves to "transparent"
+        // and the shape renders invisible (PowerPoint shows the accent gradient).
+        // Inject phClr = the resolved fillRef color so the stops' own transforms layer.
         if (fillStyle is Drawing.GradientFill gf)
         {
-            var css = GradientToCss(gf, themeColors);
-            return string.IsNullOrEmpty(css) ? (refColor != null ? $"background:{refColor}" : "") : $"background:{css}";
+            var phHex = ResolveStyleRefBareHex(fillRef, themeColors);
+            var patched = phHex != null
+                ? new Dictionary<string, string>(themeColors) { ["phClr"] = phHex }
+                : themeColors;
+            var css = GradientToCss(gf, patched);
+            return string.IsNullOrEmpty(css) || css == "transparent"
+                ? (refColor != null ? $"background:{refColor}" : "")
+                : $"background:{css}";
         }
 
         // Unknown/no indexed style entry — fall back to the bare ref color.

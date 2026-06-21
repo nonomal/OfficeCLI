@@ -743,7 +743,14 @@ public partial class PowerPointHandler
                 ? $" style=\"{flipStyle}{rtlColStyle}{vertStyle}{rotStyle}{wrapNoneStyle}{anchorCtrStyle}{(string.IsNullOrEmpty(clipPathCss) ? "" : "position:relative;")}\""
                 : "";
             var anchorCtrClass = anchorCtr ? " anchor-ctr" : "";
-            sb.Append($"<div class=\"shape-text valign-{valign}{anchorCtrClass}\"{textStyle}>");
+            // Vertical text (writing-mode) rotates the flex main axis to horizontal,
+            // so valign-* (justify-content) now anchors the text column HORIZONTALLY
+            // — which matches PowerPoint (anchor="ctr" centers a vert column across
+            // the frame width). But a width:100% .para fills that axis and blocks the
+            // centering, so flag the shape to shrink-wrap its paragraphs (same trick
+            // the anchor-ctr CSS uses).
+            var vertTextClass = !string.IsNullOrEmpty(vertStyle) ? " has-vert-text" : "";
+            sb.Append($"<div class=\"shape-text valign-{valign}{anchorCtrClass}{vertTextClass}\"{textStyle}>");
 
             // Block-level column wrapper: column-count works here (normal block
             // formatting context), unlike on the flex .shape-text parent.

@@ -345,6 +345,14 @@ public partial class PowerPointHandler
             }
             else
             {
+                // A non-auto-numbered paragraph interrupts the list — PowerPoint
+                // RESTARTS the numbering at startAt for the next numbered paragraph
+                // (verified: 1.,2.,<plain>,1.). Clearing the counters (not just
+                // nulling lastAutoKey) makes the next numbered para re-initialize from
+                // startAt instead of continuing (...,3.). A pure level return between
+                // consecutive numbered paras never enters this branch, so the
+                // continue-parent-count behavior is unaffected.
+                if (autoNumCounters.Count > 0) autoNumCounters.Clear();
                 lastAutoKey = null;
             }
 

@@ -566,6 +566,15 @@ public static partial class WordBatchEmitter
         // (the same-paragraph name filter can't see it), so any bookmark row
         // carrying one of these names is skipped document-wide.
         public HashSet<string> FormFieldBookmarkNames { get; } = new(StringComparer.Ordinal);
+
+        // BUG-DUMP-FF-ROWLEVEL-BOOKMARK: lazily-cached set of EVERY bookmark name
+        // in the source body, so the form-field noBookmark decision can recognise
+        // a wrapping bookmark that sits at ROW level (between table cells) and is
+        // therefore invisible to the same-paragraph sibling check. Cached because
+        // the scan walks the whole body once per document, not per paragraph.
+        private HashSet<string>? _allSourceBookmarkNames;
+        public HashSet<string> AllSourceBookmarkNames(WordHandler word)
+            => _allSourceBookmarkNames ??= word.GetAllBookmarkNames();
     }
 
     private static void EmitBody(WordHandler word, List<BatchItem> items,

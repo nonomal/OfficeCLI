@@ -156,11 +156,24 @@ public static partial class WordBatchEmitter
                     && e.Format.TryGetValue("name", out var bnm) && bnm != null)
                 .Select(e => e.Format["name"]!.ToString() ?? "")
                 .ToHashSet(StringComparer.Ordinal);
+            // BUG-DUMP-FF-ROWLEVEL-BOOKMARK: a form field's wrapping bookmark may
+            // sit at ROW level (a direct <w:tr> child between cells) instead of as
+            // a sibling of the field run — the same-paragraph set above can't see
+            // it, and the table emitter drops between-cell bookmarks, so without
+            // this the field is pinned noBookmark and AddFormField skips the
+            // bookmark → every form-field bookmark vanishes → Word refuses to open
+            // the rebuilt file. Consult the document-wide source bookmark names so
+            // a row-level wrapping bookmark still counts as "present" (AddFormField
+            // recreates it inside the cell). A field whose source had NO bookmark
+            // anywhere stays bookmark-less (BUG-DUMP-FFCHECKBOX-BOOKMARK).
+            var docBookmarkNames = ctx?.AllSourceBookmarkNames(word) ?? bookmarkNamesPresent;
             foreach (var ffSynth in fieldEntries.Where(e => e.Type == "formfield"
                          && e.Format.TryGetValue("ffName", out _)))
             {
                 var ffn = ffSynth.Format["ffName"]?.ToString() ?? "";
-                if (!string.IsNullOrEmpty(ffn) && !bookmarkNamesPresent.Contains(ffn))
+                if (!string.IsNullOrEmpty(ffn)
+                    && !bookmarkNamesPresent.Contains(ffn)
+                    && !docBookmarkNames.Contains(ffn))
                     ffSynth.Format["_noBookmark"] = true;
             }
             if (ctx != null)

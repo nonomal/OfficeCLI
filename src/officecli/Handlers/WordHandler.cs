@@ -627,6 +627,29 @@ public partial class WordHandler : IDocumentHandler
     /// or any referenced part can't be resolved, so the emitter falls back to
     /// the warn-and-drop path.
     /// </summary>
+    // BUG-DUMP-FF-ROWLEVEL-BOOKMARK: every <w:bookmarkStart> name anywhere in the
+    // main document body. Legacy form fields are wrapped in a same-name bookmark
+    // so REF fields can target them, but Word frequently places that bookmark at
+    // ROW level (a direct <w:tr> child sitting between two <w:tc>) rather than as
+    // a sibling of the field's run. The table emitter cannot round-trip a
+    // between-cell bookmark, so EmitParagraph's same-paragraph name check never
+    // sees it and wrongly pins noBookmark — AddFormField then skips the wrapping
+    // bookmark and ALL form-field bookmarks vanish, which makes Word refuse to
+    // open a form-heavy document. Consulting the document-wide name set lets the
+    // form-field emit recognise the row-level bookmark and have AddFormField
+    // recreate it (inside the cell — functionally equivalent for Word's form
+    // model). A field whose source genuinely had NO bookmark (a bare checkbox
+    // grid, BUG-DUMP-FFCHECKBOX-BOOKMARK) still stays bookmark-less.
+    internal HashSet<string> GetAllBookmarkNames()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return set;
+        foreach (var bs in body.Descendants<BookmarkStart>())
+            if (bs.Name?.Value is { Length: > 0 } nm) set.Add(nm);
+        return set;
+    }
+
     internal ActiveXEmitData? GetActiveXEmitData(string runPath)
     {
         OpenXmlElement? element;

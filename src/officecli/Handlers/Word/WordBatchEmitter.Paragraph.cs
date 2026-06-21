@@ -492,8 +492,26 @@ public static partial class WordBatchEmitter
         // paragraph's content; track nesting depth to keep to top-level children.
         var perNameIdx = new Dictionary<string, int>(StringComparer.Ordinal);
         int rank = 0;
-        int depth = 0; // depth relative to the paragraph's content (0 = direct child)
         bool seenParaOpen = false;
+        // BUG-DUMP-SDTORDER-HYPERLINK: a <w:r> nested inside a <w:hyperlink> (or
+        // an ins/del/smartTag/customXml/dir/bdo run-wrapper) IS surfaced by
+        // Navigation as a paragraph-level /r[N] — its run resolver flattens
+        // Descendants<Run>() excluding only SdtRun-nested runs (see the "r" case
+        // in WordHandler.Navigation.cs). So r[N] must count runs THROUGH those
+        // transparent wrappers; counting only literal top-level children
+        // desynced r[N] (a paragraph with hyperlinks numbered ". If the
+        // assessment" as r[3] here but r[5] in Navigation) and scrambled the
+        // inline-SDT flush order — a content control between two runs came back
+        // attached to the wrong run. Only <w:pPr> and <w:sdt> are opaque (pPr's
+        // children aren't content; an inline SDT's runs surface under the sdt
+        // node, not as paragraph runs); every other run-container is transparent.
+        var transparentWrappers = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "hyperlink", "ins", "del", "moveFrom", "moveTo",
+            "smartTag", "customXml", "dir", "bdo",
+        };
+        var openStack = new Stack<bool>(); // true = this open incremented suppress
+        int suppress = 0; // >0 ⇒ inside an opaque container (pPr / sdt / a run)
         // Match element opens/closes/self-closes for the w: and m: namespaces
         // (m:oMathPara / m:oMath surface as paragraph children too).
         foreach (System.Text.RegularExpressions.Match m in
@@ -508,12 +526,16 @@ public static partial class WordBatchEmitter
                 if (!closing) { seenParaOpen = true; }
                 continue;
             }
-            if (closing) { depth--; continue; }
-            if (depth == 0)
+            if (closing)
             {
-                // Direct child of the paragraph — assign the next document rank
-                // under its OOXML local name (matches the /r[N], /sdt[N], …
-                // path segments Navigation builds).
+                if (openStack.Count > 0 && openStack.Pop()) suppress--;
+                continue;
+            }
+            if (suppress == 0)
+            {
+                // Paragraph-level child (only transparent wrappers above it) —
+                // assign the next document rank under its OOXML local name
+                // (matches the /r[N], /sdt[N], … path segments Navigation builds).
                 var seg = name switch
                 {
                     "r" => "r",
@@ -528,7 +550,15 @@ public static partial class WordBatchEmitter
                 perNameIdx[seg] = idx + 1;
                 map[$"{seg}[{idx + 1}]"] = rank++;
             }
-            if (!selfClose) depth++;
+            if (!selfClose)
+            {
+                // Transparent run-wrappers do NOT suppress their children (inner
+                // runs still count as paragraph runs); everything else (pPr, sdt,
+                // a run and its rPr/text) is opaque.
+                bool opaque = !transparentWrappers.Contains(name);
+                if (opaque) suppress++;
+                openStack.Push(opaque);
+            }
         }
         return map;
     }

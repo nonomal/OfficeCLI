@@ -808,14 +808,45 @@ public partial class WordHandler
             // content width instead. The overlay imgs get `max-width:none`
             // (see the floatImages inject loop) so their declared px width wins.
             bool isOverlayContainer = floatImages is { Count: > 0 };
+
+            // Box sizing model: autofit vs fixed.
+            //
+            // A fixed-size text box (bodyPr/a:noAutofit, Word "Do not autofit")
+            // with a solid fill paints the fill ONLY over its declared height.
+            // When its content (e.g. an inner table whose rows exceed the box)
+            // overflows — vertOverflow="overflow" — Word draws the overflowing
+            // content beyond the box edge WITHOUT extending the fill. Emitting
+            // `min-height` here lets the host div grow to the content and paints
+            // `background-color` across the whole grown height, so any
+            // transparent lower region (e.g. an unshaded table row) exposes the
+            // box fill below the real box — a phantom colored band that Word
+            // never shows. Pin the declared `height` and clip to the box
+            // (overflow:hidden) so the fill — and any content taller than the
+            // box — stays confined to the declared height, matching the box
+            // Word paints. Only fixed boxes WITH a fill need this; autofit boxes
+            // (spAutoFit / normAutofit) and fill-less fixed boxes keep min-height
+            // (grow-to-content) so short content doesn't leave a gap.
+            // Autofit detection: a box is autofit only when it carries an
+            // explicit a:spAutoFit (resize box to text) or a:normAutofit (shrink
+            // text to box). Everything else — explicit a:noAutofit OR no autofit
+            // child at all (OOXML default == noAutofit) — is a fixed box.
+            var bodyPrAf = shape.Elements().FirstOrDefault(e => e.LocalName == "bodyPr");
+            bool isAutofitBox = bodyPrAf?.Elements().Any(e =>
+                e.LocalName == "spAutoFit" || e.LocalName == "normAutofit") == true;
+            bool isFixedBox = !isAutofitBox;
+            bool hasFillBg = fillCss.Contains("background", StringComparison.Ordinal);
+            var heightProp = isFixedBox && hasFillBg
+                ? $"height:{heightPx}px;overflow:hidden"
+                : $"min-height:{heightPx}px";
+
             // Anchored wrapSquare/wrapTight shape → float so following text
             // wraps beside it; otherwise inline-block (inline / wrapNone /
             // behind / in-front-of-text).
             style = floatCss != null
-                ? $"{floatCss};width:{widthPx}px;min-height:{heightPx}px;box-sizing:border-box"
+                ? $"{floatCss};width:{widthPx}px;{heightProp};box-sizing:border-box"
                 : isOverlayContainer
-                    ? $"display:block;width:100%;min-height:{heightPx}px"
-                    : $"display:inline-block;width:{widthPx}px;min-height:{heightPx}px;vertical-align:top";
+                    ? $"display:block;width:100%;{heightProp}"
+                    : $"display:inline-block;width:{widthPx}px;{heightProp};vertical-align:top";
 
             // Rotation on standalone shapes too (was only applied inside groups)
             var sXfrm = spPr?.Elements().FirstOrDefault(e => e.LocalName == "xfrm");

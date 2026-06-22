@@ -1720,6 +1720,21 @@ public partial class WordHandler
     private static bool IsMathBlockContainer(OpenXmlElement parent) =>
         parent is Body or SdtBlock or Footnote or Endnote or Header or Footer;
 
+    // BUG-DUMP-COMMENT-IN-MATH: remove comment-range markers (commentRangeStart /
+    // commentRangeEnd / commentReference, any prefix) from a verbatim math fragment
+    // before it is reconstructed. These carry stale source comment ids that no
+    // longer exist after comments.xml is renumbered; the owning comment is
+    // re-anchored separately via AddComment. Leaving an empty run wrapper behind is
+    // schema-legal (it renders nothing).
+    private static string StripVerbatimCommentMarkers(string omml)
+    {
+        if (omml.IndexOf("comment", StringComparison.OrdinalIgnoreCase) < 0) return omml;
+        return System.Text.RegularExpressions.Regex.Replace(
+            omml,
+            @"<\w+:comment(?:RangeStart|RangeEnd|Reference)\b[^>]*/>",
+            string.Empty);
+    }
+
     private string AddEquation(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         string resultPath;
@@ -1740,6 +1755,16 @@ public partial class WordHandler
             if ((properties.TryGetValue("xml", out var omml) || properties.TryGetValue("omml", out omml))
                 && !string.IsNullOrEmpty(omml) && omml.Contains("oMath", StringComparison.Ordinal))
             {
+                // BUG-DUMP-COMMENT-IN-MATH: a comment range whose End/Reference run
+                // sits INSIDE this equation rides along in the verbatim <m:oMath>,
+                // carrying the SOURCE comment id. But comments.xml is renumbered
+                // dense on replay and the comment is re-anchored separately via
+                // AddComment, so the math-borne marker keeps a now-nonexistent id —
+                // a dangling reference (silent comment loss) plus a duplicate-id
+                // desync (schema-invalid). Strip the comment-range markers from the
+                // verbatim math; the comment survives through its AddComment anchor
+                // (its end lands at the run boundary adjacent to the equation).
+                omml = StripVerbatimCommentMarkers(omml);
                 try
                 {
                     // Root is <m:oMath> → construct directly; root is <m:oMathPara>

@@ -709,6 +709,41 @@ public partial class WordHandler : IDocumentHandler
         return result;
     }
 
+    // BUG-DUMP-HDRFTR-STRUCT-BOOKMARK: a <w:bookmarkStart>/<w:bookmarkEnd> that is
+    // a DIRECT child of a <w:hdr>/<w:ftr> root (between block paragraphs/tables, not
+    // inside one) is dropped on round-trip — EmitHeaderFooterPart walks only the
+    // block children (paragraphs/tables/sdts), so a header/footer-scoped
+    // cross-reference target vanishes (header/footer paragraph-level bookmarks
+    // already survive via EmitParagraph). Return each root-level marker's verbatim
+    // OuterXml + a part-root-relative xpath + insert action so the caller replays it
+    // via raw-set. Positioned by paragraph index (the reliable anchor in a hdr/ftr;
+    // structural bookmarks interleaved with tables/sdts are vanishingly rare).
+    internal List<(string Xml, string RelXpath, string Action)> GetPartRootStructuralBookmarks(string partSourcePath)
+    {
+        var result = new List<(string, string, string)>();
+        OpenXmlElement? el;
+        try { el = NavigateToElement(ParsePath(partSourcePath)); }
+        catch { return result; }
+        if (el is not Header && el is not Footer) return result;
+
+        int totalParas = el.Elements<Paragraph>().Count();
+        int pIdx = 0;
+        foreach (var child in el.ChildElements)
+        {
+            if (child is Paragraph) { pIdx++; continue; }
+            if (child is BookmarkStart || child is BookmarkEnd)
+            {
+                string rel, action;
+                if (totalParas == 0) { rel = "."; action = "append"; }        // no paragraph anchor
+                else if (pIdx == 0) { rel = "w:p[1]"; action = "before"; }     // before first paragraph
+                else if (pIdx < totalParas) { rel = $"w:p[{pIdx + 1}]"; action = "before"; }
+                else { rel = $"w:p[{pIdx}]"; action = "after"; }               // after last paragraph
+                result.Add((child.OuterXml, rel, action));
+            }
+        }
+        return result;
+    }
+
     // BUG-DUMP-R72-FF-BOOKMARK-COUNT: per-name occurrence count of source body
     // bookmarks. The form-field noBookmark decision is count-aware, not boolean:
     // a doc with one <w:bookmarkStart name="Check1"> but 26 checkbox fields all

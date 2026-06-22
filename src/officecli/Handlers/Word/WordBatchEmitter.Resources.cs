@@ -1465,6 +1465,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: null,
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            SourceTextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
@@ -1531,6 +1532,26 @@ public static partial class WordBatchEmitter
             {
                 Command = "remove",
                 Path = $"{partTargetPath}/p[1]",
+            });
+        }
+
+        // BUG-DUMP-HDRFTR-STRUCT-BOOKMARK: re-insert any <w:bookmarkStart>/
+        // <w:bookmarkEnd> that sat at the <w:hdr>/<w:ftr> ROOT level (between block
+        // paragraphs, not inside one). The block walk above only emits paragraph/
+        // table/sdt content, so a header/footer-scoped cross-reference target was
+        // dropped, leaving a dangling REF/PAGEREF. Replay each verbatim at its
+        // source position via raw-set into this part. (Paragraph-level header/footer
+        // bookmarks already survive through EmitParagraph; only root-direct-child
+        // markers need this.)
+        foreach (var (bmXml, relXpath, action) in word.GetPartRootStructuralBookmarks(sourcePath))
+        {
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = hfRawPart,
+                Xpath = relXpath == "." ? hfRootXPath : $"{hfRootXPath}/{relXpath}",
+                Action = action,
+                Xml = bmXml,
             });
         }
     }

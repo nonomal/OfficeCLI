@@ -253,6 +253,18 @@ public static partial class WordBatchEmitter
             // text content) for a vertAlign and stash it so it rides on the field
             // op even when no formatted post-separate text run exists.
             string? fieldVertAlign = null;
+            // BUG-DUMP-R72-SETFIELD-BOOKMARK: a SET field (and any field Word
+            // bookmarks) carries a <w:bookmarkStart>/<w:bookmarkEnd> INSIDE the
+            // begin..end span — for SET it wraps the cached result between
+            // separate and end so REF fields can retrieve the stored value. The
+            // walk below has no branch for bookmark nodes, so they were consumed
+            // when `i = end` skips the span and silently dropped (TSMAD29 lost 61
+            // SET-field bookmarks; the SET field itself survived, hiding the loss
+            // from validate/convergence). Flag an inner bookmark so the whole
+            // slice is round-tripped verbatim via the same raw-set passthrough the
+            // rich-result / nested-field cases use, preserving the bookmark in
+            // place byte-for-byte.
+            bool sawInnerBookmark = false;
             for (int j = i + 1; j < children.Count; j++)
             {
                 var k = children[j];
@@ -356,6 +368,12 @@ public static partial class WordBatchEmitter
                 {
                     // BUG-DUMP-R28-INCLUDEPICTURE: the cached result drawing.
                     resultPictureNodes.Add(k);
+                }
+                else if ((k.Type == "bookmark" || k.Type == "bookmarkEnd") && depth == 1)
+                {
+                    // BUG-DUMP-R72-SETFIELD-BOOKMARK: bookmark wrapping the field
+                    // result — route the whole field to a verbatim slice below.
+                    sawInnerBookmark = true;
                 }
             }
             if (end < 0)
@@ -531,7 +549,10 @@ public static partial class WordBatchEmitter
             // Flag it and stash the field-slice run paths so TryEmitFieldRun
             // raw-sets the whole begin..end chain verbatim, preserving per-run
             // formatting. Empty / single-run results stay on the typed path.
-            if (sawSeparate && ResultRunsAreRich(resultRuns))
+            // BUG-DUMP-R72-SETFIELD-BOOKMARK: an inner bookmark also forces the
+            // verbatim slice (same passthrough as a rich result) so the bookmark
+            // wrapping the field result survives in place.
+            if ((sawSeparate && ResultRunsAreRich(resultRuns)) || sawInnerBookmark)
             {
                 var slicePaths = new List<string>();
                 for (int s = i; s <= end; s++)

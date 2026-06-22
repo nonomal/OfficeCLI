@@ -2850,6 +2850,12 @@ public partial class WordHandler
            flex container so the .dot-leader span (flex:1) stretches and the
            trailing page-number segment lands at the right edge. */
         p.has-leader-tab, div.has-leader-tab {{ display: flex; align-items: baseline; }}
+        /* Three-part Left-tab-Center-tab-Right header/paragraph: the
+           paragraph is a no-wrap flex row and each .atab-band flex-grows to an
+           equal share, text-aligned (left/center/right) per its own tab stop's
+           Val. nowrap keeps all bands on one line (Word never wraps these). */
+        p.has-aligned-tab, div.has-aligned-tab {{ display: flex; align-items: baseline; flex-wrap: nowrap; }}
+        .atab-band {{ flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .ptab-spacer {{ flex: 1; min-width: 1em; }}
         ul, ol {{ padding-left: 2em; margin: 0; }}
         ul {{ list-style-type: disc; }}

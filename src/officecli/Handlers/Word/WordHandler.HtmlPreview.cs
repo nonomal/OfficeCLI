@@ -59,6 +59,20 @@ public partial class WordHandler
         // length. -1 means "not tracking" (reset per paragraph).
         public int CurrentParagraphTabSegmentStart { get; set; } = -1;
 
+        // Tab alignment band model: true while rendering a paragraph whose tab
+        // stops include a center/right (no-leader) positional stop — the
+        // three-part "Left \t Center \t Right" header shape. In this mode each
+        // <w:tab/> closes the current leading text in a flex band and the
+        // upcoming stop's Val decides the band's text-align, so segments stay
+        // on one line and land left/centre/right (see has-aligned-tab CSS).
+        // Reset per paragraph.
+        public bool CurrentParagraphAlignedTab { get; set; }
+
+        // CSS text-align for the CURRENT aligned-tab band (the text typed before
+        // the next <w:tab/>). Band 0 (before the first tab) is left-aligned; each
+        // tab sets this to its own Val (center/right) for the band it opens.
+        public string CurrentAlignedTabAlign { get; set; } = "left";
+
         public void ResetLineForParagraph(double contentWidthPt, double firstLineIndentPt, double defaultSizePt)
         {
             LineWidthPt = contentWidthPt - firstLineIndentPt;
@@ -2447,6 +2461,8 @@ public partial class WordHandler
                         classNames.Add("has-ptab");
                     if (ParagraphHasLeaderTab(para))
                         classNames.Add("has-leader-tab");
+                    else if (ParagraphHasAlignedTab(para))
+                        classNames.Add("has-aligned-tab");
                     if (classNames.Count > 0)
                         sb.Append($" class=\"{string.Join(" ", classNames)}\"");
                     var pStyle = GetParagraphInlineCss(para);

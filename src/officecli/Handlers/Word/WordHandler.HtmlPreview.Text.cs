@@ -47,6 +47,31 @@ public partial class WordHandler
             or "middleDot" or "dash" or "heavy") == true;
     }
 
+    /// <summary>
+    /// True when the paragraph contains a &lt;w:tab&gt; AND its tab stops include
+    /// a center- or right-aligned positional stop without a leader (the classic
+    /// three-part header "Left \t Center \t Right" structure). Such paragraphs
+    /// are rendered with a flex band model (has-aligned-tab) instead of the
+    /// fixed-width left-aligned inline-block path: each band flex-grows and
+    /// text-aligns per the upcoming stop's Val, so the segments stay on one
+    /// line and land left/centre/right exactly like Word. Leader stops keep the
+    /// existing has-leader-tab (TOC dot-leader) path; pure left tabs keep the
+    /// inline-block path. Both are untouched by this detector.
+    /// </summary>
+    private bool ParagraphHasAlignedTab(Paragraph para)
+    {
+        if (!para.Descendants<TabChar>().Any()) return false;
+        var tabs = para.ParagraphProperties?.Tabs?.Elements<TabStop>();
+        if (tabs == null || !tabs.Any())
+        {
+            var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+            if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
+        }
+        return tabs?.Any(t =>
+            t.Val?.InnerText is "center" or "right"
+            && t.Leader?.InnerText is null or "none") == true;
+    }
+
     private void RenderParagraphHtml(StringBuilder sb, Paragraph para)
     {
         // Use <div> instead of <p> when paragraph contains block-level elements (text boxes, charts, shapes)
@@ -78,6 +103,8 @@ public partial class WordHandler
             classes.Add("has-ptab");
         if (ParagraphHasLeaderTab(para))
             classes.Add("has-leader-tab");
+        else if (ParagraphHasAlignedTab(para))
+            classes.Add("has-aligned-tab");
         if (classes.Count > 0)
             sb.Append($" class=\"{string.Join(" ", classes)}\"");
         var pStyle = GetParagraphInlineCss(para);
@@ -91,6 +118,9 @@ public partial class WordHandler
     {
         OnHtmlParagraphBegin(para);
         _ctx.CurrentParagraphTabIndex = 0;
+        _ctx.CurrentParagraphAlignedTab = ParagraphHasAlignedTab(para)
+            && !ParagraphHasLeaderTab(para);
+        _ctx.CurrentAlignedTabAlign = "left";
         // Mark where this paragraph's content begins so positional tabs can
         // retro-wrap the leading text into an absolute-width container.
         _ctx.CurrentParagraphTabSegmentStart = sb.Length;
@@ -415,6 +445,43 @@ public partial class WordHandler
                     var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                     if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
                 }
+                // Aligned-tab band model (three-part "Left \t Center \t Right"
+                // header): close the current leading text in a flex band whose
+                // text-align matches the band's own alignment, then arm the next
+                // band's alignment from THIS tab stop's Val. Each band flex:1, so
+                // the segments share the line evenly and land left/centre/right
+                // without overflowing onto a second line. Bypasses the
+                // fixed-width inline-block path (which ignores Val and overflows).
+                if (_ctx.CurrentParagraphAlignedTab)
+                {
+                    if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
+                    var bandStart = _ctx.CurrentParagraphTabSegmentStart;
+                    var bandAlign = _ctx.CurrentAlignedTabAlign;
+                    if (bandStart >= 0 && bandStart <= sb.Length)
+                    {
+                        var leading = sb.ToString(bandStart, sb.Length - bandStart);
+                        sb.Length = bandStart;
+                        sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+                    }
+                    // Arm the alignment for the band this tab opens.
+                    var alignedStops = tabs?
+                        .Where(t => t.Val?.InnerText != "clear" && t.Position?.HasValue == true)
+                        .OrderBy(t => t.Position!.Value).ToList();
+                    int aIdx = _ctx.CurrentParagraphTabIndex;
+                    var nextVal = (alignedStops != null && aIdx < alignedStops.Count)
+                        ? alignedStops[aIdx].Val?.InnerText : null;
+                    _ctx.CurrentAlignedTabAlign = nextVal switch
+                    {
+                        "center" => "center",
+                        "right" or "end" => "right",
+                        _ => "left",
+                    };
+                    _ctx.CurrentParagraphTabIndex++;
+                    _ctx.CurrentParagraphTabSegmentStart = sb.Length;
+                    if (!string.IsNullOrEmpty(style) && !_ctx.LineBreakEnabled)
+                    { sb.Append($"<span style=\"{style}\">"); needsSpan = true; }
+                    continue;
+                }
                 // TOC-style special case: right-aligned tab with any leader.
                 // Dot/hyphen/underscore/middleDot all fill the gap between
                 // the current inline position and the right edge of the
@@ -595,6 +662,23 @@ public partial class WordHandler
 
         if (needsSpan && !_ctx.LineBreakEnabled)
             sb.Append("</span>");
+
+        // Close the trailing aligned-tab band (text after the last <w:tab/>),
+        // so the final segment (e.g. the right-aligned "Right") is wrapped in a
+        // flex band with the armed alignment. Only when at least one tab opened
+        // a band (TabIndex > 0); a paragraph that ended up with no tab is left
+        // alone.
+        if (_ctx.CurrentParagraphAlignedTab && _ctx.CurrentParagraphTabIndex > 0)
+        {
+            var bandStart = _ctx.CurrentParagraphTabSegmentStart;
+            var bandAlign = _ctx.CurrentAlignedTabAlign;
+            if (bandStart >= 0 && bandStart <= sb.Length)
+            {
+                var leading = sb.ToString(bandStart, sb.Length - bandStart);
+                sb.Length = bandStart;
+                sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+            }
+        }
     }
 
     // ==================== OLE Object Preview Rendering ====================

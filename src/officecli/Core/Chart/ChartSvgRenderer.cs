@@ -3041,7 +3041,7 @@ internal partial class ChartSvgRenderer
             var titleRPr = titleEl.Descendants<Drawing.RunProperties>().FirstOrDefault();
             if (titleRPr?.FontSize?.HasValue == true)
                 info.TitleFontSize = $"{titleRPr.FontSize.Value / 100.0:0.##}pt";
-            info.TitleFontColor = ExtractFontColor(titleRPr);
+            info.TitleFontColor = ExtractFontColor(titleRPr, themeColors);
         }
 
         // Data labels
@@ -3214,7 +3214,7 @@ internal partial class ChartSvgRenderer
             var valDefRPr = valTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
             if (valDefRPr?.FontSize?.HasValue == true)
                 info.ValFontPx = (int)(valDefRPr.FontSize.Value / 100.0);
-            info.ValFontColor = ExtractFontColor(valDefRPr);
+            info.ValFontColor = ExtractFontColor(valDefRPr, themeColors);
             info.ValAxisLabelRotationDeg = ExtractAxisLabelRotationDeg(valTxPr);
 
             // Gridline color
@@ -3294,7 +3294,7 @@ internal partial class ChartSvgRenderer
             var catDefRPr = catTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
             if (catDefRPr?.FontSize?.HasValue == true)
                 info.CatFontPx = (int)(catDefRPr.FontSize.Value / 100.0);
-            info.CatFontColor = ExtractFontColor(catDefRPr);
+            info.CatFontColor = ExtractFontColor(catDefRPr, themeColors);
             info.CatAxisLabelRotationDeg = ExtractAxisLabelRotationDeg(catTxPr);
         }
 
@@ -3346,7 +3346,7 @@ internal partial class ChartSvgRenderer
             var legendFontSize = legendRPr?.GetAttributes().FirstOrDefault(a => a.LocalName == "sz").Value;
             if (legendFontSize != null && int.TryParse(legendFontSize, out var lfs))
                 info.LegendFontSize = $"{lfs / 100.0:0.##}pt";
-            info.LegendFontColor = ExtractFontColor(legendRPr);
+            info.LegendFontColor = ExtractFontColor(legendRPr, themeColors);
             // #7f: honor <c:legendPos w:val="r|l|t|b|tr"/>.
             var posEl = legendEl.Elements().FirstOrDefault(e => e.LocalName == "legendPos");
             var posVal = posEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
@@ -3776,13 +3776,30 @@ internal partial class ChartSvgRenderer
         return v;
     }
 
-    /// <summary>Extract font color from RunProperties or DefaultRunProperties (solidFill > srgbClr).</summary>
-    private static string? ExtractFontColor(OpenXmlElement? rPr)
+    /// <summary>Extract font color from RunProperties or DefaultRunProperties
+    /// (solidFill > srgbClr, or solidFill > schemeClr resolved through the theme).</summary>
+    private static string? ExtractFontColor(OpenXmlElement? rPr, Dictionary<string, string>? themeColors = null)
     {
         if (rPr == null) return null;
         var solidFill = rPr.Elements().FirstOrDefault(e => e.LocalName == "solidFill");
         var srgb = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "srgbClr");
         var val = srgb?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+        // schemeClr (accent1.., tx1, bg1, ...): resolve through the theme color map
+        // so a chart title / axis / legend styled with a scheme color renders its
+        // actual theme hex instead of dropping to the global default text color.
+        // Mirrors ExtractFillColor's schemeClr branch.
+        if (val == null && themeColors != null)
+        {
+            var scheme = solidFill?.Elements().FirstOrDefault(e => e.LocalName == "schemeClr");
+            var schemeName = scheme?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
+            if (!string.IsNullOrEmpty(schemeName))
+            {
+                var canonical = ParseHelpers.NormalizeSchemeColorName(schemeName) ?? schemeName;
+                if (themeColors.TryGetValue(canonical, out var themeHex)
+                    || themeColors.TryGetValue(schemeName, out themeHex))
+                    val = themeHex;
+            }
+        }
         return HexOrNull(val);
     }
 

@@ -2605,6 +2605,18 @@ public static partial class WordBatchEmitter
                     Action = "insertbefore",
                     Xml = rawXml
                 });
+                // CONSISTENCY(tbl-ordinal): this rich-block-SDT (no external rel)
+                // is shipped verbatim WITHOUT routing its inner <w:tbl> through
+                // EmitTable, so EmitTable's `++TableOrdinalBox` never counts them —
+                // yet the later `(//w:tbl)[N]` cell-SDT/SdtRow/tblGrid raw-set
+                // selectors count ALL tables in document order, including these.
+                // Leaving the ordinal short made every following table's selector
+                // land N tables early, dropping a locked SdtRow + dropdown-bound
+                // cells. Bump by the shipped XML's table count — mirrors the
+                // HasExternalRelRef carrier branch above (and the textbox carrier).
+                if (ctx != null && !string.IsNullOrEmpty(rawXml))
+                    ctx.TableOrdinalBox[0] += System.Text.RegularExpressions.Regex
+                        .Matches(rawXml, "<w:tbl[ >]").Count;
                 return;
             }
         }

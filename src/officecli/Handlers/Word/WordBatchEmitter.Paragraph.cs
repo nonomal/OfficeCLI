@@ -3385,6 +3385,27 @@ public static partial class WordBatchEmitter
     {
         if (ctx == null) return false;
 
+        // BUG-DUMP-TEXTBOX-INDEX-DESYNC: the typed `add textbox` path reads source
+        // inner content via word.Get on the SOURCE textbox index, which must track
+        // Navigation's source /<host>/textbox[N]. Navigation counts ONLY a
+        // <w:drawing> whose inner XML carries `<wps:txbx` or `txBox="1"` (a
+        // DrawingML textbox) — NOT a bare legacy <w:pict><v:textbox> VML box. So a
+        // verbatim path bumps the SOURCE ordinal only when its rawXml matches that
+        // same rule; bumping for a bare-VML box (which Navigation does not index)
+        // would itself desync the following typed textbox's read. (TextboxCounters —
+        // the REBUILD index for the emit target — counts only typed `add textbox`
+        // rows and is deliberately NOT bumped here.) Keyed by parentPath, matching
+        // the typed path's host key.
+        void BumpSourceTextboxOrdinalForVerbatim()
+        {
+            bool navigationCountsIt = rawXml.Contains("<w:drawing", StringComparison.Ordinal)
+                && (rawXml.Contains("<wps:txbx", StringComparison.Ordinal)
+                    || rawXml.Contains("txBox=\"1\"", StringComparison.Ordinal));
+            if (!navigationCountsIt) return;
+            ctx.SourceTextboxCounters[parentPath] =
+                (ctx.SourceTextboxCounters.TryGetValue(parentPath, out var _pv) ? _pv : 0) + 1;
+        }
+
         // BUG-DUMP-R26-6: a LEGACY VML textbox (<w:pict> with <v:shape
         // type="#_x0000_t202"> / <v:textbox><w:txbxContent>) is a different
         // shape family than the modern DrawingML box `add textbox` produces.
@@ -3416,6 +3437,7 @@ public static partial class WordBatchEmitter
                 var vmlData = vmlParent != null ? word.GetVmlShapeEmitData(run.Path) : null;
                 if (vmlData != null)
                 {
+                    BumpSourceTextboxOrdinalForVerbatim();
                     items.Add(new BatchItem
                     {
                         Command = "add",
@@ -3432,6 +3454,7 @@ public static partial class WordBatchEmitter
             }
             else
             {
+                BumpSourceTextboxOrdinalForVerbatim();
                 items.Add(new BatchItem
                 {
                     Command = "raw-set",
@@ -3459,6 +3482,7 @@ public static partial class WordBatchEmitter
             && (attachParaPath ?? paraTargetPath) is { } tbImgParent
             && word.GetDrawingShapeEmitData(run.Path) is { } tbImgData)
         {
+            BumpSourceTextboxOrdinalForVerbatim();
             items.Add(new BatchItem
             {
                 Command = "add",
@@ -3484,10 +3508,21 @@ public static partial class WordBatchEmitter
         // /body/textbox[K] addressing remains continuous across the doc.
         string emitParent = attachParaPath ?? hostPath;
 
-        // Allocate next 1-based textbox index for this host.
+        // Allocate the REBUILD textbox index (n): only typed `add textbox` rows
+        // count, because that is what the replayed SET ops can address.
         int n = ctx.TextboxCounters.TryGetValue(hostPath, out var prev) ? prev + 1 : 1;
         ctx.TextboxCounters[hostPath] = n;
         string textboxPath = hostPath == "/" ? "/textbox[" + n + "]" : $"{hostPath}/textbox[{n}]";
+
+        // BUG-DUMP-TEXTBOX-INDEX-DESYNC: allocate the SOURCE textbox index (sourceN)
+        // separately — it counts EVERY textbox (verbatim + typed) so it matches
+        // Navigation's source /<host>/textbox[N]. The inner-content recursion below
+        // READS from sourceReadPath (sourceN) but EMITS into textboxPath (n). When
+        // no verbatim sibling precedes this textbox the two indices coincide
+        // (sourceN == n) and behaviour is unchanged.
+        int sourceN = (ctx.SourceTextboxCounters.TryGetValue(hostPath, out var sprev) ? sprev : 0) + 1;
+        ctx.SourceTextboxCounters[hostPath] = sourceN;
+        string sourceReadPath = hostPath == "/" ? "/textbox[" + sourceN + "]" : $"{hostPath}/textbox[{sourceN}]";
 
         // Extract geometry / wrap / fill / anchor from the drawing XML so the
         // rebuilt textbox keeps its layout. Conservative best-effort — any
@@ -3672,7 +3707,7 @@ public static partial class WordBatchEmitter
         // existing (autoPresent: true) and the rest emit as fresh adds.
         try
         {
-            var txbxNode = word.Get(textboxPath);
+            var txbxNode = word.Get(sourceReadPath);
             var children = txbxNode.Children ?? new List<DocumentNode>();
             int innerPIdx = 0;
             int innerTblIdx = 0;
@@ -3687,7 +3722,7 @@ public static partial class WordBatchEmitter
                     // Navigation layer can't re-resolve — the user-facing
                     // path segment is "textbox", not "txbxContent". Use the
                     // canonical /body/textbox[N]/p[M] form instead.
-                    var sourceParaPath = $"{textboxPath}/p[{innerPIdx}]";
+                    var sourceParaPath = $"{sourceReadPath}/p[{innerPIdx}]";
                     EmitParagraph(word, sourceParaPath, textboxPath, innerPIdx, items,
                                   autoPresent: !firstParaSeen, ctx);
                     firstParaSeen = true;
@@ -3701,7 +3736,7 @@ public static partial class WordBatchEmitter
                     // `add table` rows target /body/textbox[N]/tbl[K]
                     // (AddTable already accepts a TextBoxContent parent).
                     innerTblIdx++;
-                    var sourceTblPath = $"{textboxPath}/tbl[{innerTblIdx}]";
+                    var sourceTblPath = $"{sourceReadPath}/tbl[{innerTblIdx}]";
                     EmitTable(word, sourceTblPath, innerTblIdx, items, ctx,
                               parentTablePath: null, containerPath: textboxPath);
                 }

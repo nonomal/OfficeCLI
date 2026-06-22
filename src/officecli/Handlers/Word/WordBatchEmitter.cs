@@ -149,6 +149,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            SourceTextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],
@@ -520,6 +521,16 @@ public static partial class WordBatchEmitter
         // Matches the CountTextboxesInHost selector on the Add side so dump
         // and Add-side indexing stay in lockstep.
         Dictionary<string, int> TextboxCounters,
+        // BUG-DUMP-TEXTBOX-INDEX-DESYNC: per-host SOURCE textbox ordinal, bumped for
+        // EVERY textbox (verbatim AND typed) in document order so it tracks
+        // Navigation's source /<host>/textbox[N] index. TextboxCounters above counts
+        // only typed `add textbox` rows (the REBUILD index), which diverges from the
+        // source index whenever a verbatim (VML/AltContent/embedded-image) textbox
+        // precedes a typed one. The typed path reads source inner content via the
+        // SOURCE index and emits into the REBUILD index; conflating them dropped a
+        // multi-paragraph textbox's content (read the wrong source) or overran the
+        // rebuild textbox count (target index too high).
+        Dictionary<string, int> SourceTextboxCounters,
         // BUG-R11A(BUG1): document-order ordinal of the table currently being
         // emitted, used to build a `(//w:tbl)[N]` raw-set xpath when injecting a
         // block <w:sdt> that is a direct child of a table cell. Single-element
@@ -656,6 +667,7 @@ public static partial class WordBatchEmitter
             ParaIdToTargetIdx: paraIdToTargetIdx,
             DeferredBookmarks: new List<BatchItem>(),
             TextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
+            SourceTextboxCounters: new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
             TableOrdinalBox: new int[1],
             CurrentCellXPathBox: new string?[1],
             CurrentCellPartBox: new string?[1],

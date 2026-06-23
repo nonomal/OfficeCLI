@@ -120,6 +120,19 @@ public partial class PowerPointHandler
                     hasExplicitFill = true;
                 }
 
+                // Pattern fill (<a:tcPr><a:pattFill>) — schema-valid on a table cell
+                // (CT_TableCellProperties) just like solid/grad/blip/noFill. The shape
+                // and slide-background fill paths already approximate it via
+                // PatternFillToCss (repeating-linear-gradient); the cell path dropped
+                // it, so a pattern-filled cell rendered with no fill. PatternFillToCss
+                // returns a full "background:..." declaration.
+                var cellPatt = tcPr?.GetFirstChild<Drawing.PatternFill>();
+                if (cellPatt != null)
+                {
+                    cellStyles.Add(PatternFillToCss(cellPatt, themeColors));
+                    hasExplicitFill = true;
+                }
+
                 // Picture fill (<a:tcPr><a:blipFill>): resolve the blip r:embed
                 // against the part the table lives in (same rels as the slide).
                 // PowerPoint stretches the image to fill the cell when <a:stretch>

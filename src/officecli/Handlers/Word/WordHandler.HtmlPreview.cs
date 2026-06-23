@@ -2349,7 +2349,20 @@ public partial class WordHandler
                 {
                     var bpType = bpSect.GetFirstChild<SectionType>()?.Val?.Value;
                     var bpCols = GetSectionColumnCount(bpSect);
-                    if (bpType == SectionMarkValues.Continuous && bpCols > 1)
+                    // BUG(first-section-double-col): skip the FIRST section
+                    // (sectionStartIdx == 0). Page 1's page-body already adopts
+                    // section 0's column layout (firstSection / activeSectionIdx
+                    // starts at 0), so emitting a scoped pre-break column div for
+                    // section 0 too nests `column-count:2` inside `column-count:2`,
+                    // halving the usable width again — a 44pt title in a leading
+                    // 2-col continuous section (e.g. a cover table) then renders
+                    // into a ~110pt sub-column and wraps mid-word. The R116
+                    // pre-break wrapper exists only for LATER multi-col sections
+                    // whose columns the page-body does NOT own (it picked a
+                    // different/fewer-col active section); section 0 is always
+                    // owned by the page-body, so its wrapper is pure redundancy.
+                    if (bpType == SectionMarkValues.Continuous && bpCols > 1
+                        && sectionStartIdx > 0)
                     {
                         // Does this section carry real content BEFORE its break?
                         bool hasContentBefore = false;

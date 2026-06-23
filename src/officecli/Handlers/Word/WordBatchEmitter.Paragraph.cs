@@ -15,6 +15,38 @@ public static partial class WordBatchEmitter
     /// paragraph); we issue a `set` instead of a fresh `add` so the existing
     /// paragraph gets reused rather than duplicated.
     /// </summary>
+    // BUG-DUMP26-01 / BUG-DUMP-SECTNUM: a paragraph's numbering props must never
+    // ride on an `add p` / `set p` as ad-hoc numbering. (1) numId/numLevel that came
+    // from style inheritance (ResolveNumPrFromStyle, no direct w:numPr) must be
+    // dropped — the style already supplies them and emitting them would promote
+    // inherited→explicit on replay. (2) When a direct numId is present, the
+    // abstractNum/num pair is already in /numbering (raw-set wholesale by
+    // EmitNumberingRaw); forwarding numFmt/listStyle/start to AddParagraph triggers
+    // ad-hoc numbering-definition creation — Word allocates a FRESH numId, orphaning
+    // the original abstract numbering's level rPr (color/bold/custom marker). Drop
+    // those so the paragraph just attaches by numId+numLevel to the existing def.
+    // Applied by BOTH the normal paragraph emit AND the section-carrier paragraph
+    // `set` (TryEmitInlineSectionBreak), which builds its pPr props independently.
+    private static void ApplyNumberingInheritanceFilters(IDictionary<string, string> props, DocumentNode pNode)
+    {
+        bool numInherited = pNode.Format.TryGetValue("numInherited", out var niVal)
+            && string.Equals(niVal?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        if (numInherited)
+        {
+            props.Remove("numId");
+            props.Remove("numLevel");
+            props.Remove("numFmt");
+            props.Remove("listStyle");
+            props.Remove("start");
+        }
+        if (props.ContainsKey("numId"))
+        {
+            props.Remove("numFmt");
+            props.Remove("listStyle");
+            props.Remove("start");
+        }
+    }
+
     private static void EmitParagraph(WordHandler word, string sourcePath, string parentPath,
                                       int targetIndex, List<BatchItem> items, bool autoPresent,
                                       BodyEmitContext? ctx = null)
@@ -73,30 +105,7 @@ public static partial class WordBatchEmitter
         // them would semantically promote inherited→explicit on replay.
         // Mirrors the first-run hoist precedent for run-character props
         // inherited from styles.
-        bool numInherited = pNode.Format.TryGetValue("numInherited", out var niVal)
-            && string.Equals(niVal?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
-        if (numInherited)
-        {
-            props.Remove("numId");
-            props.Remove("numLevel");
-            props.Remove("numFmt");
-            props.Remove("listStyle");
-            props.Remove("start");
-        }
-        // When a paragraph carries numId, the abstractNum/num pair is already
-        // in /numbering (raw-set wholesale by EmitNumberingRaw). Forwarding
-        // numFmt/listStyle/start to AddParagraph triggers ad-hoc
-        // numbering-definition creation in WordHandler.Add — Word allocates
-        // a fresh numId (1→9, 2→16, …) and the paragraph references the
-        // new one, orphaning the original abstract numbering's level rPr
-        // (color, bold, custom marker text). Drop those keys so the
-        // paragraph just attaches by numId+numLevel to the existing def.
-        if (props.ContainsKey("numId"))
-        {
-            props.Remove("numFmt");
-            props.Remove("listStyle");
-            props.Remove("start");
-        }
+        ApplyNumberingInheritanceFilters(props, pNode);
         // BUG-R4F-02: a paragraph may carry a numId that does not resolve to any
         // <w:num> in /numbering (dangling reference). This is valid OOXML — Word
         // renders the paragraph, just without a list marker — but the Add-side
@@ -725,6 +734,14 @@ public static partial class WordBatchEmitter
                          .Where(k => k.StartsWith("sectionBreak.", StringComparison.OrdinalIgnoreCase))
                          .ToList())
                 sectPProps.Remove(k);
+            // BUG-DUMP-SECTNUM: this `set` reuses AddParagraph/SetElement's numbering
+            // vocabulary, so it must apply the SAME inheritance filters as the normal
+            // emit (line ~70). Without it a section-carrier paragraph that inherits
+            // numbering from its style emitted numId+numFmt+start on the `set`,
+            // triggering ad-hoc numbering-definition creation: a spurious num +
+            // abstractNum in numbering.xml and a direct numPr stamped on a paragraph
+            // that had none in the source.
+            ApplyNumberingInheritanceFilters(sectPProps, pNode);
             if (sectPProps.Count > 0)
             {
                 items.Add(new BatchItem
@@ -2145,6 +2162,23 @@ public static partial class WordBatchEmitter
         // produced. The markers carry no relationships, so the append is safe.
         if (run.Format.TryGetValue("_fieldMarkerRaw", out var fmr) && fmr is bool fmrB && fmrB)
         {
+            // BUG-DUMP-FLDSIMPLE-IMG: a fldSimple decomposed into a complex field
+            // carries synthesized begin/instr/separate/end fldChar markers as inline
+            // raw XML (no source slice paths exist for them). Append that verbatim.
+            if (run.Format.TryGetValue("_markerInlineXml", out var mixObj)
+                && mixObj is string mix && !string.IsNullOrEmpty(mix)
+                && ResolveRawSetHost(parentPath, ctx) is { } inlineHost)
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "raw-set",
+                    Part = inlineHost.Part,
+                    Xpath = inlineHost.XPath,
+                    Action = "append",
+                    Xml = mix
+                });
+                return true;
+            }
             var markerPaths = run.Format.TryGetValue("_markerSlicePaths", out var mspObj)
                 ? mspObj as List<string> : null;
             if (markerPaths is { Count: > 0 } && ResolveRawSetHost(parentPath, ctx) is { } markerHost)
@@ -2880,6 +2914,16 @@ public static partial class WordBatchEmitter
                 var blipInner = CapturePicBlipInnerXml(picXml);
                 if (!string.IsNullOrEmpty(blipInner))
                     picProps["blipEffects"] = blipInner!;
+                // BUG-R13C consistency: CapturePicBlipInnerXml/StripRelReferencingBlipExts
+                // drops the SVG companion (<asvg:svgBlip r:embed=…>) because its dangling
+                // relationship would abort the whole `add picture`; the PNG raster
+                // fallback still renders, so content is conserved but the VECTOR layer is
+                // lost. Surface that as a warning — mirroring the theme-image / OLE
+                // fallback-drop warnings — instead of dropping it silently.
+                if (picXml.Contains("svgBlip", StringComparison.Ordinal))
+                    ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                        "picture", run.Path,
+                        "SVG vector layer (svgBlip) dropped on round-trip; PNG raster fallback preserved"));
                 var spEffectLst = CapturePicSpPrEffectLst(picXml);
                 if (!string.IsNullOrEmpty(spEffectLst))
                     picProps["spEffects"] = spEffectLst!;
@@ -3290,9 +3334,15 @@ public static partial class WordBatchEmitter
         // Mirrors WordHandler.CountTextboxesInHost / Navigation's textbox
         // selector — a textbox is a wps:wsp with txBox=1 cNvSpPr or a
         // wps:txbx child carrying w:txbxContent.
+        // BUG-DUMP-TXBXCONTENT-LITERAL (H31 family): the third probe must match
+        // the <w:txbxContent> ELEMENT open tag, not the bare token — a run whose
+        // visible text literally contains "txbxContent" (docs describing OOXML
+        // textbox internals) would otherwise be misrouted through the textbox
+        // drawing path, which extracts no drawing payload and silently drops the
+        // plain text. The sibling clauses already use element-anchored forms.
         return rawXml.Contains("txBox=\"1\"")
             || rawXml.Contains("<wps:txbx")
-            || rawXml.Contains("txbxContent");
+            || System.Text.RegularExpressions.Regex.IsMatch(rawXml, @"<\w*:?txbxContent[\s/>]");
     }
 
     /// <summary>
@@ -4113,8 +4163,18 @@ public static partial class WordBatchEmitter
         var raw = word.GetElementXml(run.Path);
         if (!string.IsNullOrEmpty(raw))
         {
-            if (raw.Contains("footnoteReference", StringComparison.Ordinal)) return NoteRefKind.Footnote;
-            if (raw.Contains("endnoteReference", StringComparison.Ordinal)) return NoteRefKind.Endnote;
+            // BUG-DUMP-NOTEREF-LITERAL: match the <w:footnoteReference> ELEMENT
+            // open tag, not the bare token. A run whose visible text literally
+            // contains the word "footnoteReference"/"endnoteReference" (common in
+            // docs that describe OOXML/Word internals) is NOT a note anchor — the
+            // old substring probe matched the word inside <w:t>…</w:t> and replaced
+            // the whole run with a synthesized note reference, silently dropping all
+            // its text. Require the element open-tag form `<[prefix:]footnoteReference`
+            // followed by a tag-terminating char so text content can never match.
+            if (System.Text.RegularExpressions.Regex.IsMatch(raw, @"<\w*:?footnoteReference[\s/>]"))
+                return NoteRefKind.Footnote;
+            if (System.Text.RegularExpressions.Regex.IsMatch(raw, @"<\w*:?endnoteReference[\s/>]"))
+                return NoteRefKind.Endnote;
             return NoteRefKind.None;
         }
         if (string.Equals(rStyle, "FootnoteReference", StringComparison.OrdinalIgnoreCase)) return NoteRefKind.Footnote;

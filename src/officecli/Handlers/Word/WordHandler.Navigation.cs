@@ -1439,6 +1439,17 @@ public partial class WordHandler
                         => fns.Elements<Footnote>().Where(f => f.Id?.Value > 0).Cast<OpenXmlElement>(),
                     "endnote" when current is Endnotes ens
                         => ens.Elements<Endnote>().Where(e => e.Id?.Value > 0).Cast<OpenXmlElement>(),
+                    // BUG-DUMP-FLDSIMPLE-IMG: address the Nth drawing-bearing run INSIDE
+                    // a paragraph's <w:fldSimple> results so the path-based picture
+                    // pipeline (GetElementXml / GetImageBinary / GetDrawingShapeEmitData)
+                    // can ship an image cached in a simple field. (Case label is lower —
+                    // this switch is on seg.Name.ToLowerInvariant().) Order matches the
+                    // fldSimple decomposition in the paragraph emit.
+                    "fldimgrun" when current is Paragraph fldImgPara
+                        => fldImgPara.Elements<SimpleField>()
+                            .SelectMany(f => f.Elements<Run>()
+                                .Where(r => r.GetFirstChild<Drawing>() != null))
+                            .Cast<OpenXmlElement>(),
                     _ => current.ChildElements.Where(e => e.LocalName == seg.Name).Cast<OpenXmlElement>()
                 };
             }
@@ -1521,6 +1532,16 @@ public partial class WordHandler
                 {
                     AbstractNum an => an.AbstractNumberId?.Value.ToString() == targetId,
                     NumberingInstance ni => ni.NumberID?.Value.ToString() == targetId,
+                    // BUG-DUMP-BMEND-IDPATH: a bookmarkEnd/bookmarkStart addressed by
+                    // w:id must resolve by id, NOT positionally. The dump emits a
+                    // bookmarkEnd's path as bookmarkEnd[@id=N]; without this, the
+                    // numeric form bookmarkEnd[N] was treated as a positional ordinal,
+                    // so an end whose id != its document-order position (e.g. the
+                    // first bookmarkEnd in a stack whose id is 4 but the 4th end has
+                    // id 7) re-read the WRONG element, producing a duplicate bookmark
+                    // id on round-trip.
+                    BookmarkEnd be => be.Id?.Value.ToString() == targetId,
+                    BookmarkStart bs => bs.Id?.Value.ToString() == targetId,
                     _ => false,
                 });
             }
@@ -1860,6 +1881,25 @@ public partial class WordHandler
         return BuildSectionNode(sectPrEl, path);
     }
 
+    // BUG-DUMP-DELININS / BUG-DUMP-MOVE-DEL: a run wrapped by an outer revision
+    // (ins / moveFrom / moveTo) AND an inner <w:del> must surface the inner
+    // deletion as revision.nested.* so the emitter rebuilds the nested
+    // <w:ins|moveFrom|moveTo><w:del> stack. Without it the <w:del> wrapper was
+    // dropped and the deleted text resurfaced as live, accepted content (a silent
+    // meaning change). ECMA-376 permits ins/moveFrom/moveTo to wrap a del.
+    private static void CaptureNestedDeletion(Run run, DocumentNode node)
+    {
+        var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
+        if (nestedDel == null) return;
+        node.Format["revision.nested.type"] = "del";
+        if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
+            node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
+        if (nestedDel.Date?.Value is DateTime nestedDelDate)
+            node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
+        if (nestedDel.Id?.Value is { } nestedDelId)
+            node.Format["revision.nested.id"] = nestedDelId.ToString();
+    }
+
     private DocumentNode RunToNode(Run run, DocumentNode node, string path)
     {
         node.Type = "run";
@@ -1959,21 +1999,11 @@ public partial class WordHandler
             // the inner del was dropped — the deletion round-tripped as a live
             // insertion (<w:delText> rebuilt as <w:t>, the deleted content
             // silently un-deleted; this is the cd241 delText-loss class).
-            // ECMA-376 permits only ins⊃del nesting (del cannot contain ins),
-            // so a run with BOTH an ins AND a del ancestor is always ins-outer/
-            // del-inner. Capture the inner del as revision.nested.* so the
-            // emitter rebuilds the <w:ins><w:del> stack.
-            var nestedDel = run.Ancestors<DeletedRun>().FirstOrDefault();
-            if (nestedDel != null)
-            {
-                node.Format["revision.nested.type"] = "del";
-                if (!string.IsNullOrEmpty(nestedDel.Author?.Value))
-                    node.Format["revision.nested.author"] = nestedDel.Author!.Value!;
-                if (nestedDel.Date?.Value is DateTime nestedDelDate)
-                    node.Format["revision.nested.date"] = nestedDelDate.ToString("o");
-                if (nestedDel.Id?.Value is { } nestedDelId)
-                    node.Format["revision.nested.id"] = nestedDelId.ToString();
-            }
+            // A run with BOTH an ins AND a del ancestor is ins-outer/del-inner
+            // (ECMA-376 permits ins⊃del). Capture the inner del as revision.nested.*
+            // so the emitter rebuilds the <w:ins><w:del> stack. (moveFrom/moveTo may
+            // also wrap a del — same capture, see those branches.)
+            CaptureNestedDeletion(run, node);
         }
         else if (moveFromAncestor != null)
         {
@@ -1990,6 +2020,7 @@ public partial class WordHandler
                 node.Format["revision.date"] = mfDate.ToString("o");
             if (moveFromAncestor.Id?.Value is { } mfId)
                 node.Format["revision.id"] = mfId.ToString();
+            CaptureNestedDeletion(run, node);   // BUG-DUMP-MOVE-DEL: moveFrom⊃del
         }
         else if (moveToAncestor != null)
         {
@@ -2000,6 +2031,7 @@ public partial class WordHandler
                 node.Format["revision.date"] = mtDate.ToString("o");
             if (moveToAncestor.Id?.Value is { } mtId)
                 node.Format["revision.id"] = mtId.ToString();
+            CaptureNestedDeletion(run, node);   // BUG-DUMP-MOVE-DEL: moveTo⊃del
         }
         else
         {
@@ -2348,17 +2380,35 @@ public partial class WordHandler
             var ptabEl = run.GetFirstChild<PositionalTab>();
             if (ptabEl != null)
             {
-                node.Type = "ptab";
                 // Open XML SDK v3 enum .ToString() returns "FooValues { }"
                 // — use .InnerText to get the actual XML attribute value
                 // ("center", "right", "begin", etc.). Same trap as the
                 // LineSpacingRuleValues note in WordHandler CLAUDE.md.
-                if (ptabEl.Alignment?.HasValue == true)
-                    node.Format["align"] = ptabEl.Alignment.InnerText;
-                if (ptabEl.RelativeTo?.HasValue == true)
-                    node.Format["relativeTo"] = ptabEl.RelativeTo.InnerText;
-                if (ptabEl.Leader?.HasValue == true)
-                    node.Format["leader"] = ptabEl.Leader.InnerText;
+                var ptabAlign = ptabEl.Alignment?.HasValue == true ? ptabEl.Alignment.InnerText : null;
+                var ptabRelTo = ptabEl.RelativeTo?.HasValue == true ? ptabEl.RelativeTo.InnerText : null;
+                var ptabLeader = ptabEl.Leader?.HasValue == true ? ptabEl.Leader.InnerText : null;
+                // BUG-DUMP-DELTAB sibling (BUG-DUMP-PTABTEXT): when the run ALSO
+                // carries text (<w:t> or <w:delText>), the standalone `add ptab`
+                // type-upgrade would drop that co-resident text — and unlike a
+                // plain tab the ptab can't ride back through GetRunText's \t, so
+                // keeping it a plain run would instead drop the ptab. Keep the run
+                // a `run` AND carry the ptab as inline props so AddRun rebuilds
+                // <w:ptab/> ahead of the text, preserving BOTH.
+                bool hasText = run.Elements<Text>().Any() || run.Elements<DeletedText>().Any();
+                if (hasText)
+                {
+                    node.Format["ptabInline"] = "true";
+                    if (ptabAlign != null) node.Format["ptabInline.align"] = ptabAlign;
+                    if (ptabRelTo != null) node.Format["ptabInline.relativeTo"] = ptabRelTo;
+                    if (ptabLeader != null) node.Format["ptabInline.leader"] = ptabLeader;
+                }
+                else
+                {
+                    node.Type = "ptab";
+                    if (ptabAlign != null) node.Format["align"] = ptabAlign;
+                    if (ptabRelTo != null) node.Format["relativeTo"] = ptabRelTo;
+                    if (ptabLeader != null) node.Format["leader"] = ptabLeader;
+                }
             }
         }
         if (node.Type == "run")
@@ -2442,8 +2492,17 @@ public partial class WordHandler
                         node.Format["ffType"] = "checkbox";
                         var cChecked = cb.GetFirstChild<Checked>();
                         var cDefault = cb.GetFirstChild<DefaultCheckBoxFormFieldState>();
-                        var isChk = cChecked?.Val?.Value ?? cDefault?.Val?.Value ?? false;
-                        node.Format["ffChecked"] = isChk;
+                        // BUG-DUMP-FFCHECKBOX-DEFAULT: <w:checked> (current state)
+                        // and <w:default> (initial/reset state) are independent —
+                        // surface them DISTINCTLY, each only when present (mirror the
+                        // dropdown ffResult/ffDefault split, BUG-DUMP-R27-3). The old
+                        // readback collapsed `checked ?? default` into one ffChecked
+                        // and dropped <w:default>, so a checkbox whose default differed
+                        // from its current state round-tripped with the default flipped
+                        // and the explicit current marker lost or a spurious one added.
+                        // (<w:checked/> with no w:val means checked=true.)
+                        if (cChecked != null) node.Format["ffChecked"] = cChecked.Val?.Value ?? true;
+                        if (cDefault != null) node.Format["ffDefault"] = cDefault.Val?.Value ?? true;
                         var cSize = cb.GetFirstChild<FormFieldSize>()?.Val?.Value;
                         if (!string.IsNullOrEmpty(cSize))
                             node.Format["ffCheckBoxSize"] = cSize;
@@ -2511,7 +2570,11 @@ public partial class WordHandler
         // checks "no Text element" (not "node.Text empty") because
         // GetRunText now surfaces TabChar as \t in node.Text. A pure
         // <w:r><w:tab/></w:r> run has no <w:t> child but node.Text="\t".
-        if (node.Type == "run" && !run.Elements<Text>().Any())
+        // BUG-DUMP-DELTAB: also exclude runs carrying <w:delText> (a tracked
+        // deletion). GetRunText surfaces delText into node.Text; without this
+        // exclusion a deleted run mixing <w:tab/> + <w:delText> was reclassified
+        // tab-only and node.Text wiped to "", silently dropping the deleted text.
+        if (node.Type == "run" && !run.Elements<Text>().Any() && !run.Elements<DeletedText>().Any())
         {
             var tabEls = run.Elements<TabChar>().ToList();
             // BUG-DUMP-R25-2: a tab-only run carrying MULTIPLE <w:tab/> chars
@@ -2539,7 +2602,7 @@ public partial class WordHandler
         // with text="\n" that the emitter mis-rendered. A mixed run
         // <w:t>foo</w:t><w:br/> still has a <w:t> child, so it stays a run
         // (text="foo\n") and the inline break is preserved as \n.
-        if (node.Type == "run" && !run.Elements<Text>().Any())
+        if (node.Type == "run" && !run.Elements<Text>().Any() && !run.Elements<DeletedText>().Any())
         {
             var breakEl = run.GetFirstChild<Break>();
             if (breakEl != null)
@@ -4020,9 +4083,25 @@ public partial class WordHandler
                     node.Format["sectionBreak.pageStart"] = pgNum.Start.Value;
                 if (pgNum?.Format?.Value != null)
                     node.Format["sectionBreak.pageNumFmt"] = pgNum.Format.InnerText;
+                // BUG-DUMP-SECT-CHAPNUM: chapter-number page numbering (chapStyle =
+                // heading style index, chapSep = separator between chapter and page,
+                // e.g. "1-1"/"2.3") on a mid-document section carrier. The body-sectPr
+                // readback emits both; without mirroring them here a non-trailing
+                // section's page numbers silently lost their chapter prefix/separator.
+                if (pgNum?.ChapterStyle?.Value != null)
+                    node.Format["sectionBreak.chapStyle"] = pgNum.ChapterStyle.Value;
+                if (pgNum?.ChapterSeparator?.Value != null)
+                    node.Format["sectionBreak.chapSep"] = pgNum.ChapterSeparator.InnerText;
 
                 if (inlineSectPr.GetFirstChild<TitlePage>() != null)
                     node.Format["sectionBreak.titlePage"] = true;
+
+                // BUG-DUMP-SECT-NOENDNOTE: <w:noEndnote/> suppresses endnote
+                // collection for the section. The body-sectPr readback emits it;
+                // omitting it here let suppressed endnotes reappear in a non-trailing
+                // section on round-trip.
+                if (IsToggleOn(inlineSectPr.GetFirstChild<NoEndnote>()))
+                    node.Format["sectionBreak.noEndnote"] = "true";
 
                 // BUG-DUMP-SECT-PAPERSRC: printer paper-source bins on a
                 // mid-document section carrier. Surface as sectionBreak.paperSrc.*
@@ -4090,6 +4169,17 @@ public partial class WordHandler
                 if (sbTextDir?.Val != null)
                     node.Format["sectionBreak.textDirection"] = sbTextDir.Val.InnerText;
 
+                // BUG-DUMP-SECT-RTL: a mid-document section carrier can be RTL
+                // (Hebrew/Arabic/Persian multi-section docs) via <w:bidi/> (page
+                // direction) and <w:rtlGutter/> (binding gutter on the right).
+                // The body-sectPr readback reads both; without surfacing them on
+                // the carrier every non-trailing section silently flipped LTR and
+                // the gutter moved to the left. AddSection consumes bidi/rtlGutter.
+                if (IsToggleOn(inlineSectPr.GetFirstChild<BiDi>()))
+                    node.Format["sectionBreak.bidi"] = "rtl";
+                if (IsToggleOn(inlineSectPr.GetFirstChild<GutterOnRight>()))
+                    node.Format["sectionBreak.rtlGutter"] = "true";
+
                 // Page border on a mid-document section carrier (e.g. a cover
                 // page that boxes only its own first page via display="firstPage").
                 // Surface per-side detail + offsetFrom/zOrder/display under the
@@ -4156,6 +4246,11 @@ public partial class WordHandler
                         };
                     if (lnNum.CountBy?.Value is short cb && cb > 1)
                         node.Format["sectionBreak.lineNumberCountBy"] = cb;
+                    // BUG-DUMP-SECT-LNSTART: w:lnNumType/@w:start (first line number)
+                    // on a mid-document carrier — body-sectPr readback emits it; the
+                    // carrier dropped it, restarting line numbering at the default.
+                    if (lnNum.Start?.Value is short sbLnStart)
+                        node.Format["sectionBreak.lineNumberStart"] = (int)sbLnStart;
                     // BUG-DUMP-SECT-LNDIST: w:lnNumType/@w:distance (gutter twips).
                     if (lnNum.Distance?.Value is string sbLnDistRaw
                         && int.TryParse(sbLnDistRaw, out var sbLnDist))
@@ -4875,6 +4970,7 @@ public partial class WordHandler
                 .ToList();
             int bareFieldIdx = 0;
             int fldSimpleMergeIdx = 0;
+            int fldImgRunIdx = 0;   // BUG-DUMP-FLDSIMPLE-IMG: paragraph-scoped, matches the fldimgrun[] selector
             foreach (var entry in ordered)
             {
                 int _childCountBefore = node.Children.Count;
@@ -4885,22 +4981,72 @@ public partial class WordHandler
                     // standalone loop, which is now removed for direct children).
                     var fld = (SimpleField)entry.el;
                     var instr = fld.Instruction?.Value ?? "";
-                    var displayText = string.Join("", fld.Descendants<Text>().Select(t => t.Text));
-                    var fldNode = new DocumentNode
+                    // BUG-DUMP-FLDSIMPLE-IMG: a <w:fldSimple> whose result holds a
+                    // <w:drawing> (e.g. REF SHAPE caching the referenced inline image)
+                    // cannot round-trip through the text-only `field` node below — the
+                    // image was silently dropped. Decompose into a complex field that
+                    // keeps the picture in its result: synthesized begin/instr/separate
+                    // markers (inline raw) + a real picture node (ships the image bytes
+                    // and rebinds the blip rel via the resolvable fldimgrun[] path) + an
+                    // end marker. Mirrors BUG-DUMP-R28-INCLUDEPICTURE for fldChar chains;
+                    // fldSimple already round-trips as a complex field, so it is faithful.
+                    if (fld.Descendants<Drawing>().Any())
                     {
-                        Type = "field",
-                        Text = displayText,
-                        Path = $"{path}/field[{fldSimpleMergeIdx + 1}]",
-                    };
-                    fldNode.Format["instruction"] = instr.Trim();
-                    var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
-                    if (!string.IsNullOrEmpty(instrUpper))
-                        fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
-                    if (fld.Dirty?.Value == true) fldNode.Format["dirty"] = true;
-                    if (fld.FieldLock?.Value == true) fldNode.Format["fldLock"] = true;
-                    fldNode.Format["evaluated"] = displayText.Length > 0;
-                    node.Children.Add(fldNode);
-                    fldSimpleMergeIdx++;
+                        string EscXml(string s) => s.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+                        DocumentNode MarkerNode(string xml) => new DocumentNode
+                        {
+                            Type = "field",
+                            Path = $"{path}/field[{fldSimpleMergeIdx + 1}]",
+                            Format = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["_fieldMarkerRaw"] = true,
+                                ["_markerInlineXml"] = xml,
+                            }
+                        };
+                        node.Children.Add(MarkerNode(
+                            "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
+                            + "<w:r><w:instrText xml:space=\"preserve\">" + EscXml(instr) + "</w:instrText></w:r>"
+                            + "<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>"));
+                        var pendingRaw = new System.Text.StringBuilder();
+                        void FlushRaw()
+                        {
+                            if (pendingRaw.Length == 0) return;
+                            node.Children.Add(MarkerNode(pendingRaw.ToString()));
+                            pendingRaw.Clear();
+                        }
+                        foreach (var rr in fld.Elements<Run>())
+                        {
+                            var rd = rr.GetFirstChild<Drawing>();
+                            if (rd != null)
+                            {
+                                FlushRaw();
+                                node.Children.Add(CreateImageNode(rd, rr, $"{path}/fldimgrun[{++fldImgRunIdx}]"));
+                            }
+                            else pendingRaw.Append(rr.OuterXml);
+                        }
+                        FlushRaw();
+                        node.Children.Add(MarkerNode("<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>"));
+                        fldSimpleMergeIdx++;
+                    }
+                    else
+                    {
+                        var displayText = string.Join("", fld.Descendants<Text>().Select(t => t.Text));
+                        var fldNode = new DocumentNode
+                        {
+                            Type = "field",
+                            Text = displayText,
+                            Path = $"{path}/field[{fldSimpleMergeIdx + 1}]",
+                        };
+                        fldNode.Format["instruction"] = instr.Trim();
+                        var instrUpper = instr.Trim().Split(' ', 2)[0].ToUpperInvariant();
+                        if (!string.IsNullOrEmpty(instrUpper))
+                            fldNode.Format["fieldType"] = instrUpper.ToLowerInvariant();
+                        if (fld.Dirty?.Value == true) fldNode.Format["dirty"] = true;
+                        if (fld.FieldLock?.Value == true) fldNode.Format["fldLock"] = true;
+                        fldNode.Format["evaluated"] = displayText.Length > 0;
+                        node.Children.Add(fldNode);
+                        fldSimpleMergeIdx++;
+                    }
                 }
                 else if (entry.kind == "run")
                 {
@@ -5049,7 +5195,12 @@ public partial class WordHandler
                     var beNode = new DocumentNode
                     {
                         Type = "bookmarkEnd",
-                        Path = $"{path}/bookmarkEnd[{be.Id?.Value}]",
+                        // BUG-DUMP-BMEND-IDPATH: address by w:id explicitly. A bare
+                        // numeric bracket is resolved positionally, but a bookmarkEnd's
+                        // id need not equal its document-order position (stacked TOC
+                        // anchors where one closes inside a field result), which
+                        // re-read the wrong end and duplicated a bookmark id.
+                        Path = $"{path}/bookmarkEnd[@id={be.Id?.Value}]",
                     };
                     var matchName = ResolveBookmarkEndName(be);
                     if (!string.IsNullOrEmpty(matchName))

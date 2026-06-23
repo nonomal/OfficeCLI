@@ -235,8 +235,10 @@ public partial class WordHandler
         // per page (titlePg → first-page header; evenAndOddHeaders →
         // parity-based; default otherwise).
         var allSectionsForHf = CollectSections(body);
-        var sectionHeaders = BuildSectionHfBundles(allSectionsForHf, isHeader: true);
-        var sectionFooters = BuildSectionHfBundles(allSectionsForHf, isHeader: false);
+        var sectionHeaders = BuildSectionHfBundles(allSectionsForHf, isHeader: true,
+            out var sectionHeaderFields);
+        var sectionFooters = BuildSectionHfBundles(allSectionsForHf, isHeader: false,
+            out var sectionFooterFields);
         var evenAndOddGlobal = _doc.MainDocumentPart?.DocumentSettingsPart?
             .Settings?.GetFirstChild<EvenAndOddHeaders>() != null;
         // Legacy fallback for docs that didn't come through CollectSections'
@@ -247,6 +249,12 @@ public partial class WordHandler
         var fallbackFooterSb = new StringBuilder();
         RenderHeaderFooterHtml(fallbackFooterSb, isHeader: false);
         var footerHtml = fallbackFooterSb.ToString();
+        // PAGE/NUMPAGES presence for the fallback parts — RenderHeaderFooterHtml
+        // emits only the FIRST content-bearing part, so probe the same one for
+        // its field flags. The digit-rewrite below is gated on these so a
+        // literal header/footer number is never mistaken for a page field.
+        var fallbackHeaderFields = FirstContentHeaderFooterFlags(isHeader: true);
+        var fallbackFooterFields = FirstContentHeaderFooterFlags(isHeader: false);
 
         // Render footnotes/endnotes
         var footnotesSb = new StringBuilder();
@@ -309,22 +317,15 @@ public partial class WordHandler
             }
         }
 
-        // Detect PAGE field in footer and replace with placeholder
-        // Footer typically contains: <span ...>1</span> where "1" is the cached PAGE field value
-        // We replace single-digit page numbers in the footer with a placeholder for per-page substitution
-        var footerHasPageNum = footerHtml.Contains("PAGE") || !string.IsNullOrEmpty(footerHtml);
-        // Match a single-digit-only run rendered as either <span> or <p>.
-        // The footer's PAGE field is typically a single run; the tag name
-        // depends on whether the run carries rPr styling.
-        // Wrap the matched digit run in a sentinel span so the per-page
-        // paginate JS can locate PAGE/NUMPAGES fields without clobbering
-        // unrelated digit-only content (e.g. "2026", "5 USD", chapter ids).
-        var pageNumPattern = new Regex(@"(<(?:span|p)[^>]*>)\s*\d+\s*(</(?:span|p)>)");
-        var footerTemplate = pageNumPattern.Replace(footerHtml,
-            "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-        var footerTemplateWithTotal = pageNumPattern.Replace(footerTemplate,
-            "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
-        footerTemplate = footerTemplateWithTotal;
+        // Replace the rendered PAGE / NUMPAGES result with a per-page
+        // substitution placeholder — but ONLY when the source footer part truly
+        // defines that field. Matching any digit-only run (the old behavior)
+        // clobbered literal numbers (a year "2014", a phone number, a price)
+        // that happened to be the first digit run, corrupting visible content.
+        // The tag name (span vs p) depends on whether the run carries rPr
+        // styling; ApplyPageNumFields handles both.
+        var footerTemplate = ApplyPageNumFields(
+            footerHtml, fallbackFooterFields.page, fallbackFooterFields.numPages);
 
         // Section-level multi-column layout: w:cols num=N sep=true.
         // BUG(first-section-cols): in a multi-section doc the page-body's initial
@@ -384,8 +385,17 @@ public partial class WordHandler
                     // Open XML SDK v3+: Enum.ToString() returns a
                     // debug string like "NumberFormatValues { }"; use
                     // InnerText to get the XML-level token ("decimalZero").
-                    if (pgNumType?.Format?.InnerText is { Length: > 0 } fmtStr)
-                        displayedFmt = fmtStr;
+                    //
+                    // Page number format does NOT inherit across sections:
+                    // each section's w:fmt is independent, defaulting to
+                    // "decimal" (ECMA-376 §17.6.12). A section with no
+                    // explicit w:fmt (or no pgNumType) must RESET to decimal
+                    // rather than keep the previous section's format —
+                    // otherwise a sect1 lowerRoman leaks into a sect2 body
+                    // that should number 4,5,6 (not iv,v,vi).
+                    displayedFmt = pgNumType?.Format?.InnerText is { Length: > 0 } fmtStr
+                        ? fmtStr
+                        : "decimal";
                 }
                 pgContent = sectRegex.Replace(pgContent, "");
                 pageList[i] = pgContent;
@@ -454,12 +464,14 @@ public partial class WordHandler
                 isFirstPageOfSection, pageIsEven, evenAndOddGlobal, fallbackHeaderHtml);
             // Same PAGE/NUMPAGES substitution as the footer path so headers
             // with field=page / field=numpages update per page instead of
-            // rendering the author-time cached literal "1".
-            var phdr = new Regex(@"(<(?:span|p)[^>]*>)\s*\d+\s*(</(?:span|p)>)");
-            var perPageHeaderTemplate = phdr.Replace(perPageHeader,
-                "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-            perPageHeaderTemplate = phdr.Replace(perPageHeaderTemplate,
-                "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+            // rendering the author-time cached literal "1" — but only when the
+            // picked header variant truly carries the field (gate against
+            // literal header numbers).
+            var hdrFlags = PickHeaderFooterFlags(
+                sectionHeaders, sectionHeaderFields, sections, activeSectionIdx,
+                isFirstPageOfSection, pageIsEven, evenAndOddGlobal, fallbackHeaderFields);
+            var perPageHeaderTemplate = ApplyPageNumFields(
+                perPageHeader, hdrFlags.page, hdrFlags.numPages);
             sb.Append(perPageHeaderTemplate
                 .Replace("<!--PAGE_NUM-->", hdrPageNumStr)
                 .Replace("<!--NUM_PAGES-->", pageList.Count.ToString()));
@@ -485,12 +497,13 @@ public partial class WordHandler
             var perPageFooter = PickHeaderFooter(
                 sectionFooters, sections, activeSectionIdx,
                 isFirstPageOfSection, pageIsEven, evenAndOddGlobal, footerHtml);
-            // Rebuild the PAGE field placeholder on the picked footer.
-            var pf = new Regex(@"(<(?:span|p)[^>]*>)\s*\d+\s*(</(?:span|p)>)");
-            var perPageFooterTemplate = pf.Replace(perPageFooter,
-                "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-            perPageFooterTemplate = pf.Replace(perPageFooterTemplate,
-                "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+            // Rebuild the PAGE field placeholder on the picked footer — gated to
+            // footers that actually carry the field.
+            var ftrFlags = PickHeaderFooterFlags(
+                sectionFooters, sectionFooterFields, sections, activeSectionIdx,
+                isFirstPageOfSection, pageIsEven, evenAndOddGlobal, fallbackFooterFields);
+            var perPageFooterTemplate = ApplyPageNumFields(
+                perPageFooter, ftrFlags.page, ftrFlags.numPages);
             sb.Append(perPageFooterTemplate
                 .Replace("<!--PAGE_NUM-->", pageNumStr)
                 .Replace("<!--NUM_PAGES-->", pageList.Count.ToString()));
@@ -542,19 +555,22 @@ public partial class WordHandler
         // DEFAULT header so a first-page header doesn't bleed onto later
         // pages. fallbackHeaderHtml takes arbitrary part order and may be the
         // first-page variant; prefer the resolved Default of section 0.
-        var contHeaderHtml = (sectionHeaders.TryGetValue(0, out var hb0) && hb0.Default != null)
-            ? hb0.Default
-            : fallbackHeaderHtml;
+        var useSectionDefaultHeader = sectionHeaders.TryGetValue(0, out var hb0) && hb0.Default != null;
+        var contHeaderHtml = useSectionDefaultHeader ? hb0!.Default! : fallbackHeaderHtml;
+        // Flags for the continuation header — from section 0's Default when used,
+        // else the fallback part. Keeps the rewrite gated to real PAGE fields.
+        var contHeaderFlags = useSectionDefaultHeader
+            && sectionHeaderFields.TryGetValue(0, out var hf0)
+            ? hf0.Default
+            : fallbackHeaderFields;
         // Mirror the footer (ftpl) template exactly: emit named
         // page-num-field / num-pages-field spans rather than bare comments.
         // The JS replaces <!--PAGE_NUM--> per page and the renumber loop fills
         // both .page-num-field and .num-pages-field spans — a bare
         // <!--NUM_PAGES--> comment in the header was never substituted, so
         // continuation-page headers showed an empty NUMPAGES count.
-        var headerTemplate = pageNumPattern.Replace(contHeaderHtml,
-            "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-        headerTemplate = pageNumPattern.Replace(headerTemplate,
-            "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+        var headerTemplate = ApplyPageNumFields(
+            contHeaderHtml, contHeaderFlags.page, contHeaderFlags.numPages);
         sb.AppendLine("  var htpl=" + JsStringLiteral(headerTemplate) + ";");
         // Even-page header/footer continuation templates. When the document
         // has evenAndOddHeaders enabled AND section 0 defines an even-type
@@ -568,17 +584,13 @@ public partial class WordHandler
         {
             if (sectionHeaders.TryGetValue(0, out var ehb) && ehb.Even != null)
             {
-                var t = pageNumPattern.Replace(ehb.Even,
-                    "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-                evenHeaderTemplate = pageNumPattern.Replace(t,
-                    "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+                var ef = sectionHeaderFields.TryGetValue(0, out var ehf) ? ehf.Even : (page: false, numPages: false);
+                evenHeaderTemplate = ApplyPageNumFields(ehb.Even, ef.page, ef.numPages);
             }
             if (sectionFooters.TryGetValue(0, out var efb) && efb.Even != null)
             {
-                var t = pageNumPattern.Replace(efb.Even,
-                    "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
-                evenFooterTemplate = pageNumPattern.Replace(t,
-                    "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+                var ef = sectionFooterFields.TryGetValue(0, out var eff) ? eff.Even : (page: false, numPages: false);
+                evenFooterTemplate = ApplyPageNumFields(efb.Even, ef.page, ef.numPages);
             }
         }
         sb.AppendLine("  var etpl=" + JsStringLiteral(evenHeaderTemplate) + ";");
@@ -1400,14 +1412,14 @@ public partial class WordHandler
         var rPr = defs?.RunPropertiesDefault?.RunPropertiesBaseStyle;
         var defaultRPr = defaultStyle?.StyleRunProperties;
 
-        // Font: docDefaults rFonts → Normal style rFonts → theme minor font → fallback
+        // Font: Normal style rFonts → docDefaults rFonts → theme minor font → fallback.
+        // OOXML cascade: the default paragraph (Normal) style overrides docDefaults,
+        // so Normal's rFonts must win when present (matches ResolveEffectiveRunPropertiesCore).
         var fonts = rPr?.RunFonts;
-        var font = NonEmpty(fonts?.EastAsia?.Value) ?? NonEmpty(fonts?.Ascii?.Value) ?? NonEmpty(fonts?.HighAnsi?.Value);
+        var nFonts = defaultRPr?.RunFonts;
+        var font = NonEmpty(nFonts?.EastAsia?.Value) ?? NonEmpty(nFonts?.Ascii?.Value) ?? NonEmpty(nFonts?.HighAnsi?.Value);
         if (font == null)
-        {
-            var nFonts = defaultRPr?.RunFonts;
-            font = NonEmpty(nFonts?.EastAsia?.Value) ?? NonEmpty(nFonts?.Ascii?.Value) ?? NonEmpty(nFonts?.HighAnsi?.Value);
-        }
+            font = NonEmpty(fonts?.EastAsia?.Value) ?? NonEmpty(fonts?.Ascii?.Value) ?? NonEmpty(fonts?.HighAnsi?.Value);
         if (font == null)
         {
             try
@@ -1418,12 +1430,13 @@ public partial class WordHandler
             catch (System.Xml.XmlException) { }
         }
 
-        // Size: docDefaults → Normal style → fallback (half-points → pt)
+        // Size: Normal style → docDefaults → fallback (half-points → pt).
+        // Same cascade rationale as font above — Normal's sz overrides docDefaults.
         double sizePt = 0;
-        if (rPr?.FontSize?.Val?.Value is string sz && int.TryParse(sz, out var hp))
-            sizePt = hp / 2.0;
-        if (sizePt == 0 && defaultRPr?.FontSize?.Val?.Value is string nsz && int.TryParse(nsz, out var nhp))
+        if (defaultRPr?.FontSize?.Val?.Value is string nsz && int.TryParse(nsz, out var nhp))
             sizePt = nhp / 2.0;
+        if (sizePt == 0 && rPr?.FontSize?.Val?.Value is string sz && int.TryParse(sz, out var hp))
+            sizePt = hp / 2.0;
         // OOXML §17.7.4.5 default: 20 half-points = 10pt when neither
         // rPrDefault nor Normal carries a size.
         if (sizePt == 0) sizePt = 10.0;
@@ -1759,6 +1772,90 @@ public partial class WordHandler
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Detect whether a header/footer part actually contains a PAGE and/or
+    /// NUMPAGES field. Only when the source part carries the real field may the
+    /// digit-only run it rendered be rewritten into a dynamic .page-num-field /
+    /// .num-pages-field span. Without this gate the digit-matching regex would
+    /// clobber literal numbers (a year "2014", a phone number, a price) that
+    /// happen to be the first digit run in the header/footer.
+    ///
+    /// Both <c>&lt;w:fldSimple w:instr="...PAGE..."&gt;</c> and the
+    /// <c>&lt;w:instrText&gt;PAGE&lt;/w:instrText&gt;</c> (fldChar) forms are
+    /// matched. NUMPAGES is checked first so a "NUMPAGES" instruction is not
+    /// miscounted as a plain "PAGE".
+    /// </summary>
+    private static (bool hasPage, bool hasNumPages) HeaderFooterFieldFlags(OpenXmlElement? hf)
+    {
+        bool hasPage = false, hasNumPages = false;
+        if (hf == null) return (false, false);
+        // fldSimple: instruction lives in the w:instr attribute.
+        foreach (var fld in hf.Descendants<SimpleField>())
+            Classify(fld.Instruction?.Value);
+        // fldChar field: instruction lives in <w:instrText> runs.
+        foreach (var instr in hf.Descendants<FieldCode>())
+            Classify(instr.Text);
+        return (hasPage, hasNumPages);
+
+        void Classify(string? instr)
+        {
+            if (string.IsNullOrEmpty(instr)) return;
+            // Word field instructions are case-insensitive; tokens are
+            // whitespace-delimited (e.g. "PAGE \* MERGEFORMAT").
+            var tokens = instr.Split(new[] { ' ', '\t', '\r', '\n' },
+                StringSplitOptions.RemoveEmptyEntries);
+            foreach (var tok in tokens)
+            {
+                if (tok.Equals("NUMPAGES", StringComparison.OrdinalIgnoreCase)) hasNumPages = true;
+                else if (tok.Equals("PAGE", StringComparison.OrdinalIgnoreCase)) hasPage = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Conditionally rewrite the first digit-only run into a dynamic page-number
+    /// / total-pages span — but ONLY for the field types the source part really
+    /// carries (<paramref name="hasPage"/> / <paramref name="hasNumPages"/>).
+    /// When neither flag is set the HTML is returned untouched so literal header
+    /// numbers survive verbatim.
+    /// </summary>
+    private static string ApplyPageNumFields(string html, bool hasPage, bool hasNumPages)
+    {
+        if (string.IsNullOrEmpty(html) || (!hasPage && !hasNumPages)) return html;
+        var pat = new Regex(@"(<(?:span|p)[^>]*>)\s*\d+\s*(</(?:span|p)>)");
+        if (hasPage)
+            html = pat.Replace(html,
+                "$1<span class=\"page-num-field\"><!--PAGE_NUM--></span>$2", 1);
+        if (hasNumPages)
+            html = pat.Replace(html,
+                "$1<span class=\"num-pages-field\"><!--NUM_PAGES--></span>$2", 1);
+        return html;
+    }
+
+    /// <summary>PAGE/NUMPAGES flags for the FIRST content-bearing header/footer
+    /// part — the same one <see cref="RenderHeaderFooterHtml"/> renders into the
+    /// fallback HTML. Keeps the fallback digit-rewrite gated to real fields.</summary>
+    private (bool page, bool numPages) FirstContentHeaderFooterFlags(bool isHeader)
+    {
+        if (isHeader)
+        {
+            var headerParts = _doc.MainDocumentPart?.HeaderParts;
+            if (headerParts != null)
+                foreach (var hp in headerParts)
+                    if (hp.Header != null && HeaderFooterHasContent(hp.Header))
+                        return HeaderFooterFieldFlags(hp.Header);
+        }
+        else
+        {
+            var footerParts = _doc.MainDocumentPart?.FooterParts;
+            if (footerParts != null)
+                foreach (var fp in footerParts)
+                    if (fp.Footer != null && HeaderFooterHasContent(fp.Footer))
+                        return HeaderFooterFieldFlags(fp.Footer);
+        }
+        return (false, false);
     }
 
     /// <summary>Returns true if the header/footer has any visible content:
@@ -2215,8 +2312,10 @@ public partial class WordHandler
                         listStyleParts += ";list-style-image:none"; // reset inherited picture bullet
                         // Map Word bullet character to CSS list-style-type.
                         // CONSISTENCY(bullet-glyph-map): shared with table-cell
-                        // path and GetCustomListStyleString; null => disc.
-                        var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
+                        // path and GetCustomListStyleString; default disc.
+                        // Symbol-font bullets resolve to the custom glyph string
+                        // so an inline keyword doesn't override the ::marker.
+                        var bulletType = GetUlListStyleTypeCss(numId, ilvl, lvlText);
                         listStyleParts += $";list-style-type:{bulletType}";
                     }
                     var indentStyle = $" style=\"{listStyleParts}\"";
@@ -2497,10 +2596,14 @@ public partial class WordHandler
                     var pTag = HasBlockLevelDrawing(para) ? "div" : "p";
                     sb.Append("<").Append(pTag);
                     sb.Append($" data-path=\"/body/p[{wParaCount}]\"");
-                    // Add CSS class for TOC paragraphs (suppress hyperlink styling, enable dot leaders)
+                    // Add CSS class for TOC paragraphs (suppress hyperlink styling, enable dot leaders).
+                    // Match by resolved style NAME too, not just styleId prefix: WPS / localized
+                    // Word emit numeric styleIds (e.g. "28") whose display name is "toc 1", so a
+                    // styleId-only test silently misses their TOC entries and leaks the Hyperlink
+                    // character-style color. See IsTocParagraphStyle in HtmlPreview.Text.cs.
                     var paraStyleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
                     var classNames = new List<string>();
-                    if (paraStyleId != null && paraStyleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+                    if (IsTocParagraphStyle(paraStyleId, GetStyleName(para)))
                         classNames.Add("toc");
                     // CONSISTENCY(run-special-content): body-path render must
                     // also flag has-ptab so the paragraph becomes a flex
@@ -2517,6 +2620,15 @@ public partial class WordHandler
                     if (classNames.Count > 0)
                         sb.Append($" class=\"{string.Join(" ", classNames)}\"");
                     var pStyle = GetParagraphInlineCss(para);
+                    // A body paragraph that anchors a wrapNone shape positioned
+                    // relative to the column/paragraph (see
+                    // ComputeParagraphAnchorAbsoluteCss) is the position:relative
+                    // containing block for those absolutely positioned shapes —
+                    // mirrors BuildParagraphOpenTag (header/footer path) and the
+                    // table-cell <td> path. Without it the shapes resolve against
+                    // the .page box and lose their per-shape posOffset.
+                    if (ParagraphAnchorsSubParagraphShape(para))
+                        pStyle = string.IsNullOrEmpty(pStyle) ? "position:relative" : pStyle + ";position:relative";
                     if (!string.IsNullOrEmpty(pStyle))
                         sb.Append($" style=\"{pStyle}\"");
                     sb.Append(">");
@@ -2581,8 +2693,23 @@ public partial class WordHandler
     /// #3: per-section header/footer bundle. Missing types fall back to
     /// the default variant at lookup time; missing default returns null
     /// so the legacy fallback can kick in.
+    /// <paramref name="EvenExplicit"/> records that an even-type
+    /// header/footer reference exists for this section even when its
+    /// content is empty (so <see cref="Even"/> stays null). An explicitly
+    /// referenced-but-empty even header means Word renders a BLANK even
+    /// page — it must NOT inherit the odd/default content.
     /// </summary>
-    private record HeaderFooterBundle(string? First, string? Default, string? Even);
+    private record HeaderFooterBundle(
+        string? First, string? Default, string? Even, bool EvenExplicit = false);
+
+    /// <summary>Per-variant PAGE / NUMPAGES presence flags, mirroring the three
+    /// HTML slots in <see cref="HeaderFooterBundle"/>. A slot is set only when
+    /// the corresponding source part actually defines that field, so the
+    /// digit-rewrite is gated and never clobbers literal numbers.</summary>
+    private record HeaderFooterFieldBundle(
+        (bool page, bool numPages) First,
+        (bool page, bool numPages) Default,
+        (bool page, bool numPages) Even);
 
     /// <summary>
     /// #3: walk each section's HeaderReference or FooterReference elements,
@@ -2590,14 +2717,19 @@ public partial class WordHandler
     /// type. Returns a dict keyed by section index.
     /// </summary>
     private Dictionary<int, HeaderFooterBundle> BuildSectionHfBundles(
-        List<SectionProperties> sections, bool isHeader)
+        List<SectionProperties> sections, bool isHeader,
+        out Dictionary<int, HeaderFooterFieldBundle> fieldFlags)
     {
         var result = new Dictionary<int, HeaderFooterBundle>();
+        fieldFlags = new Dictionary<int, HeaderFooterFieldBundle>();
+        var noField = (false, false);
         var mainPart = _doc.MainDocumentPart;
         if (mainPart == null) return result;
         for (int i = 0; i < sections.Count; i++)
         {
             string? first = null, def = null, even = null;
+            bool evenExplicit = false;
+            (bool, bool) firstF = noField, defF = noField, evenF = noField;
             var refs = isHeader
                 ? sections[i].Elements<HeaderReference>().Cast<OpenXmlElement>()
                 : sections[i].Elements<FooterReference>().Cast<OpenXmlElement>();
@@ -2606,7 +2738,24 @@ public partial class WordHandler
                 var rId = @ref.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
                 var typeAttr = @ref.GetAttributes().FirstOrDefault(a => a.LocalName == "type").Value;
                 if (string.IsNullOrEmpty(rId)) continue;
+                // BUG-evenheader: an even-type reference that resolves to a
+                // real part marks the section as explicitly defining its even
+                // header/footer EVEN when the part is empty (no content →
+                // html stays null below). Word renders a blank even page in
+                // that case; the explicit flag suppresses odd/default bleed.
+                if (typeAttr == "even")
+                {
+                    try
+                    {
+                        if (isHeader && mainPart.GetPartById(rId) is HeaderPart ehp && ehp.Header != null)
+                            evenExplicit = true;
+                        else if (!isHeader && mainPart.GetPartById(rId) is FooterPart efp && efp.Footer != null)
+                            evenExplicit = true;
+                    }
+                    catch { /* part missing; not explicit */ }
+                }
                 string? html = null;
+                (bool, bool) flags = noField;
                 try
                 {
                     if (isHeader && mainPart.GetPartById(rId) is HeaderPart hp && hp.Header != null
@@ -2626,6 +2775,7 @@ public partial class WordHandler
                         sb.Append(bodySb);
                         sb.Append("</div>");
                         html = sb.ToString();
+                        flags = HeaderFooterFieldFlags(hp.Header);
                     }
                     else if (!isHeader && mainPart.GetPartById(rId) is FooterPart fp && fp.Footer != null
                         && HeaderFooterHasContent(fp.Footer))
@@ -2642,18 +2792,20 @@ public partial class WordHandler
                         sb.Append(bodySb);
                         sb.Append("</div>");
                         html = sb.ToString();
+                        flags = HeaderFooterFieldFlags(fp.Footer);
                     }
                 }
                 catch { /* part missing; skip */ }
                 if (html == null) continue;
                 switch (typeAttr)
                 {
-                    case "first": first = html; break;
-                    case "even":  even = html; break;
-                    default:      def = html; break;
+                    case "first": first = html; firstF = flags; break;
+                    case "even":  even = html; evenF = flags; break;
+                    default:      def = html; defF = flags; break;
                 }
             }
-            result[i] = new HeaderFooterBundle(first, def, even);
+            result[i] = new HeaderFooterBundle(first, def, even, evenExplicit);
+            fieldFlags[i] = new HeaderFooterFieldBundle(firstF, defF, evenF);
         }
         // ECMA-376 §17.10.1: a section that does not define its own
         // header/footer reference of a given type inherits. In practice
@@ -2665,19 +2817,40 @@ public partial class WordHandler
         {
             var prev = result[i - 1];
             var cur = result[i];
+            // Inherit the field flags alongside the HTML they describe: when a
+            // slot's HTML is inherited from a neighbour, its PAGE/NUMPAGES flags
+            // must come from the same neighbour, not stay at this section's
+            // (empty) default.
+            var prevF = fieldFlags[i - 1];
+            var curF = fieldFlags[i];
             result[i] = new HeaderFooterBundle(
                 cur.First ?? prev.First,
                 cur.Default ?? prev.Default,
-                cur.Even ?? prev.Even);
+                cur.Even ?? prev.Even,
+                // A section with no even definition of its own (neither content
+                // nor an explicit empty reference) inherits the neighbour's
+                // explicit-even flag along with its Even html.
+                cur.EvenExplicit || (cur.Even == null && prev.EvenExplicit));
+            fieldFlags[i] = new HeaderFooterFieldBundle(
+                cur.First != null ? curF.First : prevF.First,
+                cur.Default != null ? curF.Default : prevF.Default,
+                cur.Even != null ? curF.Even : prevF.Even);
         }
         for (int i = sections.Count - 2; i >= 0; i--)
         {
             var next = result[i + 1];
             var cur = result[i];
+            var nextF = fieldFlags[i + 1];
+            var curF = fieldFlags[i];
             result[i] = new HeaderFooterBundle(
                 cur.First ?? next.First,
                 cur.Default ?? next.Default,
-                cur.Even ?? next.Even);
+                cur.Even ?? next.Even,
+                cur.EvenExplicit || (cur.Even == null && next.EvenExplicit));
+            fieldFlags[i] = new HeaderFooterFieldBundle(
+                cur.First != null ? curF.First : nextF.First,
+                cur.Default != null ? curF.Default : nextF.Default,
+                cur.Even != null ? curF.Even : nextF.Even);
         }
         return result;
     }
@@ -2703,9 +2876,49 @@ public partial class WordHandler
         // would show the wrong content.
         if (isFirstPageOfSection && sectHasTitlePg)
             return bundle.First ?? string.Empty;
-        if (evenAndOddGlobal && pageIsEven && bundle.Even != null)
-            return bundle.Even;
+        if (evenAndOddGlobal && pageIsEven)
+        {
+            if (bundle.Even != null) return bundle.Even;
+            // Even header/footer explicitly referenced but empty → Word
+            // renders a BLANK even page. Do NOT fall through to Default,
+            // which would bleed the odd-page content onto even pages.
+            if (bundle.EvenExplicit) return string.Empty;
+        }
         return bundle.Default ?? fallbackHtml;
+    }
+
+    /// <summary>PAGE/NUMPAGES flags for the variant that
+    /// <see cref="PickHeaderFooter"/> would return on the same page — used to
+    /// gate the digit-rewrite to parts that truly carry the field.
+    /// <paramref name="fallbackFlags"/> applies when the section has no bundle
+    /// (mirroring the fallbackHtml return).</summary>
+    private static (bool page, bool numPages) PickHeaderFooterFlags(
+        Dictionary<int, HeaderFooterBundle> htmlBundles,
+        Dictionary<int, HeaderFooterFieldBundle> flagBundles,
+        List<SectionProperties> sections,
+        int sectionIdx,
+        bool isFirstPageOfSection,
+        bool pageIsEven,
+        bool evenAndOddGlobal,
+        (bool page, bool numPages) fallbackFlags)
+    {
+        if (!flagBundles.TryGetValue(sectionIdx, out var flags)
+            || !htmlBundles.TryGetValue(sectionIdx, out var html))
+            return fallbackFlags;
+        var sectHasTitlePg = sectionIdx >= 0 && sectionIdx < sections.Count
+            && sections[sectionIdx].GetFirstChild<TitlePage>() != null;
+        if (isFirstPageOfSection && sectHasTitlePg)
+            return flags.First;
+        if (evenAndOddGlobal && pageIsEven)
+        {
+            if (html.Even != null) return flags.Even;
+            // Explicit-but-empty even page renders blank (see PickHeaderFooter)
+            // → no field carrier, mirror the empty-string return with no flags.
+            if (html.EvenExplicit) return (false, false);
+        }
+        // bundle.Default ?? fallbackHtml — when Default html is absent the
+        // fallback HTML is used, so the fallback's flags apply too.
+        return html.Default != null ? flags.Default : fallbackFlags;
     }
 
     /// <summary>

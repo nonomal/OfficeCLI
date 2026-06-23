@@ -6,7 +6,7 @@
 
 Open-source. Single binary. No Office installation. No dependencies. Works everywhere.
 
-**Built-in agent-friendly rendering engine** — agents can *see* what they create, no Office required. Render `.docx` / `.xlsx` / `.pptx` to HTML or PNG, closing the *render → look → fix* loop anywhere the binary runs.
+**OfficeCLI's built-in HTML rendering engine reproduces documents with high fidelity — and that's what gives AI eyes.** It renders `.docx` / `.xlsx` / `.pptx` to HTML or PNG, closing the *render → look → fix* loop.
 
 [![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -241,9 +241,9 @@ Updates are checked automatically in the background. Disable with `officecli con
 
 OfficeCLI is self-contained. The capabilities below ship inside the binary — **no Office required**.
 
-#### Rendering engine
+#### Rendering engine — high-fidelity, built-in
 
-A from-scratch agent-friendly rendering engine ships in the binary itself, covering shapes, charts (trendlines, error bars, waterfall, candlestick, sparklines), equations (OMML → MathJax-compatible), 3D `.glb` models via Three.js, morph transitions, slide zoom, and shape effects. Per-page PNG screenshots are produced by piping the rendered HTML through a headless browser. Three modes:
+OfficeCLI's keystone: a from-scratch, high-fidelity HTML rendering engine that lets an AI agent *see* the rendered document instead of guessing from the DOM. It covers shapes, charts (trendlines, error bars, waterfall, candlestick, sparklines), equations (OMML → MathJax-compatible), 3D `.glb` models via Three.js, morph transitions, slide zoom, and shape effects. Per-page PNG screenshots are produced by piping the rendered HTML through a headless browser. Three modes:
 
 - **`view html`** — standalone HTML file, assets inlined. Open in any browser.
 - **`view screenshot`** — per-page PNG, ready for multimodal agents to read.

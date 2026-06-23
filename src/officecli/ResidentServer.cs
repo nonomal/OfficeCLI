@@ -1217,15 +1217,30 @@ public class ResidentServer : IDisposable
                     exportW = sw;
                     exportH = sh == 1200 ? Math.Max(1, (int)Math.Round(sw * (double)nativeH / nativeW)) : sh;
                 }
-                if (renderMode != "html" && gridCols == 0 && OperatingSystem.IsWindows())
+                if (renderMode != "html" && OperatingSystem.IsWindows())
                 {
-                    var ps = pStart ?? 1; var pe = pEnd ?? ps;
                     // A read-only handler holds only read access with FileShare.ReadWrite,
                     // so the app can open the file for read concurrently — no dispose
                     // needed. An editable handler holds a write handle that blocks the
                     // app, so release it first (Dispose flushes pending edits) and reopen.
+                    // Grid cell size + slide count are resolved BEFORE any dispose so the
+                    // count read doesn't touch a disposed handler.
+                    var ps = pStart ?? 1;
+                    int gGap = 12, gPad = 12, gCellW = 0, gCellH = 0, gEnd = 0;
+                    if (gridCols > 0)
+                    {
+                        gCellW = Math.Max(1, (int)Math.Round((sw - 2 * gPad - (gridCols - 1) * gGap) / (double)gridCols));
+                        gCellH = Math.Max(1, (int)Math.Round(gCellW * (double)nativeH / nativeW));
+                        gEnd = pEnd ?? pptShotHandler.GetSlideCount();
+                    }
                     if (_editable) _handler.Dispose();
-                    try { directPng = OfficeCli.Core.PowerPointPngBackend.Render(_filePath, ps, pe, exportW, exportH); } catch { directPng = null; }
+                    try
+                    {
+                        directPng = gridCols > 0
+                            ? OfficeCli.Core.PowerPointPngBackend.RenderGrid(_filePath, ps, gEnd, gCellW, gCellH, gridCols, gGap, gPad)
+                            : OfficeCli.Core.PowerPointPngBackend.Render(_filePath, ps, pEnd ?? ps, exportW, exportH);
+                    }
+                    catch { directPng = null; }
                     if (_editable)
                     {
                         _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);

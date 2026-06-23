@@ -294,9 +294,22 @@ public static class McpServer
                 exportW = width;
                 exportH = height == 1200 ? Math.Max(1, (int)Math.Round(width * (double)nativeH / nativeW)) : height;
             }
-            if (renderMode != "html" && grid == 0 && OperatingSystem.IsWindows())
+            if (renderMode != "html" && OperatingSystem.IsWindows())
             {
-                try { directPng = OfficeCli.Core.PowerPointPngBackend.Render(file, pStart, pEnd, exportW, exportH); }
+                try
+                {
+                    if (grid > 0)
+                    {
+                        const int gap = 12, pad = 12;
+                        int cellW = Math.Max(1, (int)Math.Round((width - 2 * pad - (grid - 1) * gap) / (double)grid));
+                        int cellH = Math.Max(1, (int)Math.Round(cellW * (double)nativeH / nativeW));
+                        directPng = OfficeCli.Core.PowerPointPngBackend.RenderGrid(file, pStart, end ?? ppt.GetSlideCount(), cellW, cellH, grid, gap, pad);
+                    }
+                    else
+                    {
+                        directPng = OfficeCli.Core.PowerPointPngBackend.Render(file, pStart, pEnd, exportW, exportH);
+                    }
+                }
                 catch { directPng = null; }
             }
             if (renderMode == "native" && directPng == null)

@@ -110,9 +110,20 @@ public partial class WordHandler
 
         // BUG-R6B(BUG1): empty text -> empty paragraph (no run); non-empty ->
         // a run carrying the text. Both are valid OOXML comment bodies.
-        var commentBody = string.IsNullOrEmpty(commentText)
-            ? new Paragraph()
-            : new Paragraph(new Run(new Text(commentText) { Space = SpaceProcessingModeValues.Preserve }));
+        // BUG-DUMP-NOTE-TAB: build the seed run via AppendTextWithBreaks so a tab /
+        // newline in the comment text becomes a structural <w:tab/> / <w:br/> rather
+        // than a literal U+0009/U+000A glyph (mirrors `add r` and AddFootnote).
+        Paragraph commentBody;
+        if (string.IsNullOrEmpty(commentText))
+            commentBody = new Paragraph();
+        else
+        {
+            var cmtRun = new Run();
+            AppendTextWithBreaks(cmtRun, commentText);
+            // BUG-DUMP-NOTE-DEL: honor track-change attribution on the comment seed
+            // run too (no-op when absent), mirroring the footnote/endnote seed.
+            commentBody = new Paragraph(ApplyNoteSeedRevision(cmtRun, properties));
+        }
         // BUG-DUMP-R40-2: a Word-authored comment body opens with the comment
         // reference mark run — <w:r><w:rPr><w:rStyle w:val="CommentReference"/>
         // </w:rPr><w:annotationRef/></w:r>. The dump emitter rides this run on
@@ -1143,6 +1154,12 @@ public partial class WordHandler
                      // list, so it was dropped and the line re-snapped → reflow.
                      // ApplyRunFormatting gained a snapToGrid case (BUG-15).
                      "snapToGrid",
+                     // BUG-DUMP-RPR-CONTAINER: a hyperlink run can be RTL
+                     // (Arabic/Hebrew link text) and/or carry a CJK emphasis mark
+                     // (<w:em>); both were absent from this list and dropped on
+                     // round-trip. ApplyRunFormatting handles direction/rtl, and now
+                     // em (added alongside this fix).
+                     "direction", "rtl", "em", "emphasisMark",
                  })
         {
             if (properties.TryGetValue(hlPassKey, out var hlPassVal))
@@ -1516,12 +1533,15 @@ public partial class WordHandler
             "font.hint",
         };
         bool hasFieldFontSlot = fieldFontSlotKeys.Any(k => properties.ContainsKey(k));
+        // BUG-DUMP-RPR-CONTAINER: the fuller rPr vocabulary a field result run can
+        // carry (caps/kern/em/highlight/rtl/…) — applied via ApplyRunFormatting below.
+        bool hasFieldExtraRpr = WordBatchEmitter.FieldResultExtraRPrKeys.Any(k => properties.ContainsKey(k));
         RunProperties? fieldRProps = null;
         if (properties.TryGetValue("font", out var fFont) || properties.TryGetValue("size", out _) ||
             properties.TryGetValue("bold", out _) || properties.TryGetValue("color", out _) ||
             properties.TryGetValue("italic", out _) || properties.TryGetValue("underline", out _) ||
             properties.TryGetValue("strike", out _) ||
-            hasFieldFontSlot || fieldVertAlign != null)
+            hasFieldFontSlot || fieldVertAlign != null || hasFieldExtraRpr)
         {
             fieldRProps = new RunProperties();
             // CT_RPr schema order: rFonts → b → ... → color → sz
@@ -1567,6 +1587,16 @@ public partial class WordHandler
             // append, so AppendChild keeps it in valid schema position.
             if (fieldVertAlign != null)
                 fieldRProps.AppendChild(new VerticalTextAlignment { Val = fieldVertAlign.Value });
+            // BUG-DUMP-RPR-CONTAINER: apply the fuller rPr vocabulary a field result
+            // run can carry (caps/dstrike/outline/shadow/emboss/vanish/spacing/w/kern/
+            // position/szCs/highlight/em/lang/rtl/snapToGrid) through the same applier
+            // the run/hyperlink paths use, so a single-run formatted field result
+            // round-trips losslessly via the typed path. InsertRunPropInSchemaOrder
+            // (inside ApplyRunFormatting) keeps CT_RPr order regardless of the
+            // AppendChild sequence above.
+            foreach (var extraKey in WordBatchEmitter.FieldResultExtraRPrKeys)
+                if (properties.TryGetValue(extraKey, out var extraVal))
+                    ApplyRunFormatting(fieldRProps, extraKey, extraVal);
         }
 
         // Final emitted-run ordering: begin → instr → [separate → result] → end

@@ -6,7 +6,7 @@
 
 开源免费。单一可执行文件。无需安装 Office。零依赖。全平台运行。
 
-**内置 agent 友好渲染引擎** —— 智能体可以"看见"自己创建的内容，无需 Office。把 `.docx` / `.xlsx` / `.pptx` 渲染为 HTML 或 PNG，"渲染 → 看 → 改" 循环在二进制能跑的任何地方都成立。
+**OfficeCLI 的内置 HTML 渲染引擎，高度还原文档原貌 —— 这正是让 AI 拥有"眼睛"的关键。** 它把 `.docx` / `.xlsx` / `.pptx` 渲染为 HTML 或 PNG，闭合"渲染 → 看 → 改"的循环。
 
 [![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -238,9 +238,9 @@ OfficeCLI 会在后台自动检查更新。通过 `officecli config autoUpdate f
 
 OfficeCLI 是自包含的。下列能力全部内置在二进制中——**无需 Office**。
 
-#### 渲染引擎
+#### 渲染引擎 —— 高保真、内置
 
-从零实现的 agent 友好渲染引擎内置在二进制中，覆盖形状、图表（趋势线、误差线、瀑布、K 线、sparkline）、公式（OMML → MathJax 兼容）、通过 Three.js 渲染的 3D `.glb` 模型、morph 过渡、幻灯片缩放、形状效果。按页 PNG 截图是把渲染出的 HTML 通过无头浏览器截出来的。三种模式：
+OfficeCLI 的基石：一个从零实现、高保真的 HTML 渲染引擎，让 AI 智能体能"看见"渲染后的文档，而不是凭 DOM 瞎猜。它覆盖形状、图表（趋势线、误差线、瀑布、K 线、sparkline）、公式（OMML → MathJax 兼容）、通过 Three.js 渲染的 3D `.glb` 模型、morph 过渡、幻灯片缩放、形状效果。按页 PNG 截图是把渲染出的 HTML 通过无头浏览器截出来的。三种模式：
 
 - **`view html`** —— 独立 HTML 文件，资源内联。任何浏览器打开即可看。
 - **`view screenshot`** —— 按页 PNG，供多模态智能体读图检查。

@@ -223,10 +223,22 @@ static partial class CommandBuilder
                             ? Math.Max(1, (int)Math.Round(screenshotWidth * (double)nativeH / nativeW))
                             : screenshotHeight;
                     }
-                    if (renderMode != "html" && gridCols == 0 && OperatingSystem.IsWindows())
+                    if (renderMode != "html" && OperatingSystem.IsWindows())
                     {
-                        var ps = pStart ?? 1; var pe = pEnd ?? ps;
-                        try { directPng = OfficeCli.Core.PowerPointPngBackend.Render(file.FullName, ps, pe, exportW, exportH); }
+                        try
+                        {
+                            if (gridCols > 0)
+                            {
+                                const int gap = 12, pad = 12;
+                                int cellW = Math.Max(1, (int)Math.Round((screenshotWidth - 2 * pad - (gridCols - 1) * gap) / (double)gridCols));
+                                int cellH = Math.Max(1, (int)Math.Round(cellW * (double)nativeH / nativeW));
+                                directPng = OfficeCli.Core.PowerPointPngBackend.RenderGrid(file.FullName, pStart ?? 1, pEnd ?? pptHandler.GetSlideCount(), cellW, cellH, gridCols, gap, pad);
+                            }
+                            else
+                            {
+                                directPng = OfficeCli.Core.PowerPointPngBackend.Render(file.FullName, pStart ?? 1, pEnd ?? pStart ?? 1, exportW, exportH);
+                            }
+                        }
                         catch { directPng = null; }
                     }
                     if (renderMode == "native" && directPng == null)

@@ -411,6 +411,44 @@ internal static class WordPdfBackend
         finally { Marshal.Release(factory); }
     }
 
+    // Tile equal-size cell PNGs into an N-column grid on a white background
+    // with uniform gap and outer padding (all in pixels). Reuses the same
+    // BGRA decode/encode primitives as Stitch. Cells are placed top-left in
+    // their cell; the last row may be partially filled.
+    internal static byte[] StitchGrid(List<byte[]> cells, int cols, int gap, int pad)
+    {
+        if (cells.Count == 0) throw new InvalidOperationException("no cells to tile");
+        if (cols < 1) cols = 1;
+        var clsid = G_WICFactory_C; var iid = G_WICFactory_I;
+        CoCreateInstance(ref clsid, IntPtr.Zero, 1, ref iid, out var factory);
+        try
+        {
+            var imgs = new List<(byte[] pixels, int w, int h)>();
+            foreach (var b in cells) imgs.Add(DecodePngBgra(factory, b));
+
+            int cellW = imgs.Max(i => i.w);
+            int cellH = imgs.Max(i => i.h);
+            int rows = (imgs.Count + cols - 1) / cols;
+            int W = pad * 2 + cols * cellW + (cols - 1) * gap;
+            int H = pad * 2 + rows * cellH + (rows - 1) * gap;
+            int targetStride = W * 4;
+            var target = new byte[targetStride * H];
+            for (int i = 0; i < target.Length; i++) target[i] = 0xFF;
+            for (int idx = 0; idx < imgs.Count; idx++)
+            {
+                int r = idx / cols, c = idx % cols;
+                int x0 = pad + c * (cellW + gap);
+                int y0 = pad + r * (cellH + gap);
+                var p = imgs[idx];
+                int srcStride = p.w * 4;
+                for (int row = 0; row < p.h; row++)
+                    Array.Copy(p.pixels, row * srcStride, target, (y0 + row) * targetStride + x0 * 4, srcStride);
+            }
+            return EncodeBgraToPng(factory, target, W, H);
+        }
+        finally { Marshal.Release(factory); }
+    }
+
     static string DocxToPdf(string docx)
     {
         var pdf = Path.Combine(Path.GetTempPath(), $"_w_{Guid.NewGuid():N}.pdf");

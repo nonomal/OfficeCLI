@@ -496,7 +496,21 @@ public partial class WordHandler
                 if (ReferenceEquals(el, bkStart)) started = true;
                 continue;
             }
-            if (el is BookmarkEnd be && be.Id?.Value == id) return false; // adjacent → empty
+            if (el is BookmarkEnd be && be.Id?.Value == id)
+            {
+                // BUG-DUMP-BMSDT-DUP: the matching end lives INSIDE an SDT (raw-set
+                // verbatim, so it carries the end) while the start is OUTSIDE that
+                // SDT. Treat it as a span so the emitter emits an open=true start
+                // (reusing the id) that pairs with the SDT's verbatim end — instead
+                // of a self-contained `add bookmark` that auto-creates a SECOND,
+                // orphan bookmarkEnd (duplicate marker + REB-validate>SRC). A
+                // genuinely adjacent end (not separated into an SDT) stays empty.
+                var endSdt = be.Ancestors().FirstOrDefault(a => a is SdtBlock || a is SdtRun);
+                if (endSdt != null
+                    && !bkStart.Ancestors().Any(a => ReferenceEquals(a, endSdt)))
+                    return true;
+                return false; // adjacent → empty
+            }
             // Content between Start and End → this is a wrapping span.
             if (el is Run || el is M.OfficeMath || el is M.Paragraph
                 || el is SimpleField || el is Hyperlink)

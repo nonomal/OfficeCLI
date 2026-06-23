@@ -6,7 +6,7 @@
 
 오픈소스. 단일 바이너리. Office 설치 불필요. 의존성 제로. 모든 플랫폼 지원.
 
-**에이전트 친화적 렌더링 엔진 내장** — 에이전트가 자신이 만든 것을 "볼" 수 있고, Office 불필요. `.docx` / `.xlsx` / `.pptx`를 HTML 또는 PNG로 렌더링하며, *렌더링 → 보기 → 수정* 루프는 바이너리가 실행되는 어디서나 닫힙니다.
+**OfficeCLI의 내장 HTML 렌더링 엔진은 문서를 고충실도로 재현합니다 — 이것이 AI에게 "눈"을 줍니다.** `.docx` / `.xlsx` / `.pptx`를 HTML 또는 PNG로 렌더링하여 *렌더링 → 보기 → 수정* 루프를 닫습니다.
 
 [![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -238,9 +238,9 @@ officecli            # 직접 실행으로도 설치 트리거
 
 OfficeCLI는 자체 포함입니다. 아래 기능은 모두 바이너리 내장 — **Office 불필요**.
 
-#### 렌더링 엔진
+#### 렌더링 엔진 — 고충실도, 내장
 
-처음부터 구현한 에이전트 친화적 렌더링 엔진이 바이너리 자체에 포함되어, 도형, 차트 (추세선, 오차 막대, 워터폴, 캔들스틱, 스파크라인), 수식 (OMML → MathJax 호환), Three.js로 렌더링되는 3D `.glb` 모델, 모프 전환, 슬라이드 줌, 도형 효과를 커버합니다. 페이지별 PNG 스크린샷은 렌더링된 HTML을 헤드리스 브라우저로 캡처해 생성됩니다. 세 가지 모드:
+OfficeCLI의 핵심: 처음부터 구현한 고충실도 HTML 렌더링 엔진으로, AI 에이전트가 DOM으로 추측하는 대신 렌더링된 문서를 "볼" 수 있게 합니다. 도형, 차트 (추세선, 오차 막대, 워터폴, 캔들스틱, 스파크라인), 수식 (OMML → MathJax 호환), Three.js로 렌더링되는 3D `.glb` 모델, 모프 전환, 슬라이드 줌, 도형 효과를 커버합니다. 페이지별 PNG 스크린샷은 렌더링된 HTML을 헤드리스 브라우저로 캡처해 생성됩니다. 세 가지 모드:
 
 - **`view html`** — 독립형 HTML 파일, 에셋 인라인. 모든 브라우저에서 열 수 있습니다.
 - **`view screenshot`** — 페이지별 PNG, 멀티모달 에이전트용.

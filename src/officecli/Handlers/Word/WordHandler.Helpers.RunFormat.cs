@@ -1187,6 +1187,29 @@ public partial class WordHandler
                 else
                     InsertRunPropInSchemaOrder(props, new SnapToGrid { Val = OnOffValue.FromBoolean(false) });
                 return true;
+            // BUG-DUMP-RPR-CONTAINER: <w:em> (East-Asian emphasis mark — the dots/
+            // circles painted above/below CJK glyphs). Previously had NO curated
+            // case, so it only round-tripped on the plain-run path via AddRun's
+            // generic schema-reflection fallback; runs in a hyperlink / field-result /
+            // footnote (which apply rPr through this curated applier) silently lost it.
+            case "em":
+            case "emphasismark":
+            case "emphasis":
+            {
+                props.RemoveAllChildren<Emphasis>();
+                EmphasisMarkValues? emv = value?.Trim().ToLowerInvariant() switch
+                {
+                    "dot" => EmphasisMarkValues.Dot,
+                    "comma" => EmphasisMarkValues.Comma,
+                    "circle" => EmphasisMarkValues.Circle,
+                    "underdot" or "under-dot" => EmphasisMarkValues.UnderDot,
+                    "none" or "" or null => EmphasisMarkValues.None,
+                    _ => null
+                };
+                if (emv.HasValue)
+                    InsertRunPropInSchemaOrder(props, new Emphasis { Val = emv.Value });
+                return true;
+            }
             default:
                 return false;
         }

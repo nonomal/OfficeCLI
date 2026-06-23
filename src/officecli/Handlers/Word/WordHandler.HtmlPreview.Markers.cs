@@ -351,9 +351,24 @@ public partial class WordHandler
         if (!fmt.Equals("bullet", StringComparison.OrdinalIgnoreCase)) return null;
         var text = GetLevelText(numId, ilvl);
         if (string.IsNullOrEmpty(text)) return null;
-        // Already covered by the standard disc/circle/square switch in the
-        // main render path — don't override those.
-        if (BulletGlyphToCssKeyword(text!) != null) return null;
+        // A LOW (non-PUA) code point under a SYMBOL font (Wingdings / Symbol /
+        // Webdings) must render through the custom list-style-type string +
+        // ::marker font-family, so the browser draws the symbol font's glyph at
+        // that slot. The disc/circle/square keyword switch maps low ASCII by its
+        // LATIN meaning (e.g. "o" → circle), which is wrong for a symbol font
+        // where the 'o' slot is a checkbox ☐. PUA bullets (≥ U+F000 — U+F0B7 •,
+        // U+F0A7 ▪, U+F0FE ☑) keep the existing mapping: their keyword entries
+        // were authored for exactly these Wingdings/Symbol slots, and routing
+        // them to disc/square is intentional (cleaner marker metrics). So only
+        // skip the keyword early-return for a low-code symbol-font bullet.
+        var symbolLowCode = text![0] < 0xF000
+                            && IsSymbolBulletFont(GetBulletFontName(numId, ilvl));
+        if (!symbolLowCode)
+        {
+            // Already covered by the standard disc/circle/square switch in the
+            // main render path — don't override those.
+            if (BulletGlyphToCssKeyword(text!) != null) return null;
+        }
         // Translate Symbol/Wingdings private-use code points that map to a
         // real Unicode glyph but have no CSS list-style-type keyword (e.g.
         // Symbol 0x2D minus → en-dash bullet). Otherwise the raw PUA char
@@ -362,6 +377,60 @@ public partial class WordHandler
         // Escape ' and \ for CSS string literal.
         var escaped = text!.Replace("\\", "\\\\").Replace("'", "\\'");
         return $"'{escaped} '";
+    }
+
+    /// <summary>
+    /// Resolve a numbering level's bullet font name from its
+    /// NumberingSymbolRunProperties rFonts (ascii → hAnsi → eastAsia), or null
+    /// when the level has no symbol run properties / no font.
+    /// </summary>
+    private string? GetBulletFontName(int numId, int ilvl)
+    {
+        var rf = GetLevel(numId, ilvl)?.NumberingSymbolRunProperties?.GetFirstChild<RunFonts>();
+        return rf?.Ascii?.Value ?? rf?.HighAnsi?.Value ?? rf?.EastAsia?.Value;
+    }
+
+    // CONSISTENCY(bullet-glyph-map): a "symbol font" is one whose bullet glyph
+    // is selected purely by code point in the font's private encoding (the
+    // letter "o" in Wingdings is a checkbox ☐, not the Latin o). When the
+    // level's bullet font is one of these, the lvlText code point must be
+    // rendered with that font on the marker — at ANY code point, high PUA
+    // (U+F0xx) or low ASCII (U+006F) — never downgraded to a disc/circle/square
+    // keyword. Single source of truth for the symbol-font test, shared by
+    // GetCustomListStyleString (CSS ::marker path) and GetUlListStyleTypeCss
+    // (inline body/table list-style-type).
+    private static bool IsSymbolBulletFont(string? fontName)
+    {
+        if (string.IsNullOrEmpty(fontName)) return false;
+        return fontName!.StartsWith("Wingdings", StringComparison.OrdinalIgnoreCase)
+            || fontName.Equals("Symbol", StringComparison.OrdinalIgnoreCase)
+            || fontName.Equals("Webdings", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// CONSISTENCY(bullet-glyph-map): compute the inline <c>list-style-type</c>
+    /// value for a <c>ul</c> bullet, shared by the body and table-cell render
+    /// paths. For a symbol-font bullet (Wingdings/Symbol/Webdings) returns the
+    /// custom string literal (e.g. <c>'o '</c>) so it matches the
+    /// <c>li.marker-N-K</c> CSS class's list-style-type and the browser draws
+    /// the symbol glyph via the ::marker font-family — an inline keyword
+    /// (disc/circle) would otherwise win over the class and drop the symbol.
+    /// For non-symbol fonts returns the disc/circle/square keyword (default
+    /// disc), preserving existing behaviour for ordinary bullets.
+    /// </summary>
+    private string GetUlListStyleTypeCss(int numId, int ilvl, string? lvlText)
+    {
+        // Mirror GetCustomListStyleString: a low-code symbol-font bullet renders
+        // via the custom glyph string so the inline list-style-type matches the
+        // li.marker-N-K class (whose ::marker font-family draws the symbol). PUA
+        // and non-symbol bullets keep the disc/circle/square keyword.
+        if (!string.IsNullOrEmpty(lvlText) && lvlText![0] < 0xF000
+            && IsSymbolBulletFont(GetBulletFontName(numId, ilvl)))
+        {
+            var custom = GetCustomListStyleString(numId, ilvl);
+            if (custom != null) return custom;
+        }
+        return BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
     }
 
     // CONSISTENCY(bullet-glyph-map): single source of truth mapping a Word

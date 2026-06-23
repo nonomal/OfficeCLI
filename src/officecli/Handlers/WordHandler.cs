@@ -674,7 +674,12 @@ public partial class WordHandler : IDocumentHandler
         foreach (var child in tbl.ChildElements)
         {
             if (child is TableRow) { trIdx++; continue; }
-            if (child is BookmarkStart || child is BookmarkEnd)
+            // BUG-DUMP-BLOCK-PERM: <w:permStart>/<w:permEnd> (editable-region markers
+            // in a protected doc) are valid block-level children of <w:tbl>/<w:tr>
+            // just like bookmarks, and were dropped the same way (enumerated only at
+            // paragraph scope) — leaving an unbalanced/unbounded protected range.
+            // Capture them alongside structural bookmarks.
+            if (child is BookmarkStart || child is BookmarkEnd || child is PermStart || child is PermEnd)
             {
                 string rel, action;
                 if (trIdx == 0) { rel = "w:tr[1]"; action = "before"; }       // before first row
@@ -695,8 +700,31 @@ public partial class WordHandler : IDocumentHandler
             int tcIdx = 0;
             foreach (var rc in row.ChildElements)
             {
-                if (rc is TableCell) { tcIdx++; continue; }
-                if (rc is BookmarkStart || rc is BookmarkEnd)
+                if (rc is TableCell cellEl)
+                {
+                    tcIdx++;
+                    // BUG-DUMP-BLOCK-PERM: a <w:permStart>/<w:permEnd> that is a DIRECT
+                    // child of <w:tc> (between the cell's paragraphs, not inside one)
+                    // is also missed by the paragraph walk. Position it by the cell's
+                    // paragraph index.
+                    int cellParas = cellEl.Elements<Paragraph>().Count();
+                    int cpIdx = 0;
+                    foreach (var cc in cellEl.ChildElements)
+                    {
+                        if (cc is Paragraph) { cpIdx++; continue; }
+                        if (cc is PermStart || cc is PermEnd)
+                        {
+                            string crel, caction;
+                            if (cellParas == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]"; caction = "append"; }
+                            else if (cpIdx == 0) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[1]"; caction = "before"; }
+                            else if (cpIdx < cellParas) { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx + 1}]"; caction = "before"; }
+                            else { crel = $"w:tr[{trIdx}]/w:tc[{tcIdx}]/w:p[{cpIdx}]"; caction = "after"; }
+                            result.Add((cc.OuterXml, crel, caction));
+                        }
+                    }
+                    continue;
+                }
+                if (rc is BookmarkStart || rc is BookmarkEnd || rc is PermStart || rc is PermEnd)
                 {
                     string rel, action;
                     if (tcIdx == 0) { rel = $"w:tr[{trIdx}]/w:tc[1]"; action = "before"; }
@@ -769,6 +797,37 @@ public partial class WordHandler : IDocumentHandler
                 else if (pIdx == 0) { rel = "w:p[1]"; action = "before"; }     // before first paragraph
                 else if (pIdx < totalParas) { rel = $"w:p[{pIdx + 1}]"; action = "before"; }
                 else { rel = $"w:p[{pIdx}]"; action = "after"; }               // after last paragraph
+                result.Add((child.OuterXml, rel, action));
+            }
+        }
+        return CoalesceStructuralBookmarks(result);
+    }
+
+    // BUG-DUMP-BLOCK-PERM: <w:permStart>/<w:permEnd> (editable-region markers in a
+    // protected doc) that are DIRECT children of <w:body> — between top-level
+    // paragraphs/tables, not inside a <w:p> — were dropped on round-trip (perm
+    // markers were enumerated only at paragraph scope), silently leaving an
+    // unbalanced/unbounded protected range. Body-direct BOOKMARKS already survive
+    // (EmitBody's bookmark case), so this captures only the perm markers, positioned
+    // by top-level paragraph index, for the caller to replay via raw-set against
+    // //w:body. (Table-direct perm markers ride GetTableStructuralBookmarks.)
+    internal List<(string Xml, string RelXpath, string Action)> GetBodyStructuralPermMarkers()
+    {
+        var result = new List<(string, string, string)>();
+        var body = _doc.MainDocumentPart?.Document?.Body;
+        if (body == null) return result;
+        int totalParas = body.Elements<Paragraph>().Count();
+        int pIdx = 0;
+        foreach (var child in body.ChildElements)
+        {
+            if (child is Paragraph) { pIdx++; continue; }
+            if (child is PermStart || child is PermEnd)
+            {
+                string rel, action;
+                if (totalParas == 0) { rel = "."; action = "append"; }
+                else if (pIdx == 0) { rel = "w:p[1]"; action = "before"; }
+                else if (pIdx < totalParas) { rel = $"w:p[{pIdx + 1}]"; action = "before"; }
+                else { rel = $"w:p[{pIdx}]"; action = "after"; }
                 result.Add((child.OuterXml, rel, action));
             }
         }

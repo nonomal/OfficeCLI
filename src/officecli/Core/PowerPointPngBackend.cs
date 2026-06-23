@@ -50,6 +50,88 @@ internal static class PowerPointPngBackend
         return result;
     }
 
+    /// Render slides [startSlide..endSlide] (1-based; endSlide <= 0 means "to the
+    /// last slide") into an N-column thumbnail grid. Each slide is exported at
+    /// cellW×cellH and tiled with the given gap/padding (pixels) on a white
+    /// background. Cells are scaled down if the composed image would exceed the
+    /// 1920 long-edge ceiling. Returns null on failure.
+    public static byte[]? RenderGrid(string pptx, int startSlide, int endSlide, int cellW, int cellH, int cols, int gap, int pad, int timeoutMs = 120000)
+    {
+        byte[]? result = null;
+        Exception? error = null;
+        var th = new Thread(() =>
+        {
+            var tmp = new List<string>();
+            try { result = RenderGridCore(pptx, startSlide, endSlide, cellW, cellH, cols, gap, pad, timeoutMs, tmp); }
+            catch (Exception e) { error = e; }
+            finally { foreach (var f in tmp) { try { File.Delete(f); } catch { /* ignore */ } } }
+        });
+        th.SetApartmentState(ApartmentState.STA);
+        th.IsBackground = true;
+        th.Start();
+        if (!th.Join(timeoutMs + 30000)) return null;
+        if (error != null) return null;
+        return result;
+    }
+
+    static byte[]? RenderGridCore(string pptx, int startSlide, int endSlide, int cellW, int cellH, int cols, int gap, int pad, int timeoutMs, List<string> tmp)
+    {
+        if (cols < 1) cols = 1;
+        var clsid = G_App; var iid = WordPdfBackend.G_IDispatch;
+        WordPdfBackend.CoCreateInstance(ref clsid, IntPtr.Zero, 4, ref iid, out var app);
+        try
+        {
+            var name = (string?)WordPdfBackend.DispGet(app, "Name") ?? "";
+            if (!name.Contains("PowerPoint", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("app_not_authentic: " + name);
+            try { WordPdfBackend.DispSet(app, "DisplayAlerts", 1); } catch { /* alerts-none; ignore if unsettable */ }
+
+            var presentations = (IntPtr)WordPdfBackend.DispGet(app, "Presentations")!;
+            try
+            {
+                var pres = (IntPtr)WordPdfBackend.DispMethod(presentations, "Open", Path.GetFullPath(pptx), -1, 0, 0)!;
+                try
+                {
+                    var slides = (IntPtr)WordPdfBackend.DispGet(pres, "Slides")!;
+                    try
+                    {
+                        var count = WaitForCount(slides, timeoutMs);
+                        int s = Math.Max(1, startSlide);
+                        int e = Math.Min(count, endSlide <= 0 ? count : endSlide);
+                        if (e < s) return null;
+                        int n = e - s + 1;
+                        int rows = (n + cols - 1) / cols;
+
+                        // Scale cells down so the composed grid stays within the 1920 long-edge ceiling.
+                        int totalW = pad * 2 + cols * cellW + (cols - 1) * gap;
+                        int totalH = pad * 2 + rows * cellH + (rows - 1) * gap;
+                        int m = Math.Max(totalW, totalH);
+                        if (m > 1920) { var sc = 1920.0 / m; cellW = Math.Max(1, (int)(cellW * sc)); cellH = Math.Max(1, (int)(cellH * sc)); }
+
+                        var pngs = new List<byte[]>();
+                        for (int i = s; i <= e; i++)
+                        {
+                            var slide = (IntPtr)WordPdfBackend.DispMethod(slides, "Item", i)!;
+                            try
+                            {
+                                var outFile = Path.Combine(Path.GetTempPath(), $"_pg_{Guid.NewGuid():N}.png");
+                                tmp.Add(outFile);
+                                WordPdfBackend.DispMethod(slide, "Export", outFile, "PNG", cellW, cellH);
+                                pngs.Add(File.ReadAllBytes(outFile));
+                            }
+                            finally { Marshal.Release(slide); }
+                        }
+                        return pngs.Count == 0 ? null : WordPdfBackend.StitchGrid(pngs, cols, gap, pad);
+                    }
+                    finally { Marshal.Release(slides); }
+                }
+                finally { try { WordPdfBackend.DispMethod(pres, "Close"); } catch { } Marshal.Release(pres); }
+            }
+            finally { Marshal.Release(presentations); }
+        }
+        finally { try { WordPdfBackend.DispMethod(app, "Quit"); } catch { } Marshal.Release(app); }
+    }
+
     static byte[]? RenderCore(string pptx, int startSlide, int endSlide, int width, int height, int timeoutMs, List<string> tmp)
     {
         var clsid = G_App; var iid = WordPdfBackend.G_IDispatch;

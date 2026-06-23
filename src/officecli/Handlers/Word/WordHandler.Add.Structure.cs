@@ -315,7 +315,12 @@ public partial class WordHandler
         // carrier that has only @distance round-trips.
         bool hasLnDist = properties.TryGetValue("lineNumberDistance", out var lnDistVal) ||
                          properties.TryGetValue("linenumberdistance", out lnDistVal);
-        if (hasLineNumbers || hasCountBy || hasLnDist)
+        // BUG-DUMP-SECT-LNSTART: lnNumType/@w:start — sibling attr to countBy/
+        // distance; mirror TrySetSectionLayout's lineNumberStart case so a
+        // mid-document carrier round-trips its first-line-number.
+        bool hasLnStart = properties.TryGetValue("lineNumberStart", out var lnStartVal) ||
+                          properties.TryGetValue("linenumberstart", out lnStartVal);
+        if (hasLineNumbers || hasCountBy || hasLnDist || hasLnStart)
         {
             // BUG-DUMP-SECT-LNDIST: only stamp @w:restart when the source
             // actually carried lineNumbers — fabricating restart="continuous" on
@@ -342,6 +347,13 @@ public partial class WordHandler
                     throw new ArgumentException(
                         $"Invalid lineNumberDistance value: '{lnDistVal}'. Must be a non-negative integer (twips).");
                 lnType.Distance = lnDist.ToString();
+            }
+            if (hasLnStart)
+            {
+                if (!int.TryParse(lnStartVal, out var lnStart) || lnStart < 0)
+                    throw new ArgumentException(
+                        $"Invalid lineNumberStart value: '{lnStartVal}'. Must be a non-negative integer.");
+                lnType.Start = (short)lnStart;
             }
             InsertSectPrChildInOrder(sectPr, lnType);
         }
@@ -414,6 +426,56 @@ public partial class WordHandler
                 InsertSectPrChildInOrder(sectPr, pgNum);
             }
             pgNum.Start = startN;
+        }
+
+        // BUG-DUMP-SECT-CHAPNUM: chapter-number page numbering on a mid-document
+        // section carrier. CONSISTENCY(add-set-symmetry): mirror TrySetSectionLayout's
+        // chapStyle/chapSep cases so `add section` round-trips them (the carrier
+        // sectPr readback now forwards sectionBreak.chapStyle/chapSep).
+        if (properties.TryGetValue("chapStyle", out var chapStyleVal)
+            || properties.TryGetValue("chapstyle", out chapStyleVal))
+        {
+            if (!byte.TryParse(chapStyleVal, out var lvl) || lvl < 1 || lvl > 9)
+                throw new ArgumentException(
+                    $"Invalid chapStyle value: '{chapStyleVal}'. Must be 1-9 (heading level).");
+            var pgNum = sectPr.GetFirstChild<PageNumberType>();
+            if (pgNum == null)
+            {
+                pgNum = new PageNumberType();
+                InsertSectPrChildInOrder(sectPr, pgNum);
+            }
+            pgNum.ChapterStyle = lvl;
+        }
+        if (properties.TryGetValue("chapSep", out var chapSepVal)
+            || properties.TryGetValue("chapsep", out chapSepVal))
+        {
+            var pgNum = sectPr.GetFirstChild<PageNumberType>();
+            if (pgNum == null)
+            {
+                pgNum = new PageNumberType();
+                InsertSectPrChildInOrder(sectPr, pgNum);
+            }
+            pgNum.ChapterSeparator = chapSepVal.ToLowerInvariant() switch
+            {
+                "hyphen" or "-" => ChapterSeparatorValues.Hyphen,
+                "period" or "." => ChapterSeparatorValues.Period,
+                "colon" or ":" => ChapterSeparatorValues.Colon,
+                "emdash" or "—" => ChapterSeparatorValues.EmDash,
+                "endash" or "–" => ChapterSeparatorValues.EnDash,
+                _ => throw new ArgumentException(
+                    $"Invalid chapSep value: '{chapSepVal}'. Valid: hyphen, period, colon, emDash, enDash.")
+            };
+        }
+
+        // BUG-DUMP-SECT-NOENDNOTE: <w:noEndnote/> suppresses endnote collection for
+        // the section. CONSISTENCY(add-set-symmetry): mirror TrySetSectionLayout's
+        // noendnote case for a mid-document carrier.
+        if ((properties.TryGetValue("noEndnote", out var noEnVal)
+             || properties.TryGetValue("noendnote", out noEnVal))
+            && IsTruthy(noEnVal))
+        {
+            sectPr.RemoveAllChildren<NoEndnote>();
+            InsertSectPrChildInOrder(sectPr, new NoEndnote());
         }
 
         // BUG-DUMP-SECT-VALIGN: vertical text alignment on the page
@@ -609,6 +671,42 @@ public partial class WordHandler
         return resultPath;
     }
 
+    // BUG-DUMP-NOTE-DEL: a footnote/endnote/comment whose seed content run carries
+    // track-change attribution (revision.type=del|ins on the `add <kind>` op) must
+    // have that run wrapped in <w:del>/<w:ins> — otherwise a tracked DELETION
+    // resurfaces as LIVE accepted text (a silent meaning change), the same way the
+    // body run path wraps via AddRun. Returns the wrapper (or the run unchanged when
+    // no revision attribution). For w:del the run's <w:t> become <w:delText>.
+    // Nested ins⊃del on a note seed is vanishingly rare and not handled here.
+    private OpenXmlElement ApplyNoteSeedRevision(Run run, Dictionary<string, string> properties)
+    {
+        if (!properties.TryGetValue("revision.type", out var rt)
+            || (rt != "del" && rt != "ins"))
+            return run;
+        OpenXmlElement wrapper = rt == "ins" ? new InsertedRun() : new DeletedRun();
+        string? author = properties.GetValueOrDefault("revision.author");
+        if (!string.IsNullOrEmpty(author))
+        {
+            if (wrapper is InsertedRun iw) iw.Author = author;
+            else if (wrapper is DeletedRun dw) dw.Author = author;
+        }
+        if (properties.TryGetValue("revision.date", out var dstr) && !string.IsNullOrEmpty(dstr)
+            && DateTime.TryParse(dstr, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+        {
+            if (wrapper is InsertedRun iw2) iw2.Date = dt;
+            else if (wrapper is DeletedRun dw2) dw2.Date = dt;
+        }
+        var id = properties.GetValueOrDefault("revision.id");
+        if (string.IsNullOrEmpty(id)) id = GenerateRevisionId();
+        if (wrapper is InsertedRun iw3) iw3.Id = id;
+        else if (wrapper is DeletedRun dw3) dw3.Id = id;
+        if (rt == "del")
+            foreach (var t in run.Elements<Text>().ToList())
+                t.Parent?.ReplaceChild(new DeletedText(t.Text ?? "") { Space = t.Space }, t);
+        wrapper.AppendChild(run);
+        return wrapper;
+    }
+
     private string AddFootnote(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)
     {
         if (!properties.TryGetValue("text", out var fnText))
@@ -692,11 +790,20 @@ public partial class WordHandler
                 new Run(fnRefMarkRPr, new Text(fnText) { Space = SpaceProcessingModeValues.Preserve })
             );
         else
+        {
+            // BUG-DUMP-NOTE-TAB: build the content run via AppendTextWithBreaks so a
+            // tab/newline in the seed text becomes a structural <w:tab/> / <w:br/>
+            // (mirrors `add r`), not a literal U+0009/U+000A glyph. A footnote ref
+            // mark is commonly followed by a <w:tab/> separating the number from the
+            // text; the verbatim Text node dropped that structural tab.
+            var fnTextRun = new Run();
+            AppendTextWithBreaks(fnTextRun, fnText);
             fnContentPara = new Paragraph(
                 new ParagraphProperties(new ParagraphStyleId { Val = "FootnoteText" }),
                 new Run(fnRefMarkRPr, new FootnoteReferenceMark()),
-                new Run(new Text(fnText) { Space = SpaceProcessingModeValues.Preserve })
+                ApplyNoteSeedRevision(fnTextRun, properties)   // BUG-DUMP-NOTE-DEL
             );
+        }
         footnote.AppendChild(fnContentPara);
         // i18n: route remaining keys (direction, font.cs, bold.cs, etc.)
         // through the same paragraph + run helpers SetFootnotePath uses.
@@ -729,10 +836,9 @@ public partial class WordHandler
         if (IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows")))
             fnRef.CustomMarkFollows = true;
         var fnRefRun = new Run(fnRefRPr, fnRef);
-        if (properties.TryGetValue("referenceCustomMark", out var fnMark)
-            && !string.IsNullOrEmpty(fnMark))
-            fnRefRun.AppendChild(new Text(fnMark) { Space = SpaceProcessingModeValues.Preserve });
-        InsertIntoParagraph(fnPara, fnRefRun, index);
+        properties.TryGetValue("referenceCustomMark", out var fnMark);
+        var fnToInsert = ApplyNoteRefMarkAndRevision(fnRefRun, fnMark, properties);
+        InsertIntoParagraph(fnPara, fnToInsert, index);
 
         var resultPath = $"/footnote[@footnoteId={fnId}]";
         return resultPath;
@@ -796,11 +902,17 @@ public partial class WordHandler
                 new Run(enRefMarkRPr, new Text(enText) { Space = SpaceProcessingModeValues.Preserve })
             );
         else
+        {
+            // BUG-DUMP-NOTE-TAB: see AddFootnote — split tab/newline in the seed
+            // text into structural <w:tab/> / <w:br/> instead of a literal glyph.
+            var enTextRun = new Run();
+            AppendTextWithBreaks(enTextRun, enText);
             enContentPara = new Paragraph(
                 new ParagraphProperties(new ParagraphStyleId { Val = "EndnoteText" }),
                 new Run(enRefMarkRPr, new EndnoteReferenceMark()),
-                new Run(new Text(enText) { Space = SpaceProcessingModeValues.Preserve })
+                ApplyNoteSeedRevision(enTextRun, properties)   // BUG-DUMP-NOTE-DEL
             );
+        }
         endnote.AppendChild(enContentPara);
         // i18n: route remaining keys through the same helper as footnote.
         var enUnsupported = new List<string>();
@@ -827,13 +939,53 @@ public partial class WordHandler
         if (IsTruthy(properties.GetValueOrDefault("referenceCustomMarkFollows")))
             enRef.CustomMarkFollows = true;
         var enRefRun = new Run(enRefRPr, enRef);
-        if (properties.TryGetValue("referenceCustomMark", out var enMark)
-            && !string.IsNullOrEmpty(enMark))
-            enRefRun.AppendChild(new Text(enMark) { Space = SpaceProcessingModeValues.Preserve });
-        InsertIntoParagraph(enPara, enRefRun, index);
+        properties.TryGetValue("referenceCustomMark", out var enMark);
+        var enToInsert = ApplyNoteRefMarkAndRevision(enRefRun, enMark, properties);
+        InsertIntoParagraph(enPara, enToInsert, index);
 
         var resultPath = $"/endnote[@endnoteId={enId}]";
         return resultPath;
+    }
+
+    // BUG-DUMP-NOTEREF-CUSTOMMARK-DEL: append a note reference's custom mark glyph
+    // and, when the source reference run was a tracked revision (reference.revision.*
+    // — most commonly a <w:del> wrapping a deleted reference), re-wrap the rebuilt
+    // run so the deletion/insertion/move survives instead of resurfacing as live,
+    // accepted content. In a deletion the mark glyph must ride in <w:delText>.
+    private OpenXmlElement ApplyNoteRefMarkAndRevision(
+        Run refRun, string? customMark, Dictionary<string, string> properties)
+    {
+        var revType = properties.GetValueOrDefault("reference.revision.type");
+        bool isDel = string.Equals(revType, "del", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(customMark))
+            refRun.AppendChild(isDel
+                ? new DeletedText(customMark) { Space = SpaceProcessingModeValues.Preserve }
+                : (OpenXmlElement)new Text(customMark) { Space = SpaceProcessingModeValues.Preserve });
+
+        if (string.IsNullOrEmpty(revType))
+            return refRun;
+
+        RunTrackChangeType? wrapper = revType.ToLowerInvariant() switch
+        {
+            "del" => new DeletedRun(),
+            "ins" => new InsertedRun(),
+            "movefrom" => new MoveFromRun(),
+            "moveto" => new MoveToRun(),
+            _ => null
+        };
+        if (wrapper == null)
+            return refRun;
+
+        if (properties.TryGetValue("reference.revision.author", out var au) && !string.IsNullOrEmpty(au))
+            wrapper.Author = au;
+        if (properties.TryGetValue("reference.revision.date", out var dt) && !string.IsNullOrEmpty(dt)
+            && DateTime.TryParse(dt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d))
+            wrapper.Date = d;
+        wrapper.Id = properties.TryGetValue("reference.revision.id", out var rid) && !string.IsNullOrEmpty(rid)
+            ? rid
+            : GenerateRevisionId();
+        wrapper.AppendChild(refRun);
+        return wrapper;
     }
 
     private string AddToc(OpenXmlElement parent, string parentPath, int? index, Dictionary<string, string> properties)

@@ -90,8 +90,15 @@ public partial class WordHandler
             node.Format["type"] = "checkbox";
             var checkedEl = checkBox.GetFirstChild<Checked>();
             var defaultEl = checkBox.GetFirstChild<DefaultCheckBoxFormFieldState>();
+            // `checked` is the DISPLAYED state (current <w:checked>, else the
+            // <w:default>) — always emitted, the stable get/query contract.
+            // BUG-DUMP-FFCHECKBOX-DEFAULT: also surface the <w:default> state
+            // DISTINCTLY so the default isn't lost or conflated with the current
+            // state (the batch readback in Navigation.cs splits these for the
+            // round-trip; here we keep `checked` for API consumers + add `default`).
             var isChecked = checkedEl?.Val?.Value ?? defaultEl?.Val?.Value ?? false;
             node.Format["checked"] = isChecked;
+            if (defaultEl != null) node.Format["default"] = defaultEl.Val?.Value ?? true;
             // R14-bug3: checkBox.size (half-points) drives the visual size
             // of the rendered checkmark; expose it so dump round-trips
             // the value AddFormField defaults to 20.
@@ -456,10 +463,23 @@ public partial class WordHandler
                     checkBox.AppendChild(new FormFieldSize { Val = cbSize });
                 else
                     checkBox.AppendChild(new AutomaticallySizeFormField());
-                var isChecked = ciProps.TryGetValue("checked", out var chkVal) && ParseHelpers.IsTruthy(chkVal);
-                checkBox.AppendChild(new DefaultCheckBoxFormFieldState { Val = new OnOffValue(isChecked) });
-                if (isChecked)
-                    checkBox.AppendChild(new Checked { Val = new OnOffValue(true) });
+                // BUG-DUMP-FFCHECKBOX-DEFAULT: <w:default> (initial/reset state) and
+                // <w:checked> (current state) are independent. On a dump round-trip
+                // the readback supplies them as separate `default` / `checked` props;
+                // an interactive create supplies only `checked` (back-compat: that
+                // also seeds the default). Emit <w:checked> ONLY when the source
+                // actually had a current marker (the `checked` prop is present), so
+                // a checkbox with only a <w:default> doesn't gain a spurious
+                // <w:checked>, and an explicit unchecked (<w:checked w:val="0">)
+                // survives instead of being dropped.
+                bool hasCheckedProp = ciProps.TryGetValue("checked", out var chkVal);
+                bool checkedState = hasCheckedProp && ParseHelpers.IsTruthy(chkVal);
+                bool defaultState = ciProps.TryGetValue("default", out var cbDefVal)
+                    ? ParseHelpers.IsTruthy(cbDefVal)
+                    : checkedState;   // interactive: default follows checked
+                checkBox.AppendChild(new DefaultCheckBoxFormFieldState { Val = new OnOffValue(defaultState) });
+                if (hasCheckedProp)
+                    checkBox.AppendChild(new Checked { Val = new OnOffValue(checkedState) });
                 ffData.AppendChild(checkBox);
                 // BUG-DUMP-FFCHECKBOX-GLYPH: only synthesize the \u2610/\u2611 result glyph
                 // for a typed `add formfield type=checkbox` that gives no explicit
@@ -472,7 +492,7 @@ public partial class WordHandler
                 // ffData-rendered box, shifting form/table layout. Honor the
                 // explicit result instead (the text variable already holds it).
                 if (!ciProps.ContainsKey("text") && !ciProps.ContainsKey("value"))
-                    text = isChecked ? "\u2612" : "\u2610";
+                    text = (hasCheckedProp ? checkedState : defaultState) ? "\u2612" : "\u2610";
                 break;
             }
             case "dropdown" or "drop":
@@ -559,8 +579,15 @@ public partial class WordHandler
                 if (ciProps.TryGetValue("default", out var defaultVal))
                 {
                     textInput.AppendChild(new DefaultTextBoxFormFieldString { Val = defaultVal });
-                    // Use default value as initial text if no explicit text/value provided
-                    if (string.IsNullOrEmpty(text))
+                    // Use the default as the initial result text only for an
+                    // INTERACTIVE create with no text supplied. BUG-DUMP-FORMTEXT-
+                    // DEFAULT: when the dump pinned text="" (textPinnedEmpty — the
+                    // source FORMTEXT had a <w:default> but an EMPTY result), do NOT
+                    // materialize the default as a visible result run; that injected
+                    // body text the source never displayed (a "THESIS TITLE"
+                    // placeholder rendered twice). Mirrors the FORMDROPDOWN/
+                    // FORMCHECKBOX branches, which already guard with !textPinnedEmpty.
+                    if (string.IsNullOrEmpty(text) && !textPinnedEmpty)
                         text = defaultVal;
                 }
                 if (ciProps.TryGetValue("maxlength", out var maxLenStr) && int.TryParse(maxLenStr, out var maxLen))

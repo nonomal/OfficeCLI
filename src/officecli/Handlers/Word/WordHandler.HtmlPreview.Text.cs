@@ -72,6 +72,44 @@ public partial class WordHandler
             && t.Leader?.InnerText is null or "none") == true;
     }
 
+    /// <summary>
+    /// True when any run after <paramref name="run"/> in the paragraph carries
+    /// visible content (text, symbol, drawing, or another tab). Used by the
+    /// aligned-tab band renderer to recognize a trailing underlined tab (a
+    /// full-width heading underline rule): when the underlined tab is the last
+    /// content, the band gets a stretching bottom-border instead of a zero-width
+    /// empty span. A trailing run that holds only the paragraph mark or empty
+    /// rPr is not content.
+    /// </summary>
+    private static bool RunHasContentAfter(Run run, Paragraph para)
+    {
+        bool seenRun = false;
+        foreach (var child in para.ChildElements)
+        {
+            if (!seenRun)
+            {
+                if (ReferenceEquals(child, run)) seenRun = true;
+                continue;
+            }
+            switch (child)
+            {
+                case Run r:
+                    if (r.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text))
+                        || r.Descendants<TabChar>().Any()
+                        || r.Descendants<SymbolChar>().Any()
+                        || r.Descendants<Drawing>().Any()
+                        || r.Descendants<CarriageReturn>().Any()
+                        || r.Descendants<Break>().Any())
+                        return true;
+                    break;
+                case Hyperlink:
+                case DocumentFormat.OpenXml.Math.Paragraph:
+                    return true;
+            }
+        }
+        return false;
+    }
+
     private void RenderParagraphHtml(StringBuilder sb, Paragraph para)
     {
         // Use <div> instead of <p> when paragraph contains block-level elements (text boxes, charts, shapes)
@@ -89,10 +127,18 @@ public partial class WordHandler
     {
         var sb = new StringBuilder();
         sb.Append($"<{tag}");
-        // Add CSS class for TOC paragraphs (suppress hyperlink styling)
+        // Add CSS class for TOC paragraphs (suppress hyperlink styling).
+        // Word does NOT apply the Hyperlink character style's color/underline to
+        // the internal (\l bookmark) links a TOC field generates — entries render
+        // in the toc-N paragraph style's own color (black/auto by default). The
+        // styleId is unreliable as the TOC marker: Latin Word uses "TOC1"/"TOC2",
+        // but WPS / Chinese Word assign numeric ids (e.g. "28") whose display NAME
+        // is "toc 1". Match on the resolved style name too so both shapes get the
+        // .toc suppression class. (Real body hyperlinks — <w:hyperlink r:id=…> in
+        // non-TOC paragraphs — are unaffected and stay blue/underlined.)
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
         var classes = new List<string>();
-        if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+        if (IsTocParagraphStyle(styleId, GetStyleName(para)))
             classes.Add("toc");
         // CONSISTENCY(run-special-content): paragraphs containing w:ptab
         // (header/footer left/center/right alignment) need a flex container
@@ -108,10 +154,38 @@ public partial class WordHandler
         if (classes.Count > 0)
             sb.Append($" class=\"{string.Join(" ", classes)}\"");
         var pStyle = GetParagraphInlineCss(para);
+        // A paragraph that anchors a wrapNone shape positioned relative to the
+        // column/paragraph (e.g. checkbox rectangles floated over a label list)
+        // becomes the position:relative containing block for those absolutely
+        // positioned shapes (see ComputeParagraphAnchorAbsoluteCss). Without this
+        // the shapes resolve against the .page box and the per-checkbox posOffset
+        // is lost — they stack at the cell's left edge as a vertical ladder.
+        if (ParagraphAnchorsSubParagraphShape(para))
+            pStyle = string.IsNullOrEmpty(pStyle) ? "position:relative" : pStyle + ";position:relative";
         if (!string.IsNullOrEmpty(pStyle))
             sb.Append($" style=\"{pStyle}\"");
         sb.Append(">");
         return sb.ToString();
+    }
+
+    // A paragraph belongs to a TOC entry when its style is one of the toc-N
+    // styles. Two authoring shapes exist: Latin Word styleId "TOC1".."TOC9"
+    // (and the legacy "Contents"/"TOA"/"Index" families share the prefix idea
+    // only for TOC), and WPS / localized Word where the styleId is opaque
+    // (numeric) but the style display name is "toc 1".."toc 9" / "目录 1".
+    // Matching either the styleId prefix or the normalized name catches both.
+    private static bool IsTocParagraphStyle(string? styleId, string? styleName)
+    {
+        if (styleId != null && styleId.StartsWith("TOC", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (styleName != null)
+        {
+            // Normalize "toc 1" / "TOC 1" / "toc1" → compare prefix "toc".
+            var trimmed = styleName.TrimStart();
+            if (trimmed.StartsWith("toc", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private void RenderParagraphContentHtml(StringBuilder sb, Paragraph para)
@@ -484,11 +558,43 @@ public partial class WordHandler
                     if (needsSpan) { sb.Append("</span>"); needsSpan = false; }
                     var bandStart = _ctx.CurrentParagraphTabSegmentStart;
                     var bandAlign = _ctx.CurrentAlignedTabAlign;
+                    // Underlined (or otherwise decorated) tab to a stop with no
+                    // trailing content: Word draws the run's text-decoration
+                    // continuously across the tab gap, producing a full-width
+                    // underlined heading separator ("Experience" + an underline
+                    // rule out to the right tab stop). The band model otherwise
+                    // renders the tab run as a zero-width empty span, so the
+                    // underline stops at the word. Detect this case (decoration on
+                    // the tab run AND nothing after this tab) and render the band
+                    // with a stretching bottom-border that spans to the next stop.
+                    bool underlineTab = !string.IsNullOrEmpty(style)
+                        && style.Contains("text-decoration:underline", StringComparison.Ordinal);
+                    bool tabIsLast = underlineTab && !RunHasContentAfter(run, para);
                     if (bandStart >= 0 && bandStart <= sb.Length)
                     {
                         var leading = sb.ToString(bandStart, sb.Length - bandStart);
                         sb.Length = bandStart;
-                        sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+                        if (tabIsLast)
+                        {
+                            // The band grows (flex:1) to fill the row; a solid
+                            // bottom-border on it draws the underline continuously
+                            // from the leading text out to the right edge. Suppress
+                            // the trailing empty band so this band is the only flex
+                            // child and spans the full content width.
+                            sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign};border-bottom:1px solid currentColor\">{leading}</span>");
+                        }
+                        else
+                        {
+                            sb.Append($"<span class=\"atab-band\" style=\"text-align:{bandAlign}\">{leading}</span>");
+                        }
+                    }
+                    if (tabIsLast)
+                    {
+                        // -1 makes the trailing-band logic skip (bandStart >= 0
+                        // guard), so no empty right band steals flex space.
+                        _ctx.CurrentParagraphTabIndex++;
+                        _ctx.CurrentParagraphTabSegmentStart = -1;
+                        continue;
                     }
                     // Arm the alignment for the band this tab opens.
                     var alignedStops = tabs?
@@ -602,7 +708,16 @@ public partial class WordHandler
                         {
                             var leading = sb.ToString(segStart, sb.Length - segStart);
                             sb.Length = segStart;
-                            sb.Append($"<span style=\"display:inline-block;width:{widthPt:0.##}pt;{cssLeader}white-space:nowrap;overflow:hidden;vertical-align:bottom\">{leading}</span>");
+                            // Use min-width (not fixed width): a tab advances the
+                            // pen to AT LEAST the stop position, so when the leading
+                            // text is shorter than the gap the box is exactly widthPt
+                            // (following text lands on the absolute tab stop) and when
+                            // it is longer the box grows to fit and pushes the
+                            // following text past the stop — matching Word. A fixed
+                            // width + overflow:hidden/nowrap instead CLIPPED any
+                            // leading text wider than the gap, silently dropping
+                            // visible body text (Word never clips at a tab stop).
+                            sb.Append($"<span style=\"display:inline-block;min-width:{widthPt:0.##}pt;{cssLeader}vertical-align:bottom\">{leading}</span>");
                         }
                         else
                         {
@@ -737,6 +852,13 @@ public partial class WordHandler
         var dataUri = LoadImageAsDataUri(relId);
         if (dataUri == null) return;
 
+        // Decide web-compatibility from the part's real content type, not the
+        // returned data URI. PartToDataUri degrades undecodable WMF/EMF to an
+        // SVG placeholder data URI; inferring from the URI string would
+        // misclassify that placeholder as a renderable SVG and route the OLE
+        // preview to the <img> branch instead of the sized placeholder block.
+        var rawContentType = LoadImageContentType(relId);
+
         // Display size comes from the companion v:shape style
         // ("width:Xpt;height:Ypt"), falling back to the w:object
         // dxaOrig/dyaOrig twip attributes if the shape style is missing.
@@ -773,12 +895,13 @@ public partial class WordHandler
         var widthPx = widthPt > 0 ? (long)(widthPt * 96 / 72) : 0;
         var heightPx = heightPt > 0 ? (long)(heightPt * 96 / 72) : 0;
 
-        bool isWebCompatible = dataUri.Contains("image/png")
-            || dataUri.Contains("image/jpeg")
-            || dataUri.Contains("image/gif")
-            || dataUri.Contains("image/svg")
-            || dataUri.Contains("image/webp")
-            || dataUri.Contains("image/bmp");
+        var ctForCompat = rawContentType ?? "";
+        bool isWebCompatible = ctForCompat.Contains("image/png")
+            || ctForCompat.Contains("image/jpeg")
+            || ctForCompat.Contains("image/gif")
+            || ctForCompat.Contains("image/svg")
+            || ctForCompat.Contains("image/webp")
+            || ctForCompat.Contains("image/bmp");
 
         if (isWebCompatible)
         {

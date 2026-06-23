@@ -129,6 +129,12 @@ public partial class WordHandler
             }
         }
 
+        // Set when an auto-layout (tblW=auto / no tblW) table carries a complete tblGrid: it then
+        // gets a definite width + table-layout:fixed so its colgroup proportions become hard column
+        // widths (prevents pure-text columns collapsing to 1-char vertical when a list-bearing cell
+        // would otherwise eat the row's width). See the auto-fit comment in the width block below.
+        bool autoGridFixable = false;
+
         // Table width: explicit tblW → use it; pct → percentage; otherwise sum gridCol widths
         var tblW = tblPr?.TableWidth;
         var tblWType = tblW?.Type?.InnerText;
@@ -143,8 +149,16 @@ public partial class WordHandler
         }
         else
         {
-            // No explicit tblW or type=auto: use gridCol sum as max-width (Word auto-fit behavior)
-            // auto layout tables in Word shrink to content; max-width lets browser do the same
+            // No explicit tblW or type=auto: use gridCol sum for the table width (Word auto-fit behavior).
+            // Word auto-fit does NOT let columns grow past their grid widths to the point of starving a
+            // neighbour — it fixes the column widths from the grid and wraps content inside each cell.
+            // A browser auto table-layout, in contrast, distributes width by content min/max, and with the
+            // page-body `overflow-wrap:anywhere` rule the min-content of every text column collapses to one
+            // character. A row whose middle/last cell carries long list content then steals the whole width,
+            // squeezing pure-text columns into a 1-char vertical strip ("P/a/g/e/St/r/u/c…") while long cells
+            // overflow the page edge. When the grid is complete we therefore pin a *definite* width plus
+            // table-layout:fixed (below) so the colgroup proportions become hard column widths and content
+            // wraps inside its column, matching Word. Tables with a partial/absent grid keep content sizing.
             var isFixed = tblPr?.TableLayout?.Type?.InnerText == "fixed";
             var grid = table.GetFirstChild<TableGrid>();
             var gridCols = grid?.Elements<GridColumn>().ToList();
@@ -161,7 +175,11 @@ public partial class WordHandler
                 }
                 if (allValid && totalTwips > 0)
                 {
-                    var prop = isFixed ? "width" : "max-width";
+                    // fixed layout already uses a definite width; auto layout with a complete grid now
+                    // also gets a definite width so the table-layout:fixed pin (below) can resolve the
+                    // colgroup percentages instead of falling back to content distribution.
+                    autoGridFixable = !isFixed;
+                    var prop = (isFixed || autoGridFixable) ? "width" : "max-width";
                     tableStyles.Add($"{prop}:{totalTwips / 20.0:0.##}pt");
                 }
             }
@@ -195,6 +213,20 @@ public partial class WordHandler
             if (bidiRaw is null || !(bidiRaw is "0" or "false" or "off"))
                 tableStyles.Add("direction:rtl");
         }
+
+        // Fixed-layout tables (w:tblLayout type="fixed") encode hard per-column
+        // widths in tblGrid. Word treats those widths as upper bounds and wraps
+        // long cell content within the column. Without CSS table-layout:fixed the
+        // browser treats <col> widths as *minimums* and lets unbreakable content
+        // (esp. long header text) expand the column past its declared width, which
+        // overflows the page right edge. Pin table-layout:fixed so the colgroup
+        // widths become hard caps and over-long cell text wraps inside the column,
+        // matching Word. Only applied when an explicit tblGrid is present (autofit /
+        // no-grid tables keep their content-driven sizing).
+        var isTableFixedLayout = tblPr?.TableLayout?.Type?.InnerText == "fixed";
+        if ((isTableFixedLayout && table.GetFirstChild<TableGrid>()?.Elements<GridColumn>().Any() == true)
+            || autoGridFixable)
+            tableStyles.Add("table-layout:fixed");
 
         var tableClass = tableBordersNone ? "borderless" : "";
         var tableStyleAttr = tableStyles.Count > 0 ? $" style=\"{string.Join(";", tableStyles)}\"" : "";
@@ -350,6 +382,18 @@ public partial class WordHandler
                     continue; // Skip merged continuation cells
                 }
 
+                // A cell that anchors wrapNone shapes positioned relative to the
+                // column/paragraph (e.g. checkbox rectangles floated over a label
+                // list) becomes the position:relative containing block for those
+                // absolutely positioned shapes — applied on the <td> rather than
+                // the inner paragraph div so the label text keeps its normal flow
+                // height (a relative div whose only in-flow content is wrapped
+                // text inside a table cell collapses the row to zero otherwise).
+                // The shapes' left/top posOffsets are measured from the cell's
+                // content box, which coincides with the column/paragraph origin.
+                if (CellAnchorsSubParagraphShape(cell))
+                    cellStyle = string.IsNullOrEmpty(cellStyle) ? "position:relative" : cellStyle + ";position:relative";
+
                 if (!string.IsNullOrEmpty(cellStyle))
                     attrs.Append($" style=\"{cellStyle}\"");
 
@@ -406,7 +450,13 @@ public partial class WordHandler
                     if (cellListTag != null) { sb.Append($"</{cellListTag}>"); cellListTag = null; }
                 }
 
-                foreach (var child in cell.ChildElements)
+                // Walk cell children; block-level SDTs (content controls)
+                // wrap real paragraphs/tables, so recurse into the SDT content
+                // rather than dropping it. Placeholder/data-bound text inside a
+                // text-box layout table (e.g. the newsletter sidebar's
+                // "A Recent Success" block) lives under <w:sdt> here — handling
+                // only Paragraph/Table lost every nested run.
+                void RenderCellChild(OpenXmlElement child)
                 {
                     if (child is Paragraph cellPara)
                     {
@@ -414,7 +464,7 @@ public partial class WordHandler
                         if (listStyle != null)
                         {
                             RenderCellListItem(sb, cellPara, listStyle, ref cellListTag, olState);
-                            continue;
+                            return;
                         }
                         CloseCellList();
                         var text = GetParagraphText(cellPara);
@@ -434,7 +484,15 @@ public partial class WordHandler
                         CloseCellList();
                         RenderTableHtml(sb, nestedTable, depth: depth + 1, olState: olState);
                     }
+                    else if (child is SdtBlock sdt && sdt.SdtContentBlock is { } sdtContent)
+                    {
+                        foreach (var sdtChild in sdtContent.ChildElements)
+                            RenderCellChild(sdtChild);
+                    }
                 }
+
+                foreach (var child in cell.ChildElements)
+                    RenderCellChild(child);
                 CloseCellList();
 
                 if (exactWrap) sb.Append("</div>");
@@ -721,8 +779,10 @@ public partial class WordHandler
         {
             listStyleParts += ";list-style-image:none";
             // CONSISTENCY(bullet-glyph-map): shared with body path and
-            // GetCustomListStyleString; null => disc.
-            var bulletType = BulletGlyphToCssKeyword(lvlText ?? "") ?? "disc";
+            // GetCustomListStyleString; default disc. Symbol-font bullets
+            // resolve to the custom glyph string so an inline keyword doesn't
+            // override the ::marker font-family.
+            var bulletType = GetUlListStyleTypeCss(numId, ilvl, lvlText);
             listStyleParts += $";list-style-type:{bulletType}";
         }
 

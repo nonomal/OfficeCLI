@@ -77,6 +77,54 @@ public partial class WordHandler
         return 1;
     }
 
+    // CONSISTENCY(outline-resolution): build a styleId -> outline level map
+    // from each style's own w:outlineLvl. OOXML §17.3.1.20: w:val is
+    // ST_DecimalNumber 0-8; surface it as a 1-based level (val + 1). Heading
+    // styles carry this, so a paragraph can resolve to an outline level even
+    // when its styleId is numeric or localized and its display name contains
+    // no recognizable "Heading"/"标题" token.
+    private Dictionary<string, int> BuildStyleOutlineLevels()
+    {
+        var map = new Dictionary<string, int>(StringComparer.Ordinal);
+        var styles = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles;
+        if (styles == null) return map;
+        foreach (var s in styles.Elements<Style>())
+        {
+            var id = s.StyleId?.Value;
+            if (string.IsNullOrEmpty(id)) continue;
+            var lvl = s.StyleParagraphProperties?.OutlineLevel?.Val?.Value;
+            if (lvl.HasValue && lvl.Value >= 0 && lvl.Value <= 8)
+                map[id] = lvl.Value + 1;
+        }
+        return map;
+    }
+
+    // Resolve a paragraph's outline level (0 = Title, 1-9 = outline depth),
+    // or -1 when the paragraph is not part of the document outline. Signals,
+    // in priority order, mirror TOC generation so `view outline` and TOC agree:
+    //   1. direct paragraph w:outlineLvl (OOXML §17.3.1.20, val 0-8 -> level 1-9)
+    //   2. the paragraph style's own w:outlineLvl (via BuildStyleOutlineLevels)
+    //   3. style display name (Heading N / 标题 N / Title / Subtitle)
+    private int GetParagraphOutlineLevel(Paragraph para, Dictionary<string, int> styleLevels, out string styleName)
+    {
+        styleName = GetStyleName(para);
+
+        var direct = para.ParagraphProperties?.OutlineLevel?.Val?.Value;
+        if (direct.HasValue && direct.Value >= 0 && direct.Value <= 8)
+            return direct.Value + 1;
+
+        var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId != null && styleLevels.TryGetValue(styleId, out var sl))
+            return sl;
+
+        if (styleName.Contains("Heading") || styleName.Contains("标题")
+            || styleName.StartsWith("heading", StringComparison.OrdinalIgnoreCase))
+            return GetHeadingLevel(styleName);
+        if (styleName == "Title") return 0;
+        if (styleName == "Subtitle") return 1;
+        return -1;
+    }
+
     private static bool IsNormalStyle(string styleName)
     {
         return styleName is "Normal" or "正文" or "Body Text" or "Body" or "a"

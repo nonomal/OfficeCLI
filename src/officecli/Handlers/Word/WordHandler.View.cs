@@ -771,22 +771,21 @@ public partial class WordHandler
         sb.AppendLine();
 
         // Heading structure
+        var styleLevels = BuildStyleOutlineLevels();
         int lineNum = 0;
         foreach (var para in paragraphs)
         {
             lineNum++;
-            var styleName = GetStyleName(para);
+            var level = GetParagraphOutlineLevel(para, styleLevels, out var styleName);
+            if (level < 0) continue;
             var text = GetParagraphText(para);
-
-            if (styleName.Contains("Heading") || styleName.Contains("标题")
-                || styleName.StartsWith("heading", StringComparison.OrdinalIgnoreCase)
-                || styleName == "Title" || styleName == "Subtitle")
-            {
-                var level = GetHeadingLevel(styleName);
-                var indent = level <= 1 ? "" : new string(' ', (level - 1) * 2);
-                var prefix = level == 0 ? "■" : "├──";
-                sb.AppendLine($"{indent}{prefix} [{lineNum}] \"{text}\" ({styleName})");
-            }
+            // Skip outline markers carrying no text (e.g. a trailing empty
+            // paragraph that inherited an outlineLvl) so they don't surface
+            // as phantom headings — consistent with TOC generation.
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            var indent = level <= 1 ? "" : new string(' ', (level - 1) * 2);
+            var prefix = level == 0 ? "■" : "├──";
+            sb.AppendLine($"{indent}{prefix} [{lineNum}] \"{text}\" ({styleName})");
         }
 
         return sb.ToString().TrimEnd();
@@ -993,26 +992,23 @@ public partial class WordHandler
         var footers = GetFooterTexts();
         if (footers.Count > 0) result["footers"] = new JsonArray(footers.Select(f => (JsonNode)JsonValue.Create(f)!).ToArray());
 
+        var styleLevels = BuildStyleOutlineLevels();
         var headingsArray = new JsonArray();
         int lineNum = 0;
         foreach (var para in paragraphs)
         {
             lineNum++;
-            var styleName = GetStyleName(para);
+            var level = GetParagraphOutlineLevel(para, styleLevels, out var styleName);
+            if (level < 0) continue;
             var text = GetParagraphText(para);
-
-            if (styleName.Contains("Heading") || styleName.Contains("标题")
-                || styleName.StartsWith("heading", StringComparison.OrdinalIgnoreCase)
-                || styleName == "Title" || styleName == "Subtitle")
+            if (string.IsNullOrWhiteSpace(text)) continue;
+            headingsArray.Add((JsonNode)new JsonObject
             {
-                headingsArray.Add((JsonNode)new JsonObject
-                {
-                    ["line"] = lineNum,
-                    ["text"] = text,
-                    ["style"] = styleName,
-                    ["level"] = GetHeadingLevel(styleName)
-                });
-            }
+                ["line"] = lineNum,
+                ["text"] = text,
+                ["style"] = styleName,
+                ["level"] = level
+            });
         }
         result["headings"] = headingsArray;
 

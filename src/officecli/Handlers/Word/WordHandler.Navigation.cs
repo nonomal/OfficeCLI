@@ -2474,8 +2474,17 @@ public partial class WordHandler
                         node.Format["ffType"] = "checkbox";
                         var cChecked = cb.GetFirstChild<Checked>();
                         var cDefault = cb.GetFirstChild<DefaultCheckBoxFormFieldState>();
-                        var isChk = cChecked?.Val?.Value ?? cDefault?.Val?.Value ?? false;
-                        node.Format["ffChecked"] = isChk;
+                        // BUG-DUMP-FFCHECKBOX-DEFAULT: <w:checked> (current state)
+                        // and <w:default> (initial/reset state) are independent —
+                        // surface them DISTINCTLY, each only when present (mirror the
+                        // dropdown ffResult/ffDefault split, BUG-DUMP-R27-3). The old
+                        // readback collapsed `checked ?? default` into one ffChecked
+                        // and dropped <w:default>, so a checkbox whose default differed
+                        // from its current state round-tripped with the default flipped
+                        // and the explicit current marker lost or a spurious one added.
+                        // (<w:checked/> with no w:val means checked=true.)
+                        if (cChecked != null) node.Format["ffChecked"] = cChecked.Val?.Value ?? true;
+                        if (cDefault != null) node.Format["ffDefault"] = cDefault.Val?.Value ?? true;
                         var cSize = cb.GetFirstChild<FormFieldSize>()?.Val?.Value;
                         if (!string.IsNullOrEmpty(cSize))
                             node.Format["ffCheckBoxSize"] = cSize;

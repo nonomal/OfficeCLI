@@ -385,8 +385,17 @@ public partial class WordHandler
                     // Open XML SDK v3+: Enum.ToString() returns a
                     // debug string like "NumberFormatValues { }"; use
                     // InnerText to get the XML-level token ("decimalZero").
-                    if (pgNumType?.Format?.InnerText is { Length: > 0 } fmtStr)
-                        displayedFmt = fmtStr;
+                    //
+                    // Page number format does NOT inherit across sections:
+                    // each section's w:fmt is independent, defaulting to
+                    // "decimal" (ECMA-376 §17.6.12). A section with no
+                    // explicit w:fmt (or no pgNumType) must RESET to decimal
+                    // rather than keep the previous section's format —
+                    // otherwise a sect1 lowerRoman leaks into a sect2 body
+                    // that should number 4,5,6 (not iv,v,vi).
+                    displayedFmt = pgNumType?.Format?.InnerText is { Length: > 0 } fmtStr
+                        ? fmtStr
+                        : "decimal";
                 }
                 pgContent = sectRegex.Replace(pgContent, "");
                 pageList[i] = pgContent;
@@ -2684,8 +2693,14 @@ public partial class WordHandler
     /// #3: per-section header/footer bundle. Missing types fall back to
     /// the default variant at lookup time; missing default returns null
     /// so the legacy fallback can kick in.
+    /// <paramref name="EvenExplicit"/> records that an even-type
+    /// header/footer reference exists for this section even when its
+    /// content is empty (so <see cref="Even"/> stays null). An explicitly
+    /// referenced-but-empty even header means Word renders a BLANK even
+    /// page — it must NOT inherit the odd/default content.
     /// </summary>
-    private record HeaderFooterBundle(string? First, string? Default, string? Even);
+    private record HeaderFooterBundle(
+        string? First, string? Default, string? Even, bool EvenExplicit = false);
 
     /// <summary>Per-variant PAGE / NUMPAGES presence flags, mirroring the three
     /// HTML slots in <see cref="HeaderFooterBundle"/>. A slot is set only when
@@ -2713,6 +2728,7 @@ public partial class WordHandler
         for (int i = 0; i < sections.Count; i++)
         {
             string? first = null, def = null, even = null;
+            bool evenExplicit = false;
             (bool, bool) firstF = noField, defF = noField, evenF = noField;
             var refs = isHeader
                 ? sections[i].Elements<HeaderReference>().Cast<OpenXmlElement>()
@@ -2722,6 +2738,22 @@ public partial class WordHandler
                 var rId = @ref.GetAttributes().FirstOrDefault(a => a.LocalName == "id").Value;
                 var typeAttr = @ref.GetAttributes().FirstOrDefault(a => a.LocalName == "type").Value;
                 if (string.IsNullOrEmpty(rId)) continue;
+                // BUG-evenheader: an even-type reference that resolves to a
+                // real part marks the section as explicitly defining its even
+                // header/footer EVEN when the part is empty (no content →
+                // html stays null below). Word renders a blank even page in
+                // that case; the explicit flag suppresses odd/default bleed.
+                if (typeAttr == "even")
+                {
+                    try
+                    {
+                        if (isHeader && mainPart.GetPartById(rId) is HeaderPart ehp && ehp.Header != null)
+                            evenExplicit = true;
+                        else if (!isHeader && mainPart.GetPartById(rId) is FooterPart efp && efp.Footer != null)
+                            evenExplicit = true;
+                    }
+                    catch { /* part missing; not explicit */ }
+                }
                 string? html = null;
                 (bool, bool) flags = noField;
                 try
@@ -2772,7 +2804,7 @@ public partial class WordHandler
                     default:      def = html; defF = flags; break;
                 }
             }
-            result[i] = new HeaderFooterBundle(first, def, even);
+            result[i] = new HeaderFooterBundle(first, def, even, evenExplicit);
             fieldFlags[i] = new HeaderFooterFieldBundle(firstF, defF, evenF);
         }
         // ECMA-376 §17.10.1: a section that does not define its own
@@ -2794,7 +2826,11 @@ public partial class WordHandler
             result[i] = new HeaderFooterBundle(
                 cur.First ?? prev.First,
                 cur.Default ?? prev.Default,
-                cur.Even ?? prev.Even);
+                cur.Even ?? prev.Even,
+                // A section with no even definition of its own (neither content
+                // nor an explicit empty reference) inherits the neighbour's
+                // explicit-even flag along with its Even html.
+                cur.EvenExplicit || (cur.Even == null && prev.EvenExplicit));
             fieldFlags[i] = new HeaderFooterFieldBundle(
                 cur.First != null ? curF.First : prevF.First,
                 cur.Default != null ? curF.Default : prevF.Default,
@@ -2809,7 +2845,8 @@ public partial class WordHandler
             result[i] = new HeaderFooterBundle(
                 cur.First ?? next.First,
                 cur.Default ?? next.Default,
-                cur.Even ?? next.Even);
+                cur.Even ?? next.Even,
+                cur.EvenExplicit || (cur.Even == null && next.EvenExplicit));
             fieldFlags[i] = new HeaderFooterFieldBundle(
                 cur.First != null ? curF.First : nextF.First,
                 cur.Default != null ? curF.Default : nextF.Default,
@@ -2839,8 +2876,14 @@ public partial class WordHandler
         // would show the wrong content.
         if (isFirstPageOfSection && sectHasTitlePg)
             return bundle.First ?? string.Empty;
-        if (evenAndOddGlobal && pageIsEven && bundle.Even != null)
-            return bundle.Even;
+        if (evenAndOddGlobal && pageIsEven)
+        {
+            if (bundle.Even != null) return bundle.Even;
+            // Even header/footer explicitly referenced but empty → Word
+            // renders a BLANK even page. Do NOT fall through to Default,
+            // which would bleed the odd-page content onto even pages.
+            if (bundle.EvenExplicit) return string.Empty;
+        }
         return bundle.Default ?? fallbackHtml;
     }
 
@@ -2866,8 +2909,13 @@ public partial class WordHandler
             && sections[sectionIdx].GetFirstChild<TitlePage>() != null;
         if (isFirstPageOfSection && sectHasTitlePg)
             return flags.First;
-        if (evenAndOddGlobal && pageIsEven && html.Even != null)
-            return flags.Even;
+        if (evenAndOddGlobal && pageIsEven)
+        {
+            if (html.Even != null) return flags.Even;
+            // Explicit-but-empty even page renders blank (see PickHeaderFooter)
+            // → no field carrier, mirror the empty-string return with no flags.
+            if (html.EvenExplicit) return (false, false);
+        }
         // bundle.Default ?? fallbackHtml — when Default html is absent the
         // fallback HTML is used, so the fallback's flags apply too.
         return html.Default != null ? flags.Default : fallbackFlags;

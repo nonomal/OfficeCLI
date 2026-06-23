@@ -464,10 +464,22 @@ public partial class WordHandler
                 // Tag the result run of a PAGE / NUMPAGES field so
                 // ApplyPageNumFields rewrites exactly this run and never a
                 // literal header/footer number.
+                //
+                // Exclude the field's own fldChar runs (begin / separate / end):
+                // the Separate run flips inResult=true and then falls through to
+                // here, but it renders NOTHING — wrapping it produced a stray
+                // empty <span class="page-num-result"></span> BEFORE the real
+                // digit run's wrapper. ApplyPageNumFields' primary Replace(…,1)
+                // then consumed that empty wrapper as the placeholder, and the
+                // leftover-strip pass unwrapped the real digit run, leaking the
+                // cached number as a visible sibling ("Page 11 of 22"). Only the
+                // actual result-content runs (no fldChar of their own) may be
+                // tagged, so exactly one result wrapper per field is emitted.
                 (int kind, bool inResult) pageFieldTop =
                     fieldStack.Count > 0 ? fieldStack.Peek() : (0, false);
                 bool tagPageField = pageFieldTop.inResult
-                    && (pageFieldTop.kind == 1 || pageFieldTop.kind == 2);
+                    && (pageFieldTop.kind == 1 || pageFieldTop.kind == 2)
+                    && runFldChar == null;
                 if (tagPageField)
                     sb.Append(pageFieldTop.kind == 1
                         ? "<span class=\"page-num-result\">"

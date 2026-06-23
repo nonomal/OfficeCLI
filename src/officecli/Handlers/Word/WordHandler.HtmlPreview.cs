@@ -660,34 +660,48 @@ public partial class WordHandler
     var pos=getComputedStyle(el).position;
     return pos==='absolute'||pos==='fixed';
   }
+  // A header child is a full-page background / watermark layer (paint-behind,
+  // must NOT push the body down — R47 full-bleed cover, behind-text watermark)
+  // when it spans ~the whole page. An ordinary header logo (inline OR anchored
+  // out-of-flow) is far smaller and MUST count toward header height so the body
+  // clears it. Distinguishing by SIZE (not merely position:absolute) is the
+  // R120 fix: the previous isOutOfFlow gate skipped EVERY absolute child, so an
+  // anchored/floated header logo reported zero header height and the body
+  // overlapped (then hid) it. We keep excluding the genuine full-page layers.
+  function isFullPageHeaderLayer(c,page){
+    if(c.classList&&(c.classList.contains('vml-watermark-layer')))return true;
+    var pr=page.getBoundingClientRect();
+    var cr=c.getBoundingClientRect();
+    // ≥85% of page width AND height → a full-bleed background/cover layer.
+    return cr.width>=pr.width*0.85 && cr.height>=pr.height*0.85;
+  }
   // Tall-header reflow: Word pushes the body down when the header content is
   // taller than the top margin lets it sit above the body. Our .doc-header is
   // position:absolute (R47, so a full-bleed cover banner can paint behind the
   // body without reserving space), which means normal-flow header content
   // (logo + title, an address block) overlaps the body's first paragraph when
   // it exceeds the top margin. Measure each header's REQUIRED bottom from its
-  // own in-flow children only — full-page background / watermark layers inside
-  // the header are position:absolute (isOutOfFlow) and report ~page-height, so
-  // counting them would push every body to page 2. The full-bleed cover stays
-  // behind the body (no push), exactly the R47 design. When the in-flow header
-  // bottom exceeds the page's current top padding, grow the page's padding-top
-  // so the flex .page-body starts below the header. Idempotent: re-derives the
-  // needed padding from the header geometry each call (base = topMarginPx).
+  // children, excluding only genuine full-page background / watermark layers
+  // (isFullPageHeaderLayer) — NOT every absolute child, so an anchored logo
+  // still counts (R120). The full-bleed cover stays behind the body (no push),
+  // exactly the R47 design. When the header bottom exceeds the page's current
+  // top padding, grow the page's padding-top so the flex .page-body starts
+  // below the header. Geometry is read via getBoundingClientRect relative to
+  // the page top so it is immune to offsetParent quirks. Idempotent: re-derives
+  // the needed padding from the header geometry each call (base = topMarginPx).
   function adjustHeaderPadding(page){
     var hdr=page.querySelector('.doc-header');
     if(!hdr)return;
-    // hdr is absolute at top:headerDistPx; its in-flow content bottom relative
-    // to the page top = headerDistPx + (max in-flow child bottom within hdr).
-    var hdrTop=hdr.offsetTop; // == headerDistPx (absolute top within .page)
+    var pageTop=page.getBoundingClientRect().top;
     var contentBottom=0;
     Array.from(hdr.children).forEach(function(c){
-      if(isOutOfFlow(c))return; // skip full-page bg / watermark layers
-      var b=c.offsetTop+c.offsetHeight; // relative to hdr's padding box
+      if(isFullPageHeaderLayer(c,page))return; // skip full-page bg / watermark
+      var b=c.getBoundingClientRect().bottom-pageTop; // bottom relative to page top
       if(b>contentBottom)contentBottom=b;
     });
     if(contentBottom<=0)return;
     // Small bottom gap so body doesn't butt against the header's last line.
-    var needed=hdrTop+contentBottom+(headerDistPx*0.5);
+    var needed=contentBottom+(headerDistPx*0.5);
     var base=topMarginPx;
     var pad=needed>base?needed:base;
     page.style.paddingTop=pad+'px';
@@ -2047,11 +2061,11 @@ public partial class WordHandler
                 // already handled by the shape renderer; VML is a
                 // parallel deprecated format we must detect by name.
                 var watermark = ExtractVmlWatermark(para);
-                if (watermark is var (watermarkText, watermarkColor))
+                if (watermark is (var watermarkText, var watermarkColor))
                 {
                     var colorCss = string.IsNullOrWhiteSpace(watermarkColor)
                         ? "#d0d0d0"
-                        : (watermarkColor!.StartsWith("#") ? watermarkColor : "#" + watermarkColor);
+                        : NormalizeVmlColorCss(watermarkColor!);
                     // The watermark must be centered over the whole page, so it
                     // is wrapped in a full-page layer (position:absolute;inset:0)
                     // that the caller emits as a direct child of .page — NOT
@@ -2072,6 +2086,18 @@ public partial class WordHandler
                     // .doc-header); fall back to inline if a caller didn't
                     // provide one (keeps older call paths working).
                     (watermarkSb ?? sb).Append(watermarkHtml);
+                    // The same paragraph may carry other in-flow content
+                    // alongside the VML watermark — most notably a DrawingML
+                    // logo (<a:blip r:embed>) in a first-page header that packs
+                    // the brand mark and the "EXAMPLE"/"DRAFT" watermark into a
+                    // single <w:p>. Render that residual content (it walks runs
+                    // via Descendants<Drawing>(), which skips the VML
+                    // <w:pict>/<v:textpath>, so the watermark is not
+                    // double-rendered). Skip the paragraph entirely when the
+                    // watermark is its only content, to avoid emitting a blank
+                    // <p> in the header band (prior behaviour: bare `continue`).
+                    if (ParagraphHasNonWatermarkContent(para))
+                        RenderParagraphHtml(sb, para);
                     continue;
                 }
                 RenderParagraphHtml(sb, para);
@@ -2104,6 +2130,56 @@ public partial class WordHandler
         return null;
     }
 
+    /// <summary>
+    /// Turn a VML color attribute value into a valid CSS color. VML
+    /// <c>fillcolor</c> accepts both hex (<c>#C0C0C0</c>, <c>C0C0C0</c>,
+    /// <c>#ccc</c>) and CSS named colors (<c>silver</c>, <c>red</c>, …).
+    /// Only bare 3/6-digit hex gets a <c>#</c> prepended; named colors pass
+    /// through unchanged. Blindly prepending <c>#</c> turned <c>silver</c>
+    /// into the invalid <c>#silver</c>, which browsers drop → solid black.
+    /// </summary>
+    private static string NormalizeVmlColorCss(string color)
+    {
+        var c = color.Trim();
+        if (c.StartsWith("#")) return c;
+        bool isHex = (c.Length == 3 || c.Length == 6)
+            && c.All(ch => (ch >= '0' && ch <= '9')
+                || (ch >= 'a' && ch <= 'f')
+                || (ch >= 'A' && ch <= 'F'));
+        return isHex ? "#" + c : c;
+    }
+
+    /// <summary>
+    /// True when a paragraph that carries a VML watermark (<c>v:textpath</c>)
+    /// ALSO carries renderable in-flow content — a DrawingML drawing
+    /// (<c>&lt;w:drawing&gt;</c>, e.g. a header logo) or any visible text.
+    /// Used to decide whether to fall through to <c>RenderParagraphHtml</c>
+    /// after emitting the watermark span: a watermark-only paragraph is
+    /// skipped to avoid a blank <c>&lt;p&gt;</c>, while a paragraph mixing the
+    /// watermark with a logo still renders the logo.
+    /// </summary>
+    private static bool ParagraphHasNonWatermarkContent(Paragraph para)
+    {
+        // DrawingML (real picture/shape) — SDK Descendants<Drawing>() does not
+        // see the VML <w:pict>, so any hit here is non-watermark content.
+        if (para.Descendants<Drawing>().Any()) return true;
+        // Any visible text run.
+        if (para.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text))) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// True when a paragraph carries renderable content (visible text or a
+    /// DrawingML drawing). Used by the R116 pre-break multi-column scan to tell
+    /// a content-bearing section (wrap its preceding content in columns) apart
+    /// from an empty leading section-delimiter paragraph (handled after-break).
+    /// </summary>
+    private static bool ParagraphHasRenderableContent(Paragraph para)
+    {
+        if (para.Descendants<Drawing>().Any()) return true;
+        return para.Descendants<Text>().Any(t => !string.IsNullOrEmpty(t.Text));
+    }
+
     // ==================== Body Rendering ====================
 
     private void RenderBodyHtml(StringBuilder sb, Body body)
@@ -2134,6 +2210,65 @@ public partial class WordHandler
         var bodySectPr = body.GetFirstChild<SectionProperties>();
         var bodyColCount = GetSectionColumnCount(bodySectPr);
 
+        // BUG(content-before-multicol-break, R116): an inline `continuous`
+        // multi-column sectPr applies its column layout to the content that
+        // PRECEDES it (the section ending AT that paragraph). The mechanism-2
+        // branch below (and the page-body BuildColBodyStyle) only cover the
+        // opposite shape — the multi-col section's content FOLLOWING an empty
+        // leading delimiter paragraph (vacancy, R85), or a multi-col section
+        // that owns a whole page. When the multi-col section has real content
+        // BEFORE its break AND a fewer-col section follows on the SAME server
+        // page (an IEEE 2-col body whose 1-col References tail shares the page),
+        // the page-body picks the LAST (1-col) section so the whole body renders
+        // single-column, and the after-break div wraps the wrong (later) content
+        // — emitting an empty `<div column-count:2>` while the 2-col body escapes
+        // it. Detect those sections here and wrap exactly their paragraph range
+        // (section start → break paragraph) in a scoped column-count div.
+        //
+        // Discriminator vs the vacancy (after-break) shape: a "pre-break" section
+        // has renderable content in the elements BEFORE its closing sectPr-bearing
+        // paragraph. The vacancy 2-col delimiter paragraph is the ONLY element of
+        // its section (no prior content) → not matched here, still handled by the
+        // existing after-break branch.
+        var preBreakColOpenAt = new Dictionary<int, (int cols, string gap, bool sep)>();
+        var preBreakColCloseAfter = new HashSet<int>();
+        {
+            int sectionStartIdx = 0; // first element index of the current section
+            for (int ei = 0; ei < elements.Count; ei++)
+            {
+                if (elements[ei] is Paragraph bp
+                    && bp.ParagraphProperties?.GetFirstChild<SectionProperties>() is SectionProperties bpSect)
+                {
+                    var bpType = bpSect.GetFirstChild<SectionType>()?.Val?.Value;
+                    var bpCols = GetSectionColumnCount(bpSect);
+                    if (bpType == SectionMarkValues.Continuous && bpCols > 1)
+                    {
+                        // Does this section carry real content BEFORE its break?
+                        bool hasContentBefore = false;
+                        for (int k = sectionStartIdx; k < ei; k++)
+                        {
+                            if (elements[k] is Table) { hasContentBefore = true; break; }
+                            if (elements[k] is Paragraph kp && ParagraphHasRenderableContent(kp))
+                            { hasContentBefore = true; break; }
+                        }
+                        if (hasContentBefore)
+                        {
+                            var sc = bpSect.GetFirstChild<Columns>();
+                            var sep = sc?.Separator?.Value == true;
+                            var space = sc?.Space?.Value;
+                            var gap = int.TryParse(space, out var sp) && sp > 0
+                                ? (sp / 20.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+                                : "36";
+                            preBreakColOpenAt[sectionStartIdx] = (bpCols, gap, sep);
+                            preBreakColCloseAfter.Add(ei);
+                        }
+                    }
+                    sectionStartIdx = ei + 1; // next section starts after this break
+                }
+            }
+        }
+        bool inPreBreakMultiCol = false;
+
         int wParaCount = 0, wTableCount = 0;
         int wBlockCount = 0;
         bool inList = false;
@@ -2158,6 +2293,19 @@ public partial class WordHandler
         for (int ei = 0; ei < elements.Count; ei++)
         {
             var element = elements[ei];
+
+            // BUG(content-before-multicol-break, R116): close the scoped
+            // pre-break multi-column div once its section-closing paragraph
+            // (emitted in the PREVIOUS iteration) has rendered. Mirrors the
+            // section-advance timing below so the break paragraph stays inside
+            // the columns it belongs to.
+            if (inPreBreakMultiCol && ei > 0 && preBreakColCloseAfter.Contains(ei - 1))
+            {
+                sb.AppendLine("</div>");
+                inPreBreakMultiCol = false;
+            }
+            // (open emitted below, AFTER the section-advance PAGE_BREAK so a
+            // section starting on a fresh page keeps the <div> on the new page)
 
             // Emit body-level <w:bookmarkStart> as a navigable <a id="...">.
             // Word places bookmarkStart directly under <w:body> when the
@@ -2259,6 +2407,19 @@ public partial class WordHandler
                 }
             }
 
+            // BUG(content-before-multicol-break, R116): open the scoped pre-break
+            // multi-column div at the START of a section whose content precedes
+            // its multi-col continuous break. Emitted AFTER the section-advance
+            // PAGE_BREAK above so a section starting on a fresh page keeps the
+            // <div> on the new page (never split across the page boundary).
+            if (!inPreBreakMultiCol && !inMultiColumn
+                && preBreakColOpenAt.TryGetValue(ei, out var pbc))
+            {
+                sb.AppendLine($"<div style=\"column-count:{pbc.cols};column-gap:{pbc.gap}pt"
+                    + (pbc.sep ? ";column-rule:1px solid #000" : "") + "\">");
+                inPreBreakMultiCol = true;
+            }
+
             // Emit invisible anchors for watch scroll targeting. #6: a
             // paragraph that exists purely as an m:oMathPara wrapper is
             // emitted as a <div class="equation">, not a <p>. Skip it from
@@ -2311,8 +2472,17 @@ public partial class WordHandler
                 // layout for content FOLLOWING the break in the same page. The
                 // next-sectPr scan returns the body sectPr fallback (usually 1
                 // column), missing the change. Read this sectPr's own w:cols.
+                //
+                // R116 exception: when THIS break's multi-col section is the one
+                // whose CONTENT PRECEDED it (handled by the scoped pre-break div
+                // above), its own w:cols describes the content already wrapped,
+                // NOT the content that follows. Reading it here would re-open a
+                // multi-col div over the next (fewer-col) section. Fall through to
+                // the next-section scan so the following content gets its real
+                // column count.
                 var sectType = inlineSectPr.GetFirstChild<SectionType>()?.Val?.Value;
-                var nextCols = sectType == SectionMarkValues.Continuous
+                var nextCols = (sectType == SectionMarkValues.Continuous
+                                && !preBreakColCloseAfter.Contains(ei))
                     ? GetSectionColumnCount(inlineSectPr)
                     : GetNextSectionColumnCount(elements, ei, bodyColCount);
                 if (nextCols > 1 && !inMultiColumn)
@@ -2861,6 +3031,7 @@ public partial class WordHandler
         if (pendingBlockClose > 0) sb.Append($"<span class=\"we\" data-block=\"{pendingBlockClose}\" style=\"display:none\"></span>");
         if (inList) sb.Append($"<span class=\"we\" data-block=\"{wBlockCount}\" style=\"display:none\"></span>");
         if (inMultiColumn) sb.AppendLine("</div>");
+        if (inPreBreakMultiCol) sb.AppendLine("</div>"); // R116: section ran to doc end
         if (dropCapWrapRemaining > 0) sb.Append("</div>");
         CloseAllLists(sb, listStack, ref currentListType, ref pendingLiClose);
     }

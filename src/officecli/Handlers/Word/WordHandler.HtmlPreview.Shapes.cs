@@ -476,8 +476,44 @@ public partial class WordHandler
         double topBase = inHeaderFooter ? 0 : pg.MarginTopPt;
 
         double leftPt = leftBase;
+        // <wp:align> (center/left/right) is an alternative to <wp:posOffset>:
+        // Word resolves it against the relativeFrom frame's extent. The
+        // wrapSquare/Tight/Through paths above already read this element
+        // (e.LocalName == "align"); the overlay path previously ignored it and
+        // fell back to leftBase (= 0 in header/footer), pinning a page-centered
+        // full-width banner to the left margin and clipping its left edge.
+        // Resolve align → an absolute left coordinate the same way: center →
+        // (frameW - imgW)/2, right → frameW - imgW, left → 0, all measured from
+        // the frame origin, then shifted by the frame's left edge.
+        var hAlign = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "align")?.InnerText;
         var hOffEl = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
-        if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
+        if (hAlign is "center" or "right" or "left")
+        {
+            // Frame width + origin per relativeFrom. page → full page width from
+            // the physical edge (0); margin/column/character → the content
+            // column from the left margin. In a header/footer band the origin is
+            // already inset to the left margin, so frameOrigin is 0 there.
+            double imgWidthPt = widthPx * 72.0 / 96.0; // 96 DPI px → pt
+            double frameWidthPt, frameOriginPt;
+            if (hFrom == DW.HorizontalRelativePositionValues.Page)
+            {
+                frameWidthPt = pg.WidthPt;
+                frameOriginPt = inHeaderFooter ? -pg.MarginLeftPt : 0;
+            }
+            else // margin / column / character / leftMargin / insideMargin / …
+            {
+                frameWidthPt = pg.WidthPt - pg.MarginLeftPt - pg.MarginRightPt;
+                frameOriginPt = leftBase;
+            }
+            double alignedPt = hAlign switch
+            {
+                "center" => (frameWidthPt - imgWidthPt) / 2.0,
+                "right" => frameWidthPt - imgWidthPt,
+                _ => 0, // left
+            };
+            leftPt = frameOriginPt + alignedPt;
+        }
+        else if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
         {
             leftPt = hFrom == DW.HorizontalRelativePositionValues.Page
                 ? hOffEmu / EmuConverter.EmuPerPointF

@@ -2155,7 +2155,23 @@ public static partial class WordBatchEmitter
                           // <w:ind w:left="0" w:firstLine="0"/> re-wrapped on
                           // replay and shifted the page bottom):
                           or "indent" or "firstLineIndent" or "hangingIndent"
-                          or "hanging" or "contextualSpacing" or "spaceBeforeAuto" or "spaceAfterAuto";
+                          or "hanging" or "contextualSpacing" or "spaceBeforeAuto" or "spaceAfterAuto"
+                          // BUG-DUMP-NOTE-NUMPR: a note's first paragraph can be a
+                          // numbered/bulleted list item (direct <w:numPr>). Forward
+                          // numId+numLevel so AddFootnote/AddEndnote
+                          // (WordHandler.Add.Structure.cs) rebuild the numPr. Only
+                          // these two — NOT numFmt/listStyle/start, which would
+                          // trigger ad-hoc numbering-definition creation (BUG-DUMP26-01);
+                          // the existing /numbering raw-set already holds the def.
+                          or "numId" or "numLevel";
+                // Don't forward style-INHERITED numbering (the pStyle, forwarded
+                // separately, supplies it) — promoting inherited->explicit would
+                // duplicate it. numInherited is skipped by FilterEmittableProps, so
+                // read it from the raw first-para Format.
+                if ((k == "numId" || k == "numLevel")
+                    && bodyParas[0].Format.TryGetValue("numInherited", out var noteNi)
+                    && string.Equals(noteNi?.ToString(), "true", StringComparison.OrdinalIgnoreCase))
+                    isParaKey = false;
                 if (isParaKey && !noteProps.ContainsKey(k))
                     noteProps[k] = v.ToString()!;
             }

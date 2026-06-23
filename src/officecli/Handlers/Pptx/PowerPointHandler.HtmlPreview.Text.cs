@@ -77,6 +77,7 @@ public partial class PowerPointHandler
             // these as effective.* — mirror it in the RENDER path.
             OpenXmlElement? inheritedLvlPpr = null;
             Drawing.DefaultRunProperties? inheritedDefRp = null;
+            Drawing.DefaultRunProperties? inheritedCapsRp = null;
             if (placeholderShape != null && placeholderPart != null)
             {
                 int level = para.ParagraphProperties?.Level?.Value ?? 0;
@@ -88,6 +89,15 @@ public partial class PowerPointHandler
                 inheritedLvlPpr = ResolvePlaceholderLevelPpr(placeholderShape, placeholderPart, level, _ => true);
                 inheritedDefRp = ResolvePlaceholderDefRp(placeholderShape, placeholderPart, level,
                     dr => dr.Bold?.HasValue == true || dr.Italic?.HasValue == true);
+                // Caps (cap="all"/"small") is resolved with its OWN predicate, not folded
+                // into the bold/italic lookup: many themes apply all-caps to title/body
+                // placeholders via the master/layout defRPr with NO bold or italic, so the
+                // bold/italic predicate never matched and inherited caps was silently
+                // dropped (PowerPoint renders uppercase; the preview rendered mixed case).
+                // A dedicated lookup also avoids cross-level contamination (caps on one
+                // inheritance level, bold on another).
+                inheritedCapsRp = ResolvePlaceholderDefRp(placeholderShape, placeholderPart, level,
+                    dr => dr.Capital?.HasValue == true);
             }
             // R11-3: style-matrix fontRef schemeClr is the FINAL fallback run color
             // when no explicit run color and no inherited placeholder color is found.
@@ -519,7 +529,7 @@ public partial class PowerPointHandler
                 // Inherited caps (e.g. layout/master title defRPr cap="all"): applied
                 // as a fallback when the run sets no cap of its own, so all-caps title
                 // styles render uppercase (matching PowerPoint).
-                Drawing.TextCapsValues? inhCap = inheritedDefRp?.Capital?.HasValue == true ? inheritedDefRp.Capital.Value : null;
+                Drawing.TextCapsValues? inhCap = inheritedCapsRp?.Capital?.HasValue == true ? inheritedCapsRp.Capital.Value : null;
                 // R63: walk the paragraph's children IN DOCUMENT ORDER so that a
                 // soft line break (<a:br>, Drawing.Break) interleaved between runs
                 // emits its <br> at the right position. Previously runs were all

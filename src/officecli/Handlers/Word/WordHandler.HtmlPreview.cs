@@ -2485,15 +2485,29 @@ public partial class WordHandler
                                 && !preBreakColCloseAfter.Contains(ei))
                     ? GetSectionColumnCount(inlineSectPr)
                     : GetNextSectionColumnCount(elements, ei, bodyColCount);
-                if (nextCols > 1 && !inMultiColumn)
+                // BUG(content-before-multicol-break, R116): GetNextSectionColumnCount
+                // looks PAST this break to the next inline sectPr's w:cols. When the
+                // next section is a "pre-break" multi-col one (its content precedes
+                // its OWN closing break, e.g. an IEEE 2-col body that follows a
+                // nextPage title section), that scan returns the 2-col count and this
+                // branch would open a multi-col div HERE — on the wrong content, and
+                // set inMultiColumn=true so the scoped pre-break div (which actually
+                // wraps that section) is blocked from opening (its open guard is
+                // !inMultiColumn). The pre-break branch owns that section, so skip
+                // this inline open/close entirely when the section START immediately
+                // following this break (ei+1) is a pre-break key.
+                if (!preBreakColOpenAt.ContainsKey(ei + 1))
                 {
-                    sb.AppendLine($"<div style=\"column-count:{nextCols};column-gap:36pt\">");
-                    inMultiColumn = true;
-                }
-                else if (nextCols <= 1 && inMultiColumn)
-                {
-                    sb.AppendLine("</div>");
-                    inMultiColumn = false;
+                    if (nextCols > 1 && !inMultiColumn)
+                    {
+                        sb.AppendLine($"<div style=\"column-count:{nextCols};column-gap:36pt\">");
+                        inMultiColumn = true;
+                    }
+                    else if (nextCols <= 1 && inMultiColumn)
+                    {
+                        sb.AppendLine("</div>");
+                        inMultiColumn = false;
+                    }
                 }
             }
 

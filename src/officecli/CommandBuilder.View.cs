@@ -285,13 +285,11 @@ static partial class CommandBuilder
                 {
                     // Contact-sheet grid: tile every page into an N-column (or auto)
                     // thumbnail grid for a one-shot whole-document overview.
-                    // HTML-only (even on Windows) — a structural overview doesn't
-                    // need real-Word fidelity, and the native PDF path has no
-                    // page-downscale+tile step. Single-page docx screenshots keep
-                    // native-Word-first in the branch below.
-                    // CONSISTENCY(grid-html-only): mirrors pptx's HTML CSS grid;
-                    // pptx additionally has a native grid (PowerPointPngBackend.
-                    // RenderGrid) we deliberately don't replicate for docx.
+                    // Native-first, mirroring pptx and single-page docx: on Windows
+                    // with Word, RenderGrid rasterizes each real-Word page and tiles
+                    // it; elsewhere (or on failure) we fall back to the HTML preview
+                    // grid. Column count + cell size are computed once below and used
+                    // by both paths.
                     const int gap = 12, pad = 12;
                     const int maxDim = 1920; // mirror HtmlScreenshot.CapDim's LLM-image ceiling
                     const int scrollbar = 17;
@@ -329,9 +327,23 @@ static partial class CommandBuilder
                     double over = Math.Max(vpW, vpH) / maxDim;
                     if (over > 1.0) { vpW /= over; cellW /= over; cellH /= over; vpH /= over; }
 
-                    html = wordHandlerGrid.ViewAsHtml(null, docGridCols, (int)Math.Round(cellW));
-                    screenshotWidth = Math.Max(1, (int)Math.Round(vpW));
-                    screenshotHeight = Math.Max(1, (int)Math.Ceiling(vpH));
+                    // Native-first: render each real-Word page and tile (Windows + Word).
+                    if (renderMode != "html" && OperatingSystem.IsWindows())
+                    {
+                        try { directPng = OfficeCli.Core.WordPdfBackend.RenderGrid(file.FullName, $"1-{pageCount}", (int)Math.Round(cellW), (int)Math.Round(cellH), docGridCols, gap, pad); }
+                        catch { directPng = null; }
+                    }
+                    if (renderMode == "native" && directPng == null)
+                        throw new OfficeCli.Core.CliException("--render native requires Windows with Microsoft Word installed.")
+                        { Code = "native_unavailable", Suggestion = "Use --render html or --render auto." };
+                    if (directPng == null)
+                    {
+                        // HTML fallback: layoutGrid tiles in-browser; size the viewport
+                        // to fit the rows so window-size backends don't crop.
+                        html = wordHandlerGrid.ViewAsHtml(null, docGridCols, (int)Math.Round(cellW));
+                        screenshotWidth = Math.Max(1, (int)Math.Round(vpW));
+                        screenshotHeight = Math.Max(1, (int)Math.Ceiling(vpH));
+                    }
                 }
                 else if (handler is OfficeCli.Handlers.WordHandler wordHandler)
                 {

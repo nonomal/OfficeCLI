@@ -1274,9 +1274,8 @@ public class ResidentServer : IDisposable
                 html = excelShotHandler.ViewAsHtml();
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotGrid && gridCols != 0)
             {
-                // Contact-sheet grid (HTML-only, even on Windows) — mirrors
-                // CommandBuilder.View.cs's docx grid branch (incl. -1 = auto). See
-                // the CONSISTENCY(grid-html-only) note there.
+                // Contact-sheet grid — mirrors CommandBuilder.View.cs's docx grid
+                // branch (native-first on Windows, HTML fallback; incl. -1 = auto).
                 const int gGap = 12, gPad = 12, gMaxDim = 1920, gScrollbar = 17;
                 var (gNpW, gNpH) = wordShotGrid.GetPageNativePixels();
                 int gPageCount = 1;
@@ -1298,9 +1297,31 @@ public class ResidentServer : IDisposable
                 double gOver = Math.Max(gVpW, gVpH) / gMaxDim;
                 if (gOver > 1.0) { gVpW /= gOver; gCellW /= gOver; gCellH /= gOver; gVpH /= gOver; }
 
-                html = wordShotGrid.ViewAsHtml(null, gCols, (int)Math.Round(gCellW));
-                sw = Math.Max(1, (int)Math.Round(gVpW));
-                sh = Math.Max(1, (int)Math.Ceiling(gVpH));
+                // Native-first on Windows: release an editable write lock (blocks
+                // Word) before rendering, then reopen — same dance as the single-page
+                // branch below.
+                if (renderMode != "html" && OperatingSystem.IsWindows())
+                {
+                    if (_editable) _handler.Dispose();
+                    try { directPng = OfficeCli.Core.WordPdfBackend.RenderGrid(_filePath, $"1-{gPageCount}", (int)Math.Round(gCellW), (int)Math.Round(gCellH), gCols, gGap, gPad); }
+                    catch { directPng = null; }
+                    if (_editable)
+                    {
+                        _handler = OfficeCli.Handlers.DocumentHandlerFactory.Open(_filePath, _editable);
+                        wordShotGrid = (OfficeCli.Handlers.WordHandler)_handler;
+                    }
+                }
+                if (renderMode == "native" && directPng == null)
+                {
+                    Console.Error.WriteLine("--render native requires Windows with Microsoft Word installed.");
+                    return;
+                }
+                if (directPng == null)
+                {
+                    html = wordShotGrid.ViewAsHtml(null, gCols, (int)Math.Round(gCellW));
+                    sw = Math.Max(1, (int)Math.Round(gVpW));
+                    sh = Math.Max(1, (int)Math.Ceiling(gVpH));
+                }
             }
             else if (_handler is OfficeCli.Handlers.WordHandler wordShotHandler)
             {

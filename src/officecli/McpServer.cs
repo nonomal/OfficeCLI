@@ -331,9 +331,8 @@ public static class McpServer
         else if (handler is Handlers.ExcelHandler ex) html = ex.ViewAsHtml();
         else if (handler is Handlers.WordHandler whGrid && grid != 0)
         {
-            // Contact-sheet grid (HTML-only, incl. -1 = auto) — mirrors
-            // CommandBuilder.View.cs's docx grid branch. See its
-            // CONSISTENCY(grid-html-only) note.
+            // Contact-sheet grid (native-first on Windows, HTML fallback; incl.
+            // -1 = auto) — mirrors CommandBuilder.View.cs's docx grid branch.
             const int gap = 12, pad = 12, maxDim = 1920, scrollbar = 17;
             var (npW, npH) = whGrid.GetPageNativePixels();
             int pageCount = 1;
@@ -355,9 +354,20 @@ public static class McpServer
             double over = Math.Max(vpW, vpH) / maxDim;
             if (over > 1.0) { vpW /= over; cellW /= over; cellH /= over; vpH /= over; }
 
-            html = whGrid.ViewAsHtml(null, cols, (int)Math.Round(cellW));
-            width = Math.Max(1, (int)Math.Round(vpW));
-            height = Math.Max(1, (int)Math.Ceiling(vpH));
+            // Native-first (the read-only MCP handler coexists with Word's open).
+            if (renderMode != "html" && OperatingSystem.IsWindows())
+            {
+                try { directPng = OfficeCli.Core.WordPdfBackend.RenderGrid(file, $"1-{pageCount}", (int)Math.Round(cellW), (int)Math.Round(cellH), cols, gap, pad); }
+                catch { directPng = null; }
+            }
+            if (renderMode == "native" && directPng == null)
+                throw new ArgumentException("render=native requires Windows with Microsoft Word installed.");
+            if (directPng == null)
+            {
+                html = whGrid.ViewAsHtml(null, cols, (int)Math.Round(cellW));
+                width = Math.Max(1, (int)Math.Round(vpW));
+                height = Math.Max(1, (int)Math.Ceiling(vpH));
+            }
         }
         else if (handler is Handlers.WordHandler wh)
         {

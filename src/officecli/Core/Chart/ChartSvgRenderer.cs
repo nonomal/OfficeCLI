@@ -2208,7 +2208,8 @@ internal partial class ChartSvgRenderer
         List<double>? lineWidths, List<string>? lineDashes, bool markersOnly,
         bool showDataLabels, double? axisMin, double? axisMax, double? majorUnit, string? valNumFmt,
         List<bool>? smooth = null, List<TrendlineInfo?>? trendlines = null, List<ErrorBarInfo?>? errorBars = null,
-        List<string?>? markerFillColors = null, List<string?>? markerLineColors = null)
+        List<string?>? markerFillColors = null, List<string?>? markerLineColors = null,
+        string? dataLabelNumFmt = null)
     {
         var scatterSeries = plotArea.Descendants<OpenXmlCompositeElement>()
             .Where(e => e.LocalName == "ser" && e.Parent?.LocalName == "scatterChart").ToList();
@@ -2334,7 +2335,13 @@ internal partial class ChartSvgRenderer
                 sb.AppendLine($"        {RenderMarkerSvg(shape, p.x, p.y, mSize, mFill ?? color, mStroke ?? color)}");
                 if (showDataLabels)
                 {
-                    var vlabel = p.yv % 1 == 0 ? $"{(int)p.yv}" : $"{p.yv:0.#}";
+                    // Honor <c:dLbls><c:numFmt> on the data labels (e.g. "$#,##0");
+                    // fall back to the value-axis numFmt, then the bare shortcut —
+                    // mirrors the line/bubble renderers. Previously hardcoded, so a
+                    // currency/percent data label rendered as a bare number.
+                    var vlabel = !string.IsNullOrEmpty(dataLabelNumFmt) ? FormatAxisValue(p.yv, dataLabelNumFmt)
+                        : !string.IsNullOrEmpty(valNumFmt) ? FormatAxisValue(p.yv, valNumFmt)
+                        : p.yv % 1 == 0 ? $"{(int)p.yv}" : $"{p.yv:0.#}";
                     sb.AppendLine($"        <text class=\"chart-data-label\" x=\"{p.x:0.#}\" y=\"{p.y - 6:0.#}\" fill=\"{ValueColor}\" font-size=\"{DataLabelFontPx}\" text-anchor=\"middle\">{vlabel}</text>");
                 }
             }
@@ -4050,7 +4057,8 @@ internal partial class ChartSvgRenderer
                 info.ScatterMarkersOnly, info.ShowDataLabels,
                 info.AxisMin, info.AxisMax, info.MajorUnit, info.ValNumFmt,
                 info.Smooth, info.Trendlines, info.ErrorBars,
-                info.MarkerFillColors, info.MarkerLineColors);
+                info.MarkerFillColors, info.MarkerLineColors,
+                info.DataLabelsNumFmt);
         }
         else if (chartType.Contains("line") || chartType == "scatter")
         {

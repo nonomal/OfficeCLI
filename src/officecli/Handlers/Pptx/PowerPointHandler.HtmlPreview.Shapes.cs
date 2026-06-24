@@ -30,8 +30,11 @@ public partial class PowerPointHandler
         if (prstGeomEarly?.Preset?.HasValue == true
             && prstGeomEarly.Preset.InnerText == "line")
         {
+            // Forward the shape's text body: a prstGeom="line" sp can carry a <p:txBody>
+            // label (PowerPoint renders it over the line); the connector overlay draws it.
+            // Without this the label was silently dropped.
             RenderConnector(sb, shape.ShapeProperties, themeColors, dataPath, overridePos,
-                style: shape.ShapeStyle, part: part);
+                cxnTextBody: shape.TextBody, style: shape.ShapeStyle, part: part);
             return;
         }
 

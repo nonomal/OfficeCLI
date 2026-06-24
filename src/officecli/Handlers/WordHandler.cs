@@ -803,6 +803,46 @@ public partial class WordHandler : IDocumentHandler
         return CoalesceStructuralBookmarks(result);
     }
 
+    // BUG-DUMP-H97: <w:bookmarkStart>/<w:bookmarkEnd> (and <w:permStart>/<w:permEnd>)
+    // that are DIRECT children of a <w:tc> — between <w:tcPr> and the cell's first
+    // paragraph, or between/after cell paragraphs — were dropped on round-trip: the
+    // cell content walk emits only p/tbl/sdt children, so a cell-level (often
+    // column-span, colFirst/colLast) bookmark slipped through. The canonical source
+    // is Google Docs, which emits cell nav anchors as leading tc-direct-child
+    // bookmarks. Mirrors GetPartRootStructuralBookmarks (header/footer root): return
+    // each marker's verbatim OuterXml (namespace-correct, preserving
+    // colFirst/colLast) + its paragraph-relative position for the caller to raw-set
+    // into the rebuilt cell.
+    internal List<(string Xml, string RelXpath, string Action)> GetCellStructuralBookmarks(string cellSourcePath)
+    {
+        var result = new List<(string, string, string)>();
+        OpenXmlElement? el;
+        try { el = NavigateToElement(ParsePath(cellSourcePath)); }
+        catch { return result; }
+        if (el is not TableCell) return result;
+
+        int totalParas = el.Elements<Paragraph>().Count();
+        int pIdx = 0;
+        foreach (var child in el.ChildElements)
+        {
+            if (child is Paragraph) { pIdx++; continue; }
+            if (child is BookmarkStart || child is BookmarkEnd || child is PermStart || child is PermEnd)
+            {
+                string rel, action;
+                if (totalParas == 0) { rel = "."; action = "append"; }
+                else if (pIdx == 0) { rel = "w:p[1]"; action = "before"; }
+                else if (pIdx < totalParas) { rel = $"w:p[{pIdx + 1}]"; action = "before"; }
+                else { rel = $"w:p[{pIdx}]"; action = "after"; }
+                result.Add((child.OuterXml, rel, action));
+            }
+        }
+        // NB: do NOT coalesce. A coalesced single fragment carrying both
+        // <w:bookmarkStart> and <w:bookmarkEnd> raw-set into a cell triggers a
+        // duplicate bookmarkEnd (bookmark-id processing of the inserted fragment);
+        // emitting each marker as its own raw-set op round-trips 1:1 (verified).
+        return result;
+    }
+
     // BUG-DUMP-BLOCK-PERM: <w:permStart>/<w:permEnd> (editable-region markers in a
     // protected doc) that are DIRECT children of <w:body> — between top-level
     // paragraphs/tables, not inside a <w:p> — were dropped on round-trip (perm

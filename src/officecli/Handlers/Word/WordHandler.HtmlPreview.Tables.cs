@@ -54,6 +54,13 @@ public partial class WordHandler
         // Resolve conditional formatting from table style
         var condFormats = styleId != null ? ResolveTableStyleConditionalFormats(styleId) : null;
 
+        // Resolve the table-style base run properties (<w:style><w:rPr>) — the
+        // whole-table run formatting (e.g. white caps text). Per-cell these are
+        // merged into the run cascade just above docDefaults, with the matching
+        // conditional-format (firstRow/band…) rPr layered on top. See
+        // ResolveEffectiveRunPropertiesCore step 1b.
+        var tableStyleBaseRunProps = styleId != null ? ResolveTableStyleBaseRunProps(styleId) : null;
+
         // Resolve the table-style base cell shading (<w:style><w:tcPr><w:shd>) —
         // the whole-table cell fill. Used as the lowest-priority cell background
         // fallback so a dark-list table's blue fill shows behind its white run
@@ -125,7 +132,7 @@ public partial class WordHandler
             // twips -> pt = w / 20. pct/auto types skipped (dxa is the common case).
             var tblInd = tblPr?.TableIndentation;
             if (tblInd?.Type?.InnerText is null or "dxa"
-                && tblInd?.Width?.Value is int indW && indW > 0)
+                && LenientDxa(tblInd?.Width) is int indW && indW > 0)
                 tableStyles.Add($"margin-left:{indW / 20.0:0.#}pt");
         }
 
@@ -326,6 +333,43 @@ public partial class WordHandler
                 }
             }
 
+            // R126: per-column max single-span dxa tcW. Word lets a cell's explicit
+            // tcW drive its column when tcW > gridCol; under table-layout:fixed the
+            // <col> width pins the cell instead, so a label cell with tcW=810 over a
+            // gridCol=270 column collapses to ~13.5pt (vertical one-char-per-line).
+            // Capture the widest single-span dxa tcW per column to correct the gridCol
+            // below — but ONLY from rows whose total gridSpan equals colCount. Such a
+            // row has exactly one cell per grid column, so cell index reliably maps to
+            // column index AND each cell occupies exactly one column (its tcW is that
+            // column's intended width). Rows that don't cover the grid carry cells that
+            // effectively span multiple columns with no gridSpan element (e.g. a single
+            // tcW=10350 full-width cell, or tcW boundaries that don't align with gridCol
+            // boundaries); attributing their tcW to one column would mis-widen it — that
+            // ambiguous geometry is the deferred R89 class, left on the gridCol path.
+            var dxaMaxByCol = new double?[colCount];
+            foreach (var r in table.Elements<TableRow>())
+            {
+                var rowCells = r.Elements<TableCell>().ToList();
+                int rowSpanTotal = rowCells.Sum(c => { var s = c.TableCellProperties?.GridSpan?.Val?.Value ?? 1; return s < 1 ? 1 : s; });
+                if (rowSpanTotal != colCount) continue; // only full-grid rows map cell→column reliably
+                int ci = 0;
+                foreach (var tc in rowCells)
+                {
+                    if (ci >= colCount) break;
+                    var span = tc.TableCellProperties?.GridSpan?.Val?.Value ?? 1;
+                    if (span < 1) span = 1;
+                    var tcW = tc.TableCellProperties?.TableCellWidth;
+                    if (span == 1 && tcW?.Type?.InnerText == "dxa"
+                        && double.TryParse(tcW.Width?.Value, System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out var dxaVal) && dxaVal > 0
+                        && (dxaMaxByCol[ci] == null || dxaVal > dxaMaxByCol[ci]))
+                    {
+                        dxaMaxByCol[ci] = dxaVal;
+                    }
+                    ci += span;
+                }
+            }
+
             int colIdx = 0;
             foreach (var col in tblGrid.Elements<GridColumn>())
             {
@@ -340,7 +384,14 @@ public partial class WordHandler
                 }
                 else if (w != null && isFixedLayout)
                 {
-                    var pt = double.Parse(w, System.Globalization.CultureInfo.InvariantCulture) / 20.0; // twips to pt
+                    var twips = double.Parse(w, System.Globalization.CultureInfo.InvariantCulture);
+                    // R126: if a single-span cell in this column carries an explicit dxa
+                    // tcW wider than the gridCol, the cell's width drives the column (Word
+                    // behavior). Widen the <col> to that tcW so fixed layout doesn't pin a
+                    // label cell to a too-narrow gridCol and collapse its text vertically.
+                    if (colIdx < colCount && dxaMaxByCol[colIdx] is double dxaW && dxaW > twips)
+                        twips = dxaW;
+                    var pt = twips / 20.0; // twips to pt
                     sb.Append($"<col style=\"width:{pt:0.##}pt\" data-col-twips=\"{w}\">");
                 }
                 else if (w != null && colTotal > 0 && twipsByCol[colIdx] > 0)
@@ -363,7 +414,8 @@ public partial class WordHandler
 
         var rows = table.Elements<TableRow>().ToList();
         var totalRows = rows.Count;
-        var totalCols = tblGrid?.Elements<GridColumn>().Count() ?? rows.FirstOrDefault()?.Elements<TableCell>().Count() ?? 0;
+        var totalCols = tblGrid?.Elements<GridColumn>().Count()
+            ?? (rows.FirstOrDefault() is { } firstRow ? GetRowCellsFlattened(firstRow).Count : 0);
 
         for (int rowIdx = 0; rowIdx < totalRows; rowIdx++)
         {
@@ -395,7 +447,15 @@ public partial class WordHandler
             sb.AppendLine(isHeader ? $"<tr class=\"header-row\"{hdrMarker}{rowDataPathAttr}{trStyle}>" : $"<tr{rowDataPathAttr}{trStyle}>");
 
             int colIdx = 0;
-            foreach (var cell in row.Elements<TableCell>())
+            // Cell-level content controls (<w:sdt> wrapping a <w:tc> as a direct
+            // <w:tr> child — Word's dropdown-bound / placeholder form-field cell
+            // shape) are NOT direct TableCell children of the row, so
+            // Elements<TableCell>() dropped them entirely, leaving the form cell
+            // blank (e.g. the staff-evaluation form's "Click or tap here to
+            // enter text." placeholder cells under <w:showingPlcHdr>). Flatten
+            // through GetRowCellsFlattened so every cell — wrapped or not —
+            // renders, mirroring the Get/Query/dump cell-flatten contract.
+            foreach (var cell in GetRowCellsFlattened(row))
             {
                 var tag = isHeader ? "th" : "td";
                 var condTypes = GetConditionalTypes(tblLook, rowIdx, colIdx, totalRows, totalCols);
@@ -570,9 +630,31 @@ public partial class WordHandler
                     }
                 }
 
+                // Assemble this cell's table-style run-property layers (base rPr
+                // then matching conditional-format rPr, lowest→highest priority —
+                // condTypes is already ordered band → firstCol/lastCol →
+                // firstRow/lastRow) and stash them on _ctx so the run cascade
+                // (ResolveEffectiveRunPropertiesCore step 1b) picks up white-caps
+                // / band run formatting. Saved/restored like ImageHostPart.
+                List<OpenXmlElement>? cellRunPropLayers = null;
+                if (tableStyleBaseRunProps != null)
+                    (cellRunPropLayers = new List<OpenXmlElement>()).AddRange(tableStyleBaseRunProps);
+                if (condFormats != null)
+                {
+                    foreach (var ct in condTypes)
+                    {
+                        if (condFormats.TryGetValue(ct, out var cf) && cf.RunProperties != null)
+                            (cellRunPropLayers ??= new List<OpenXmlElement>()).Add(cf.RunProperties);
+                    }
+                }
+                var savedCellRunProps = _ctx.CurrentCellTableStyleRunProps;
+                _ctx.CurrentCellTableStyleRunProps = cellRunPropLayers;
+
                 foreach (var child in cell.ChildElements)
                     RenderCellChild(child);
                 CloseCellList();
+
+                _ctx.CurrentCellTableStyleRunProps = savedCellRunProps;
 
                 if (exactWrap) sb.Append("</div>");
                 sb.AppendLine($"</{tag}>");
@@ -669,6 +751,39 @@ public partial class WordHandler
             currentId = style.BasedOn?.Val?.Value;
         }
         return null;
+    }
+
+    /// <summary>Resolve the table-style base run properties
+    /// (&lt;w:style&gt;&lt;w:rPr&gt;) walking the basedOn chain, returned
+    /// base→derived (lowest→highest priority) as a layer list. This is the
+    /// whole-table run formatting (e.g. the Invoice table's base rPr that writes
+    /// white caps text). It sits below the per-cell conditional-format
+    /// (tblStylePr) rPr and below paragraph/character styles in the cascade —
+    /// see ResolveEffectiveRunPropertiesCore step 1b. The caller appends the
+    /// matching tblStylePr conditional rPr after these so the band wins.</summary>
+    private List<OpenXmlElement>? ResolveTableStyleBaseRunProps(string styleId)
+    {
+        // Collect the basedOn chain (derived→base), then return base→derived.
+        var visited = new HashSet<string>();
+        var chain = new List<Style>();
+        var currentId = styleId;
+        while (currentId != null && visited.Add(currentId))
+        {
+            var style = FindStyleById(currentId);
+            if (style == null) break;
+            chain.Add(style);
+            currentId = style.BasedOn?.Val?.Value;
+        }
+        chain.Reverse(); // base first
+
+        List<OpenXmlElement>? layers = null;
+        foreach (var style in chain)
+        {
+            var rPr = style.StyleRunProperties;
+            if (rPr == null) continue;
+            (layers ??= new List<OpenXmlElement>()).Add(rPr);
+        }
+        return layers;
     }
 
     // ==================== Table Look / Conditional Formatting ====================
@@ -906,6 +1021,10 @@ public partial class WordHandler
             // override the ::marker font-family.
             var bulletType = GetUlListStyleTypeCss(numId, ilvl, lvlText);
             listStyleParts += $";list-style-type:{bulletType}";
+            // CONSISTENCY(bullet-text-indent-reset): mirror the body path — a
+            // bullet's native ::marker must not inherit an ordered ancestor's
+            // hanging text-indent, which would pull the first line over the disc.
+            listStyleParts += ";text-indent:0";
         }
 
         if (cellListTag == null)

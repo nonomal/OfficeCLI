@@ -2177,6 +2177,27 @@ public partial class WordHandler
         sb.AppendLine($"</{tag}>");
     }
 
+    /// <summary>
+    /// Read a dxa width value leniently. The SDK's typed Int16/Int32
+    /// <c>.Value</c> getter throws <see cref="System.FormatException"/> on
+    /// decimal dxa strings such as <c>"108.0"</c> that some non-Word generators
+    /// emit — and an uncaught throw aborted the ENTIRE HTML render (zero output).
+    /// Reading the raw <c>InnerText</c> never parses, so we truncate the
+    /// fractional part ourselves. Returns null for absent/"auto"/unparseable.
+    /// </summary>
+    private static int? LenientDxa(DocumentFormat.OpenXml.OpenXmlSimpleType? widthVal)
+    {
+        var raw = widthVal?.InnerText;
+        if (string.IsNullOrEmpty(raw)) return null;
+        if (int.TryParse(raw, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var i))
+            return i;
+        if (double.TryParse(raw, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var d))
+            return (int)System.Math.Round(d);
+        return null;
+    }
+
     private string GetTableCellInlineCss(TableCell cell, bool tableBordersNone, TableBorders? tblBorders = null,
         Dictionary<string, TableConditionalFormat>? condFormats = null, List<string>? condTypes = null,
         int rowIdx = 0, int colIdx = 0, int totalRows = 1, int totalCols = 1,
@@ -2278,14 +2299,14 @@ public partial class WordHandler
             // L/R=0 table with bare cells doesn't fall back to 5.4pt.
             if (tblCellMar != null)
             {
-                var tTop = tblCellMar.TopMargin?.Width?.Value;
-                var tBot = tblCellMar.BottomMargin?.Width?.Value;
-                var tLeft = tblCellMar.TableCellLeftMargin?.Width?.Value;
-                var tRight = tblCellMar.TableCellRightMargin?.Width?.Value;
-                var pTop = tTop != null ? $"{Units.TwipsToPt(tTop):0.#}pt" : "0pt";
-                var pBot = tBot != null ? $"{Units.TwipsToPt(tBot):0.#}pt" : "0pt";
-                var pLeft = tLeft != null ? $"{Units.TwipsToPt((int)tLeft):0.#}pt" : "5.4pt";
-                var pRight = tRight != null ? $"{Units.TwipsToPt((int)tRight):0.#}pt" : "5.4pt";
+                var tTop = LenientDxa(tblCellMar.TopMargin?.Width);
+                var tBot = LenientDxa(tblCellMar.BottomMargin?.Width);
+                var tLeft = LenientDxa(tblCellMar.TableCellLeftMargin?.Width);
+                var tRight = LenientDxa(tblCellMar.TableCellRightMargin?.Width);
+                var pTop = tTop != null ? $"{Units.TwipsToPt(tTop.Value):0.#}pt" : "0pt";
+                var pBot = tBot != null ? $"{Units.TwipsToPt(tBot.Value):0.#}pt" : "0pt";
+                var pLeft = tLeft != null ? $"{Units.TwipsToPt(tLeft.Value):0.#}pt" : "5.4pt";
+                var pRight = tRight != null ? $"{Units.TwipsToPt(tRight.Value):0.#}pt" : "5.4pt";
                 parts.Add($"padding:{pTop} {pRight} {pBot} {pLeft}");
             }
             return string.Join(";", parts);
@@ -2316,10 +2337,16 @@ public partial class WordHandler
         var tcBorders = tcPr.TableCellBorders;
         if (tcBorders != null)
         {
-            if (!IsBorderNone(tcBorders.TopBorder)) { parts.RemoveAll(p => p.StartsWith("border-top:")); RenderBorderCss(parts, tcBorders.TopBorder, "border-top"); }
-            if (!IsBorderNone(tcBorders.BottomBorder)) { parts.RemoveAll(p => p.StartsWith("border-bottom:")); RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom"); }
-            if (!IsBorderNone(tcBorders.LeftBorder)) { parts.RemoveAll(p => p.StartsWith("border-left:")); RenderBorderCss(parts, tcBorders.LeftBorder, "border-left"); }
-            if (!IsBorderNone(tcBorders.RightBorder)) { parts.RemoveAll(p => p.StartsWith("border-right:")); RenderBorderCss(parts, tcBorders.RightBorder, "border-right"); }
+            // A PRESENT cell border side always overrides the inherited
+            // table-level border, including when it is an explicit nil/none:
+            // OOXML treats <w:* w:val="nil"/> as "suppress the table border on
+            // this side", not "inherit it". So remove the inherited border-<side>
+            // whenever the side element exists, then paint the cell border only
+            // when it actually has a value. An ABSENT side (null) still inherits.
+            if (tcBorders.TopBorder != null) { parts.RemoveAll(p => p.StartsWith("border-top:")); if (!IsBorderNone(tcBorders.TopBorder)) RenderBorderCss(parts, tcBorders.TopBorder, "border-top"); }
+            if (tcBorders.BottomBorder != null) { parts.RemoveAll(p => p.StartsWith("border-bottom:")); if (!IsBorderNone(tcBorders.BottomBorder)) RenderBorderCss(parts, tcBorders.BottomBorder, "border-bottom"); }
+            if (tcBorders.LeftBorder != null) { parts.RemoveAll(p => p.StartsWith("border-left:")); if (!IsBorderNone(tcBorders.LeftBorder)) RenderBorderCss(parts, tcBorders.LeftBorder, "border-left"); }
+            if (tcBorders.RightBorder != null) { parts.RemoveAll(p => p.StartsWith("border-right:")); if (!IsBorderNone(tcBorders.RightBorder)) RenderBorderCss(parts, tcBorders.RightBorder, "border-right"); }
 
             // Diagonal cell borders (w:tl2br / w:tr2bl) render as an absolutely
             // positioned SVG overlay inside the <td> (HTML has no diagonal
@@ -2395,18 +2422,18 @@ public partial class WordHandler
         var margins = tcPr?.TableCellMargin;
         {
             // top/bottom: TopMargin/BottomMargin on both tcMar and tblCellMar.
-            var topVal = margins?.TopMargin?.Width?.Value ?? tblCellMar?.TopMargin?.Width?.Value;
-            var botVal = margins?.BottomMargin?.Width?.Value ?? tblCellMar?.BottomMargin?.Width?.Value;
+            var topVal = LenientDxa(margins?.TopMargin?.Width) ?? LenientDxa(tblCellMar?.TopMargin?.Width);
+            var botVal = LenientDxa(margins?.BottomMargin?.Width) ?? LenientDxa(tblCellMar?.BottomMargin?.Width);
             // left/right: tcMar exposes Left/Start + Right/End; tblCellMar uses
             // the distinct TableCellLeftMargin / TableCellRightMargin children.
-            var leftVal = margins?.LeftMargin?.Width?.Value ?? margins?.StartMargin?.Width?.Value
-                          ?? tblCellMar?.TableCellLeftMargin?.Width?.Value.ToString();
-            var rightVal = margins?.RightMargin?.Width?.Value ?? margins?.EndMargin?.Width?.Value
-                           ?? tblCellMar?.TableCellRightMargin?.Width?.Value.ToString();
-            var padTop = topVal != null ? $"{Units.TwipsToPt(topVal):0.#}pt" : "0pt";
-            var padBot = botVal != null ? $"{Units.TwipsToPt(botVal):0.#}pt" : "0pt";
-            var padLeft = leftVal != null ? $"{Units.TwipsToPt(leftVal):0.#}pt" : "5.4pt";
-            var padRight = rightVal != null ? $"{Units.TwipsToPt(rightVal):0.#}pt" : "5.4pt";
+            var leftVal = LenientDxa(margins?.LeftMargin?.Width) ?? LenientDxa(margins?.StartMargin?.Width)
+                          ?? LenientDxa(tblCellMar?.TableCellLeftMargin?.Width);
+            var rightVal = LenientDxa(margins?.RightMargin?.Width) ?? LenientDxa(margins?.EndMargin?.Width)
+                           ?? LenientDxa(tblCellMar?.TableCellRightMargin?.Width);
+            var padTop = topVal != null ? $"{Units.TwipsToPt(topVal.Value):0.#}pt" : "0pt";
+            var padBot = botVal != null ? $"{Units.TwipsToPt(botVal.Value):0.#}pt" : "0pt";
+            var padLeft = leftVal != null ? $"{Units.TwipsToPt(leftVal.Value):0.#}pt" : "5.4pt";
+            var padRight = rightVal != null ? $"{Units.TwipsToPt(rightVal.Value):0.#}pt" : "5.4pt";
             parts.Add($"padding:{padTop} {padRight} {padBot} {padLeft}");
         }
 

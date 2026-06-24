@@ -560,81 +560,16 @@ public partial class ExcelHandler
                     var evalSheetData = GetSheet(worksheet).GetFirstChild<SheetData>();
                     var evaluator = new Core.FormulaEvaluator(evalSheetData!, _doc.WorkbookPart);
                     var evalResult = evaluator.TryEvaluateFull(value.TrimStart('='));
-                    // R3 BUG C: ResolveRef now always wraps even single-cell refs
-                    // in an Area (Round-2 change to preserve BaseRow/BaseCol).
-                    // When that single cell holds an Error (e.g. INDIRECT to a
-                    // non-existent sheet), the result reads IsRange:true rather
-                    // than IsError:true. Unwrap the 1x1 Area-of-Error so the
-                    // cell still gets t="e" + the error sentinel as its cached
-                    // value instead of falling through to the "no value" branch.
-                    if (evalResult is { IsRange: true, RangeValue: { Rows: 1, Cols: 1 } rd1 } &&
-                        rd1.Cells[0, 0] is { IsError: true } innerErr)
-                        evalResult = innerErr;
-                    // BUG R4-C: same Area-of-1x1 unwrap for string / bool / numeric
-                    // results from OFFSET / INDIRECT. Without this the dispatch below
-                    // falls through to the "no value" branch — t and <v> are both
-                    // dropped, producing an on-disk cell that real Excel mis-parses
-                    // (Get reads correctly only because in-memory eval recomputes).
-                    if (evalResult is { IsRange: true, RangeValue: { Rows: 1, Cols: 1 } rd2 }
-                        && rd2.Cells[0, 0] is { } inner
-                        && (inner.IsString || inner.IsBool || inner.IsNumeric || inner.IsError))
-                        evalResult = inner;
-                    if (evalResult is { IsNumeric: true })
-                    {
-                        // IEEE-754 ±Infinity / NaN have no OOXML representation;
-                        // writing "<v>-Infinity</v>" produces a file Excel refuses
-                        // to open. Promote to #NUM! so the cell switches to t="e".
-                        var nv = evalResult.NumericValue!.Value;
-                        if (double.IsNaN(nv) || double.IsInfinity(nv))
-                        {
-                            cell.CellValue = new CellValue("#NUM!");
-                            cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.Error);
-                        }
-                        else
-                        {
-                            cell.CellValue = new CellValue(evalResult.ToCellValueText());
-                            cell.DataType = null;
-                        }
-                    }
-                    else if (evalResult is { IsString: true })
-                    {
-                        cell.CellValue = new CellValue(evalResult.StringValue!);
-                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.String);
-                    }
-                    else if (evalResult is { IsBool: true })
-                    {
-                        cell.CellValue = new CellValue(evalResult.ToCellValueText());
-                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.Boolean);
-                    }
-                    else if (evalResult is { IsError: true })
-                    {
-                        cell.CellValue = new CellValue(evalResult.ErrorValue!);
-                        cell.DataType = new DocumentFormat.OpenXml.EnumValue<CellValues>(CellValues.Error);
-                    }
-                    else
-                    {
-                        // Formula written but not evaluated — will be calculated when opened in Excel
-                        cell.CellValue = null;
-                        cell.DataType = null;
-                    }
-                    // Ensure fullCalcOnLoad so Excel recalculates formulas on open
-                    {
-                        var workbook = _doc.WorkbookPart!.Workbook!;
-                        var calcPr = workbook.GetFirstChild<CalculationProperties>();
-                        if (calcPr == null)
-                        {
-                            calcPr = new CalculationProperties();
-                            // OOXML schema order: ...definedNames, calcPr, oleSize, customWorkbookViews, pivotCaches...
-                            var insertBefore = (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.OleSize>()
-                                ?? (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.CustomWorkbookViews>()
-                                ?? (DocumentFormat.OpenXml.OpenXmlElement?)workbook.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.PivotCaches>();
-                            if (insertBefore != null)
-                                workbook.InsertBefore(calcPr, insertBefore);
-                            else
-                                workbook.AppendChild(calcPr);
-                        }
-                        calcPr.FullCalculationOnLoad = true;
-                    }
+                    // Cache the freshly-evaluated result (or clear value+type when
+                    // unevaluable). Dispatch shared with the L1 cache-refresh path —
+                    // see ExcelHandler.FormulaCache.cs.
+                    WriteFormulaResultToCell(cell, evalResult);
+                    // Excel/Sheets recalculate formulas on open via fullCalcOnLoad;
+                    // headless cache-trusting readers (openpyxl/pandas) do not. The
+                    // cache written here can later go stale if a precedent cell is
+                    // mutated after this formula — RefreshStaleFormulaCaches reconciles
+                    // that at persist (see ExcelHandler.FormulaCache.cs).
+                    EnsureFullCalcOnLoad();
                     break;
                 case "type":
                     // CONSISTENCY(cell-type-parity): Add accepts type=richtext;

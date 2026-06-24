@@ -167,6 +167,10 @@ public partial class ExcelHandler
     /// </summary>
     private void FlushDirtyParts()
     {
+        // Reconcile any formula caches that went stale since they were written
+        // (e.g. a SUMIFS authored before its data was imported). Runs before the
+        // dirty-part flush so cells it touches are picked up by the loop below.
+        RefreshStaleFormulaCaches();
         foreach (var part in _dirtyWorksheets)
         {
             ReorderWorksheetChildren(GetSheet(part));

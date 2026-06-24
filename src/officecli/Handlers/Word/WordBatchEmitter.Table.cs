@@ -1061,6 +1061,44 @@ public static partial class WordBatchEmitter
                         Path = $"{cellTargetPath}/p[1]",
                     });
                 }
+
+                // BUG-DUMP-H97: cell-level (direct <w:tc> child) bookmark / perm
+                // markers — between <w:tcPr> and the first paragraph (Google Docs cell
+                // nav anchors, often column-span colFirst/colLast), or between/after
+                // cell paragraphs — are skipped by the p/tbl/sdt cell walk above and
+                // were silently dropped. Replay each verbatim (preserving id/name/
+                // colFirst/colLast) at its paragraph-relative position via raw-set,
+                // mirroring the header/footer-root structural-bookmark path. Emitted
+                // AFTER the cell's paragraphs so the w:p[K] anchor resolves. Body
+                // tables only (cellRawXPath != null); header/footer cells warn.
+                var cellBms = word.GetCellStructuralBookmarks(cellSourcePath);
+                if (cellBms.Count > 0)
+                {
+                    if (cellRawXPath != null)
+                    {
+                        foreach (var (bmXml, relXpath, action) in cellBms)
+                        {
+                            items.Add(new BatchItem
+                            {
+                                Command = "raw-set",
+                                Part = cellRawPart,
+                                Xpath = relXpath == "." ? cellRawXPath : $"{cellRawXPath}/{relXpath}",
+                                Action = action == "before" ? "insertbefore"
+                                       : action == "after" ? "insertafter" : "append",
+                                Xml = bmXml,
+                            });
+                        }
+                    }
+                    else
+                    {
+                        ctx?.Warnings.Add(new DocxUnsupportedWarning(
+                            Element: "bookmark",
+                            Path: cellSourcePath,
+                            Reason: "cell-level bookmark/perm marker (direct <w:tc> child) in a "
+                            + "header/footer-hosted table cell was dropped on rebuild "
+                            + "(cell raw-set targeting is limited to body tables)."));
+                    }
+                }
             }
             // Trim trailing cells when source row is underfilled (sum of
             // source spans < gridCols). AddTable seeds `cols` cells per row;

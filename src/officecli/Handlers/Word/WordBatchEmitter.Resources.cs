@@ -2243,6 +2243,20 @@ public static partial class WordBatchEmitter
                                 .Where(e => e.Name == wNs2 + "t" || e.Name == wNs2 + "delText")
                                 .Select(e => e.Value));
                         noteProps["referenceCustomMark"] = markText;
+                        // BUG-DUMP-H97: an academic-style custom mark is often a
+                        // SYMBOL glyph (<w:sym w:font="Symbol" w:char="F020"/>), not
+                        // <w:t> text. Reading only <w:t>/<w:delText> captured an empty
+                        // mark → customMarkFollows="true" with no mark = dangling flag
+                        // + the visible marker glyph vanished. Capture the <w:sym>
+                        // font+char so AddFootnote/AddEndnote can rebuild it.
+                        var symEl = runEl.Elements(wNs2 + "sym").FirstOrDefault();
+                        if (symEl != null)
+                        {
+                            var symFont = symEl.Attribute(wNs2 + "font")?.Value ?? "";
+                            var symChar = symEl.Attribute(wNs2 + "char")?.Value ?? "";
+                            if (symChar.Length > 0)
+                                noteProps["referenceCustomMarkSym"] = symFont + ":" + symChar;
+                        }
                     }
                 }
                 catch { /* malformed run XML — keep the rStyle-only fallback */ }

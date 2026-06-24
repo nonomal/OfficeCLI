@@ -478,31 +478,9 @@ public partial class ExcelHandler
                 || string.Equals(issueType, "c", StringComparison.OrdinalIgnoreCase);
         }
 
-        // Compare cachedValue (raw <x:v> text) against our computedValue.
-        // Both are strings, but Excel writes numerics with varying precision
-        // and trailing-zero rules ("3" vs "3.0", "0.1" vs "0.10000000000000001"
-        // for IEEE-754 round-trips), so a strict string compare false-positives
-        // formula_cache_stale on values that are numerically equal. When both
-        // sides parse as finite doubles, compare with a relative tolerance of
-        // 1e-9 — well below Excel's own ~15-digit display precision, but loose
-        // enough to absorb IEEE round-trip jitter that Excel itself emits when
-        // re-saving the same calculation. Non-numeric strings fall back to byte-equal.
-        static bool CachedComputedAgree(string cached, string computed)
-        {
-            if (string.Equals(cached, computed, StringComparison.Ordinal))
-                return true;
-            if (double.TryParse(cached, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var a)
-                && double.TryParse(computed, System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture, out var b)
-                && double.IsFinite(a) && double.IsFinite(b))
-            {
-                var scale = Math.Max(Math.Abs(a), Math.Abs(b));
-                return Math.Abs(a - b) <= 1e-9 * Math.Max(scale, 1.0);
-            }
-            return false;
-        }
-
+        // cachedValue vs computedValue agreement (1e-9 relative tolerance for
+        // numerics) is shared with the save-time cache sweep — see
+        // CachedComputedAgree in ExcelHandler.FormulaCache.cs.
         var sheets = GetWorksheets();
         foreach (var (sheetName, worksheetPart) in sheets)
         {

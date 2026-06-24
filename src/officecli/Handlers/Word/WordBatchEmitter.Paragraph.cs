@@ -4774,11 +4774,35 @@ public static partial class WordBatchEmitter
             // values mark a hyperlink boundary even when URL/anchor match.
             int j = i + 1;
             var group = new List<DocumentNode> { run };
+            // BUG-DUMP-H99: zero-width position anchors (bookmark/perm markers) that
+            // sit BETWEEN two runs of the SAME hyperlink are stashed here and
+            // re-emitted right after the merged wrapper, so an interior anchor does
+            // not fragment the one <w:hyperlink> into two.
+            var pendingInterior = new List<DocumentNode>();
             var sb = new System.Text.StringBuilder(run.Text ?? "");
             while (j < runs.Count)
             {
                 var next = runs[j];
-                if (next.Type != "run" && next.Type != "r" && next.Type != "tab") break;
+                if (next.Type != "run" && next.Type != "r" && next.Type != "tab")
+                {
+                    // BUG-DUMP-H99: a <w:bookmarkStart/End> or <w:permStart/End>
+                    // interior to a hyperlink (e.g. an _Hlk edit anchor Word inserts
+                    // mid-link) previously broke the coalesce walk here, splitting one
+                    // hyperlink into two on round-trip (silent injection 1→2). When a
+                    // later run with the SAME url/anchor/_hyperlinkParent follows, the
+                    // marker is interior: stash it (re-emitted just after the merged
+                    // wrapper, where the zero-width anchor is position-equivalent) and
+                    // keep coalescing. Any other non-run node — a second hyperlink,
+                    // field, sdt, drawing — is a genuine boundary and still breaks.
+                    if (IsInteriorHyperlinkMarker(next)
+                        && HasSameHyperlinkRunAhead(runs, j + 1, url, anchor, hlParent))
+                    {
+                        pendingInterior.Add(next);
+                        j++;
+                        continue;
+                    }
+                    break;
+                }
                 next.Format.TryGetValue("url", out var nUrlObj);
                 next.Format.TryGetValue("anchor", out var nAncObj);
                 next.Format.TryGetValue("_hyperlinkParent", out var nHlpObj);
@@ -4816,9 +4840,45 @@ public static partial class WordBatchEmitter
                 merged.Children = group;
             }
             result.Add(merged);
+            // BUG-DUMP-H99: re-emit any interior bookmark/perm markers right after
+            // the merged wrapper (their original document position fell between the
+            // coalesced runs; a zero-width anchor is position-equivalent there).
+            result.AddRange(pendingInterior);
             i = j;
         }
         return result;
+    }
+
+    // BUG-DUMP-H99: zero-width position anchors that may sit interior to a
+    // hyperlink's run sequence. Splitting the coalesce walk at one of these
+    // fragmented a single <w:hyperlink> into two on round-trip.
+    private static bool IsInteriorHyperlinkMarker(DocumentNode n) =>
+        n.Type is "bookmark" or "bookmarkEnd" or "permStart" or "permEnd";
+
+    // True when, looking forward from `from`, the next run/r/tab carries the same
+    // url + anchor + _hyperlinkParent as the group being coalesced — i.e. the
+    // intervening marker(s) are interior to ONE hyperlink rather than separating
+    // two distinct same-target hyperlinks (which carry different _hyperlinkParent).
+    private static bool HasSameHyperlinkRunAhead(List<DocumentNode> runs, int from,
+        string? url, string? anchor, string? hlParent)
+    {
+        for (int k = from; k < runs.Count; k++)
+        {
+            var n = runs[k];
+            if (n.Type == "run" || n.Type == "r" || n.Type == "tab")
+            {
+                n.Format.TryGetValue("url", out var uo);
+                n.Format.TryGetValue("anchor", out var ao);
+                n.Format.TryGetValue("_hyperlinkParent", out var ho);
+                return string.Equals(uo?.ToString(), url, StringComparison.Ordinal)
+                    && string.Equals(ao?.ToString(), anchor, StringComparison.Ordinal)
+                    && string.Equals(ho?.ToString(), hlParent, StringComparison.Ordinal);
+            }
+            // Skip further interior markers; any other node is a boundary.
+            if (IsInteriorHyperlinkMarker(n)) continue;
+            return false;
+        }
+        return false;
     }
 
     // BUG-DUMP-HOIST: run-level character properties that WordHandler.Navigation

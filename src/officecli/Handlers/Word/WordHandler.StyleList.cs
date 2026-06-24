@@ -42,6 +42,22 @@ public partial class WordHandler
         if (defaultRPr != null)
             MergeRunProperties(effective, defaultRPr, "/docDefaults", sources);
 
+        // 1b. Table-style run properties (base rPr + matching conditional-format
+        // rPr) for the cell the run lives in. Per ECMA-376 §17.7.2 the run-
+        // property cascade places table styles directly above docDefaults and
+        // below paragraph/character styles, so merge the layers (lowest→highest
+        // priority, already ordered by the renderer) here. The HTML renderer
+        // stashes them on _ctx around RenderCellChild; null/empty on the body
+        // path. Without this a firstRow/band cell's <w:caps/> + white <w:color/>
+        // never reach the run and it falls back to docDefaults (e.g. the Invoice
+        // "PAYMENT OPTIONS" header rendered lowercase grey instead of white caps).
+        var cellTableStyleRPr = _ctx?.CurrentCellTableStyleRunProps;
+        if (cellTableStyleRPr != null)
+        {
+            foreach (var layerRPr in cellTableStyleRPr)
+                MergeRunProperties(effective, layerRPr, "/tableStyle", sources);
+        }
+
         // 2. Walk paragraph style basedOn chain (collect in order, apply from base to derived)
         var styleId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
         // OOXML §17.7.4.17: a paragraph without an explicit <w:pStyle>
@@ -787,7 +803,11 @@ public partial class WordHandler
         if (numProps != null)
         {
             var nid = numProps.NumberingId?.Val?.Value;
-            if (nid != null && nid != 0)
+            // numId=0 is OOXML's "no numbering" sentinel — it explicitly removes
+            // any inherited list reference, so stop here rather than walking the
+            // style chain (which would resurrect the based-on style's numbering).
+            if (nid == 0) return null;
+            if (nid != null)
                 return (nid.Value, numProps.NumberingLevelReference?.Val?.Value ?? 0);
         }
 
@@ -807,7 +827,12 @@ public partial class WordHandler
             if (styleNumPr != null)
             {
                 var nid = styleNumPr.NumberingId?.Val?.Value;
-                if (nid != null && nid != 0)
+                // A style that sets numId=0 explicitly cancels numbering for
+                // everything based on it (e.g. a title style based on Heading1
+                // that opts out of the heading's auto-number). Stop the walk so
+                // the based-on style's numbering is not inherited.
+                if (nid == 0) return null;
+                if (nid != null)
                     return (nid.Value, styleNumPr.NumberingLevelReference?.Val?.Value ?? 0);
             }
 

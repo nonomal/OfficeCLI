@@ -1900,6 +1900,36 @@ public partial class WordHandler
             node.Format["revision.nested.id"] = nestedDelId.ToString();
     }
 
+    // BUG-DUMP-H99: detect a run that PACKS an entire field's fldChar chain
+    // (begin + <w:instrText> + separate + cached result + end) into a SINGLE
+    // <w:r>, instead of Word's usual one-structural-element-per-run shape. Such
+    // runs are emitted by some converters (RTF→docx, Markdown→docx) and a few
+    // apps for footer PAGE / STYLEREF fields. RunToNode surfaces only the FIRST
+    // structural element (GetFirstChild<FieldChar>()), so the instruction,
+    // separator, cached result and end fldChar were silently lost — and
+    // CollapseFieldChains then saw a lone begin and warn-dropped the whole field
+    // (the page number vanished). A run is "packed" when it carries at least one
+    // field-structural element (fldChar / instrText / delInstrText) alongside any
+    // other emittable child; the caller splits it into the same one-element-per-
+    // run node stream Word emits so the collapse pass rebuilds the field.
+    private static bool IsPackedFieldRun(Run run)
+    {
+        var fldChars = run.Elements<FieldChar>().ToList();
+        if (fldChars.Count == 0) return false;
+        bool hasBegin = fldChars.Any(f => string.Equals(
+            f.FieldCharType?.InnerText, "begin", StringComparison.OrdinalIgnoreCase));
+        bool hasEnd = fldChars.Any(f => string.Equals(
+            f.FieldCharType?.InnerText, "end", StringComparison.OrdinalIgnoreCase));
+        // Only a SELF-CONTAINED field (begin … end packed in one <w:r>) is split.
+        // A run carrying only a partial fragment (e.g. begin + instrText with the
+        // separate/end in sibling runs, or a lone begin — authored-garbage shapes)
+        // is left to RunToNode's first-match-wins type precedence: splitting it
+        // wouldn't help the round-trip (it still collapses to an unmatched-begin
+        // warn-drop) and would break the documented single-node contract
+        // (WordRunSpecialContentBugFixTests.FieldChar_PlusInstrText_InSameRun_StableType).
+        return hasBegin && hasEnd;
+    }
+
     private DocumentNode RunToNode(Run run, DocumentNode node, string path)
     {
         node.Type = "run";
@@ -5101,6 +5131,42 @@ public partial class WordHandler
                 }
                 else if (entry.kind == "run")
                 {
+                    // BUG-DUMP-H99: a run that packs an entire field's fldChar
+                    // chain into one <w:r> must be split into the same one-
+                    // structural-element-per-run node stream Word emits, so
+                    // CollapseFieldChains rebuilds the field instead of seeing a
+                    // lone begin and warn-dropping it. Uniform run formatting (the
+                    // packed run carries a single rPr) round-trips fully via the
+                    // typed field path. See IsPackedFieldRun.
+                    if (entry.el is Run packedRun && IsPackedFieldRun(packedRun))
+                    {
+                        var packedRpr = packedRun.GetFirstChild<RunProperties>();
+                        string? hlParentForPacked = null;
+                        if (packedRun.Parent is Hyperlink packedHl)
+                        {
+                            int hlIdxP = paraHyperlinks.IndexOf(packedHl);
+                            if (hlIdxP >= 0) hlParentForPacked = $"{path}/hyperlink[{hlIdxP + 1}]";
+                        }
+                        bool packedInCustomXml = packedRun.Ancestors<CustomXmlRun>().FirstOrDefault() != null;
+                        foreach (var packedChild in packedRun.ChildElements)
+                        {
+                            if (packedChild is RunProperties) continue;
+                            if (packedChild is LastRenderedPageBreak) continue;
+                            var synthRun = new Run();
+                            if (packedRpr != null)
+                                synthRun.AppendChild((RunProperties)packedRpr.CloneNode(true));
+                            synthRun.AppendChild(packedChild.CloneNode(true));
+                            var packedNode = ElementToNode(synthRun, $"{path}/r[{runIdx + 1}]", depth - 1);
+                            if (hlParentForPacked != null)
+                                packedNode.Format["_hyperlinkParent"] = hlParentForPacked;
+                            if (packedInCustomXml)
+                                packedNode.Format["_wrapperFlattened"] = true;
+                            node.Children.Add(packedNode);
+                            runIdx++;
+                        }
+                    }
+                    else
+                    {
                     var runNode = ElementToNode(entry.el, $"{path}/r[{runIdx + 1}]", depth - 1);
                     // BUG-DUMP-R35-2: unlike <w:smartTag> (OpenXmlUnknownElement in
                     // this SDK build — handled by the unknown-subtree synthesizer
@@ -5128,6 +5194,7 @@ public partial class WordHandler
                     }
                     node.Children.Add(runNode);
                     runIdx++;
+                    }
                 }
                 else if (entry.kind == "eq")
                 {

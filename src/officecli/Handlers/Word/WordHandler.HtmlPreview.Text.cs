@@ -67,9 +67,38 @@ public partial class WordHandler
             var tsId = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
             if (tsId != null) tabs = ResolveTabStopsFromStyle(tsId);
         }
-        return tabs?.Any(t =>
-            t.Val?.InnerText is "center" or "right"
-            && t.Leader?.InnerText is null or "none") == true;
+        var alignStops = tabs?
+            .Where(t => t.Val?.InnerText is "center" or "right"
+                && t.Leader?.InnerText is null or "none")
+            .ToList();
+        if (alignStops == null || alignStops.Count == 0) return false;
+        // Hanging-indent bullet/list shape (NOT a page-spanning three-part
+        // header): a hanging indent whose center/right tab stops all sit in the
+        // indent gutter (position <= the left indent) is a bullet aligned at the
+        // indent via a tiny right-tab, then text at a left-tab — e.g.
+        // `ind left=520 hanging=260` with stops right@100 + left@260, the bullet
+        // "•" tab-positioned at the hanging origin. The flex band model splits
+        // the line into equal thirds, so the right-aligned bullet band lands ~2/3
+        // across and the text band starts mid-line, rendering the list "centered".
+        // Word positions by absolute tab pos (~left indent), not equal thirds.
+        // Defer these to the positional inline-block tab path, which honours the
+        // actual stop position. The genuine three-part header (no hanging indent,
+        // stops at page-center / right-edge) is unaffected.
+        var pProps = para.ParagraphProperties;
+        var hangingTwips = pProps?.Indentation?.Hanging?.Value
+            ?? ResolveIndentationFromStyle(pProps?.ParagraphStyleId?.Val?.Value)?.Hanging?.Value;
+        if (hangingTwips is string hs && hs != "0" && long.TryParse(hs, out var hangingVal) && hangingVal > 0)
+        {
+            var leftIndentTwips = pProps?.Indentation?.Left?.Value
+                ?? ResolveIndentationFromStyle(pProps?.ParagraphStyleId?.Val?.Value)?.Left?.Value;
+            long leftVal = (leftIndentTwips is string ls && long.TryParse(ls, out var lv)) ? lv : 0;
+            // All qualifying (center/right) stops at/under the left indent → the
+            // tabs live in the list gutter, not across the page → not a header.
+            bool allStopsInGutter = alignStops.All(t =>
+                t.Position?.HasValue == true && t.Position.Value <= leftVal);
+            if (allStopsInGutter) return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -342,6 +371,17 @@ public partial class WordHandler
         // fldChar.Separate and fldChar.End. Begin already emits the glyph, so
         // suppress the cached run to avoid rendering the checkbox twice.
         bool skipCachedCheckboxDisplay = false;
+        // PAGE / NUMPAGES field-scope tracking. Word stores a PAGE field as the
+        // run sequence: fldChar(begin) → instrText("PAGE") → fldChar(separate) →
+        // <result digits> → fldChar(end). To rewrite ONLY the field-result run
+        // into a dynamic page-number span (and never a literal header/footer
+        // number such as a date "01" or a course code "001"), tag the result
+        // run's HTML with a marker class while it's inside the separate…end
+        // region. ApplyPageNumFields then targets that class instead of blindly
+        // rewriting the first digit run in document order. Fields can nest, so
+        // keep a stack: each entry is the PAGE/NUMPAGES kind (0=other) and
+        // whether we've passed the separator into the result region.
+        var fieldStack = new System.Collections.Generic.Stack<(int kind, bool inResult)>();
 
         foreach (var child in para.ChildElements)
         {
@@ -360,6 +400,95 @@ public partial class WordHandler
                     if (runFldChar == FieldCharValues.End)
                         skipCachedCheckboxDisplay = false;
                     continue;
+                }
+                // PAGE / NUMPAGES field-scope state machine (drives the
+                // page-num-result / num-pages-result tagging below).
+                if (runFldChar == FieldCharValues.Begin)
+                {
+                    fieldStack.Push((0, false));
+                }
+                else if (runFldChar == FieldCharValues.Separate)
+                {
+                    if (fieldStack.Count > 0)
+                    {
+                        var top = fieldStack.Pop();
+                        fieldStack.Push((top.kind, true));
+                    }
+                }
+                else if (runFldChar == FieldCharValues.End)
+                {
+                    if (fieldStack.Count > 0) fieldStack.Pop();
+                }
+                else
+                {
+                    // Classify the field by its instruction text (instrText run).
+                    var instr = run.GetFirstChild<FieldCode>()?.Text;
+                    if (!string.IsNullOrEmpty(instr) && fieldStack.Count > 0)
+                    {
+                        // MACROBUTTON: Word renders the field's DISPLAY text (the
+                        // tokens after "MACROBUTTON <macroname> ") as visible,
+                        // clickable body content — it is NOT a hidden field
+                        // instruction. The display can span several instrText
+                        // runs, each with its own rPr (e.g. a bold word). Word
+                        // also typically writes NO separate/result, so there is
+                        // no cached result run to fall back on; the instrText
+                        // text IS the rendered content. Tag the field kind so
+                        // the instrText runs below render their FieldCode text
+                        // (minus the leading "MACROBUTTON <macroname> " on the
+                        // first run) instead of being swallowed as a hidden
+                        // instruction. kind 3 = MACROBUTTON.
+                        if (instr.TrimStart().StartsWith("MACROBUTTON", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var topM = fieldStack.Pop();
+                            fieldStack.Push((3, topM.inResult));
+                        }
+                        else
+                        {
+                            int kind = ClassifyPageFieldInstruction(instr);
+                            if (kind != 0)
+                            {
+                                var top = fieldStack.Pop();
+                                fieldStack.Push((kind, top.inResult));
+                            }
+                        }
+                    }
+                    // Render the MACROBUTTON display text from this instrText run.
+                    // The instrText is a <w:fldChar>-scoped FieldCode, so the
+                    // normal RenderRunHtml path (which only renders <w:t>) skips
+                    // it. Build a throwaway <w:r><w:t> carrying the SAME rPr so
+                    // bold / font formatting is preserved, then reuse
+                    // RenderRunHtml for CSS. Strip the "MACROBUTTON <macro> "
+                    // prefix from the first run only (the run that actually
+                    // begins with the keyword).
+                    if (fieldStack.Count > 0 && fieldStack.Peek().kind == 3)
+                    {
+                        var fieldCode = run.GetFirstChild<FieldCode>();
+                        var displayText = fieldCode?.Text ?? "";
+                        // Strip "MACROBUTTON" + macro name + one trailing space.
+                        // Note the sample uses two spaces ("MACROBUTTON  DoFieldClick [");
+                        // \s+ after the keyword and after the macro name absorbs
+                        // any extra whitespace, leaving the display ("[") intact.
+                        displayText = Regex.Replace(
+                            displayText,
+                            @"^\s*MACROBUTTON\s+\S+\s?",
+                            "",
+                            RegexOptions.IgnoreCase);
+                        if (!string.IsNullOrEmpty(displayText))
+                        {
+                            var displayRun = new Run();
+                            var rPr = run.RunProperties;
+                            if (rPr != null)
+                                displayRun.RunProperties = (RunProperties)rPr.CloneNode(true);
+                            displayRun.AppendChild(new Text(displayText) { Space = SpaceProcessingModeValues.Preserve });
+                            RenderRunHtml(sb, displayRun, para);
+                        }
+                    }
+                    // MACROBUTTON instrText runs are fully handled above; never
+                    // fall through to the result-run RenderRunHtml below (it
+                    // would render nothing, but skip it for clarity + to avoid
+                    // accidental page-field tagging on a kind-3 field).
+                    if (fieldStack.Count > 0 && fieldStack.Peek().kind == 3)
+                        continue;
                 }
                 // Find drawing (direct child or inside mc:AlternateContent Choice)
                 // SDK's Descendants<Drawing>() naturally skips mc:Fallback (VML w:pict)
@@ -389,7 +518,32 @@ public partial class WordHandler
                     continue;
                 }
 
+                // Tag the result run of a PAGE / NUMPAGES field so
+                // ApplyPageNumFields rewrites exactly this run and never a
+                // literal header/footer number.
+                //
+                // Exclude the field's own fldChar runs (begin / separate / end):
+                // the Separate run flips inResult=true and then falls through to
+                // here, but it renders NOTHING — wrapping it produced a stray
+                // empty <span class="page-num-result"></span> BEFORE the real
+                // digit run's wrapper. ApplyPageNumFields' primary Replace(…,1)
+                // then consumed that empty wrapper as the placeholder, and the
+                // leftover-strip pass unwrapped the real digit run, leaking the
+                // cached number as a visible sibling ("Page 11 of 22"). Only the
+                // actual result-content runs (no fldChar of their own) may be
+                // tagged, so exactly one result wrapper per field is emitted.
+                (int kind, bool inResult) pageFieldTop =
+                    fieldStack.Count > 0 ? fieldStack.Peek() : (0, false);
+                bool tagPageField = pageFieldTop.inResult
+                    && (pageFieldTop.kind == 1 || pageFieldTop.kind == 2)
+                    && runFldChar == null;
+                if (tagPageField)
+                    sb.Append(pageFieldTop.kind == 1
+                        ? "<span class=\"page-num-result\">"
+                        : "<span class=\"num-pages-result\">");
                 RenderRunHtml(sb, run, para);
+                if (tagPageField)
+                    sb.Append("</span>");
             }
             else if (child.LocalName is "ins" or "moveTo")
             {
@@ -437,80 +591,72 @@ public partial class WordHandler
             }
             else if (child.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple")
             {
-                // Content controls, smart tags, custom XML, simple fields —
-                // render hyperlinks with href + their own runs (TOC entries
-                // are authored as <w:fldSimple> wrapping <w:hyperlink>),
-                // then render bare runs. Runs nested inside a hyperlink are
-                // emitted by the hyperlink branch so skip them at the
-                // outer Run pass.
-                var emittedRuns = new HashSet<OpenXmlElement>();
-                foreach (var innerHyp in child.Descendants<Hyperlink>())
+                // Content controls, smart tags, custom XML, simple fields — walk
+                // the wrapper content in DOCUMENT ORDER, recursing into nested
+                // wrappers. A run may be a typed Run, or — for legacy Office-2003
+                // <w:smartTag> that the SDK parses as an OpenXmlUnknownElement — an
+                // unknown <w:r> rebuilt from its OuterXml so its rPr (italic/size/
+                // color) survives (R102-1: "Bucharest"/"Romania"). A nested
+                // address (place > City/State/PostalCode) mixes a typed outer
+                // wrapper with UNKNOWN inner smartTags; the old typed-then-unknown
+                // two-pass dropped the inner runs (the typed pass found the bare
+                // separators, so the unknown pass was skipped) and scrambled order.
+                // Walking once in order handles mixed typed/unknown content and
+                // any nesting depth. TOC entries are <w:fldSimple> wrapping
+                // <w:hyperlink>, rendered in place by the Hyperlink branch.
+                void RenderWrapperContent(OpenXmlElement container)
                 {
-                    RenderHyperlinkHtml(sb, innerHyp, para);
-                    foreach (var r in innerHyp.Descendants<Run>())
-                        emittedRuns.Add(r);
-                }
-                foreach (var innerRun in child.Descendants<Run>())
-                {
-                    if (emittedRuns.Contains(innerRun)) continue;
-                    RenderRunHtml(sb, innerRun, para);
-                }
-                // Legacy Office 2003 smart tags (<w:smartTag>) parse as an
-                // OpenXmlUnknownElement whose nested <w:r> are also unknown, so
-                // Descendants<Run>() finds none. Rebuild each unknown <w:r> as a
-                // typed Run from its OuterXml and render it through the normal
-                // run path so its rPr (italic, size, color, …) is preserved —
-                // emitting child.InnerText here would drop all formatting,
-                // making smartTag-wrapped runs render upright while their
-                // byte-identical direct-child siblings render italic
-                // (R102-1: "Bucharest"/"Romania" upright inside an all-italic
-                // affiliation line). Bare InnerText remains the last resort.
-                if (!child.Descendants<Hyperlink>().Any() && !child.Descendants<Run>().Any())
-                {
-                    bool renderedAny = false;
-                    foreach (var unkRun in child.Descendants<DocumentFormat.OpenXml.OpenXmlUnknownElement>())
+                    foreach (var node in container.ChildElements)
                     {
-                        if (unkRun.LocalName != "r"
-                            || unkRun.NamespaceUri != "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
-                            continue;
-                        // A nested smartTag's runs are picked up by the outer
-                        // Descendants pass already; skip runs that sit inside a
-                        // deeper smartTag/customXml so they aren't rendered twice.
-                        bool nestedDeeper = false;
-                        for (var anc = unkRun.Parent; anc != null && anc != child; anc = anc.Parent)
-                            if (anc is DocumentFormat.OpenXml.OpenXmlUnknownElement uw
-                                && uw.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-                                && (uw.LocalName == "smartTag" || uw.LocalName == "customXml"))
-                            { nestedDeeper = true; break; }
-                        if (nestedDeeper) continue;
-                        Run? typedRun = null;
-                        try
-                        {
-                            // OuterXml of an unknown <w:r> may omit the xmlns:w
-                            // declaration when the prefix is bound on an ancestor;
-                            // new Run(xml) then can't bind the prefix. Inject the
-                            // WordprocessingML namespace when it's missing so the
-                            // fragment parses standalone.
-                            var xml = unkRun.OuterXml;
-                            if (!string.IsNullOrEmpty(xml) && !xml.Contains("xmlns:w=", StringComparison.Ordinal))
-                                xml = xml.Replace("<w:r ",
-                                        "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
-                                        StringComparison.Ordinal)
-                                    .Replace("<w:r>",
-                                        "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
-                                        StringComparison.Ordinal);
-                            typedRun = new Run(xml);
-                        }
-                        catch { typedRun = null; }
-                        if (typedRun != null)
-                        {
+                        if (node is Hyperlink hyp)
+                            RenderHyperlinkHtml(sb, hyp, para);
+                        else if (node is Run typedRun)
                             RenderRunHtml(sb, typedRun, para);
-                            renderedAny = true;
+                        // "sdtContent" is the <w:sdtContent> wrapper that holds an
+                        // SDT's runs — an inline content control (SdtRun) keeps its
+                        // text there, not as a direct child of <w:sdt>. Recurse into
+                        // it too, else a placeholder/label like a "DATE" content
+                        // control rendered nothing.
+                        else if (node.LocalName is "sdt" or "sdtContent" or "smartTag" or "customXml" or "fldSimple"
+                            && node.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+                            RenderWrapperContent(node);
+                        else if (node is DocumentFormat.OpenXml.OpenXmlUnknownElement unk
+                            && unk.NamespaceUri == "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+                        {
+                            if (unk.LocalName is "smartTag" or "customXml" or "sdt" or "sdtContent")
+                            {
+                                RenderWrapperContent(unk);
+                            }
+                            else if (unk.LocalName == "r")
+                            {
+                                Run? rebuilt = null;
+                                try
+                                {
+                                    // OuterXml of an unknown <w:r> may omit the
+                                    // xmlns:w declaration when the prefix is bound on
+                                    // an ancestor; new Run(xml) then can't bind it.
+                                    // Inject the WordprocessingML namespace when
+                                    // missing so the fragment parses standalone.
+                                    var xml = unk.OuterXml;
+                                    if (!string.IsNullOrEmpty(xml) && !xml.Contains("xmlns:w=", StringComparison.Ordinal))
+                                        xml = xml.Replace("<w:r ",
+                                                "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
+                                                StringComparison.Ordinal)
+                                            .Replace("<w:r>",
+                                                "<w:r xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">",
+                                                StringComparison.Ordinal);
+                                    rebuilt = new Run(xml);
+                                }
+                                catch { rebuilt = null; }
+                                if (rebuilt != null)
+                                    RenderRunHtml(sb, rebuilt, para);
+                                else if (!string.IsNullOrEmpty(unk.InnerText))
+                                    sb.Append(System.Net.WebUtility.HtmlEncode(unk.InnerText));
+                            }
                         }
                     }
-                    if (!renderedAny && !string.IsNullOrEmpty(child.InnerText))
-                        sb.Append(System.Net.WebUtility.HtmlEncode(child.InnerText));
                 }
+                RenderWrapperContent(child);
             }
         }
 
@@ -986,7 +1132,19 @@ public partial class WordHandler
                             // width + overflow:hidden/nowrap instead CLIPPED any
                             // leading text wider than the gap, silently dropping
                             // visible body text (Word never clips at a tab stop).
-                            sb.Append($"<span style=\"display:inline-block;min-width:{widthPt:0.##}pt;{cssLeader}vertical-align:bottom\">{leading}</span>");
+                            //
+                            // text-align:left is FORCED on the box: the retro-wrap
+                            // model only positions correctly when the leading text
+                            // sits at the box's LEFT edge so the min-width gap forms
+                            // to its RIGHT (the following text then lands on the
+                            // absolute tab stop). In a right/center/justify paragraph
+                            // (e.g. a financial-table cell whose TableParagraph style
+                            // carries w:jc="right") the box would otherwise inherit
+                            // text-align:right, pulling the leading text to the box's
+                            // right edge — collapsing the visible gap and gluing the
+                            // two tab-separated values together ("(51.3)507.9"). For
+                            // a left-aligned paragraph this is a no-op.
+                            sb.Append($"<span style=\"display:inline-block;min-width:{widthPt:0.##}pt;{cssLeader}vertical-align:bottom;text-align:left\">{leading}</span>");
                         }
                         else
                         {

@@ -476,8 +476,44 @@ public partial class WordHandler
         double topBase = inHeaderFooter ? 0 : pg.MarginTopPt;
 
         double leftPt = leftBase;
+        // <wp:align> (center/left/right) is an alternative to <wp:posOffset>:
+        // Word resolves it against the relativeFrom frame's extent. The
+        // wrapSquare/Tight/Through paths above already read this element
+        // (e.LocalName == "align"); the overlay path previously ignored it and
+        // fell back to leftBase (= 0 in header/footer), pinning a page-centered
+        // full-width banner to the left margin and clipping its left edge.
+        // Resolve align → an absolute left coordinate the same way: center →
+        // (frameW - imgW)/2, right → frameW - imgW, left → 0, all measured from
+        // the frame origin, then shifted by the frame's left edge.
+        var hAlign = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "align")?.InnerText;
         var hOffEl = hPos?.Descendants().FirstOrDefault(e => e.LocalName == "posOffset");
-        if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
+        if (hAlign is "center" or "right" or "left")
+        {
+            // Frame width + origin per relativeFrom. page → full page width from
+            // the physical edge (0); margin/column/character → the content
+            // column from the left margin. In a header/footer band the origin is
+            // already inset to the left margin, so frameOrigin is 0 there.
+            double imgWidthPt = widthPx * 72.0 / 96.0; // 96 DPI px → pt
+            double frameWidthPt, frameOriginPt;
+            if (hFrom == DW.HorizontalRelativePositionValues.Page)
+            {
+                frameWidthPt = pg.WidthPt;
+                frameOriginPt = inHeaderFooter ? -pg.MarginLeftPt : 0;
+            }
+            else // margin / column / character / leftMargin / insideMargin / …
+            {
+                frameWidthPt = pg.WidthPt - pg.MarginLeftPt - pg.MarginRightPt;
+                frameOriginPt = leftBase;
+            }
+            double alignedPt = hAlign switch
+            {
+                "center" => (frameWidthPt - imgWidthPt) / 2.0,
+                "right" => frameWidthPt - imgWidthPt,
+                _ => 0, // left
+            };
+            leftPt = frameOriginPt + alignedPt;
+        }
+        else if (hOffEl != null && long.TryParse(hOffEl.InnerText, out var hOffEmu))
         {
             leftPt = hFrom == DW.HorizontalRelativePositionValues.Page
                 ? hOffEmu / EmuConverter.EmuPerPointF
@@ -548,14 +584,19 @@ public partial class WordHandler
 
         // Border from a:ln. An <a:ln> with <a:noFill/> (or w="0") is an EXPLICIT
         // declaration of "no outline" — Word renders no border, so we must NOT
-        // emit a default one. Only emit a border when the line actually paints.
+        // emit a default one. A bare self-closing <a:ln/> (no w, no fill child)
+        // is likewise NOT a paintable outline: with neither a width nor a fill
+        // it inherits nothing meaningful for a style-less picture and Word draws
+        // nothing, so we must require an explicit width OR fill before emitting.
         var ln = spPr.Elements().FirstOrDefault(e => e.LocalName == "ln");
         if (ln != null)
         {
             var noFill = ln.Elements().Any(e => e.LocalName == "noFill");
             var wAttr = ln.GetAttributes().FirstOrDefault(a => a.LocalName == "w").Value;
             var hasZeroWidth = long.TryParse(wAttr, out var wEmu0) && wEmu0 == 0;
-            if (!noFill && !hasZeroWidth)
+            var hasWidth = long.TryParse(wAttr, out var wEmuPos) && wEmuPos > 0;
+            var hasFill = ln.Elements().Any(e => e.LocalName is "solidFill" or "gradFill" or "pattFill");
+            if (!noFill && !hasZeroWidth && (hasWidth || hasFill))
             {
                 double borderPx = 1;
                 if (long.TryParse(wAttr, out var wEmu) && wEmu > 0)
@@ -1047,7 +1088,46 @@ public partial class WordHandler
                 e.LocalName == "spAutoFit" || e.LocalName == "normAutofit") == true;
             bool isFixedBox = !isAutofitBox;
             bool hasFillBg = fillCss.Contains("background", StringComparison.Ordinal);
-            var heightProp = isFixedBox && hasFillBg
+
+            // Horizontal overflow: a fixed (noAutofit) box can declare a narrow
+            // ext cx yet hold a wider inner table (cover layouts commonly pin a
+            // tall/thin box but lay the title + multi-column body in a table
+            // whose grid far exceeds the box). bodyPr/@horzOverflow defaults to
+            // "overflow"; Word then paints the content at its NATURAL width,
+            // spilling past the declared box edge — it does NOT crush the table
+            // into the narrow box. Pinning width:{widthPx}px here instead
+            // collapses the inner width:100% table into the box and detonates
+            // wrapping (one glyph/word per line, hyperlinks sliced). When the
+            // box is fixed, horzOverflow is not clipped, and it carries an inner
+            // table whose grid width exceeds the declared box width, widen the
+            // host to the table's natural width so the content renders un-crushed
+            // the way Word draws it. Mirrors the image-overflow precedent above
+            // (drop the clamp, paint at native width). Excludes the DRAFT-stamp /
+            // classification-banner / overlay-container boxes — none carry an
+            // inner table, so this never perturbs R88/R109.
+            var horzClip = bodyPrAf?.GetAttributes()
+                .Any(a => a.LocalName == "horzOverflow" && a.Value == "clip") == true;
+            long boxWidthPx = widthPx;
+            if (isFixedBox && !horzClip)
+            {
+                var innerTbl = txbx?.Elements().FirstOrDefault(e => e.LocalName == "tbl");
+                var tblGrid = innerTbl?.Elements().FirstOrDefault(e => e.LocalName == "tblGrid");
+                if (tblGrid != null)
+                {
+                    long gridTwips = 0;
+                    foreach (var gc in tblGrid.Elements().Where(e => e.LocalName == "gridCol"))
+                        gridTwips += GetLongAttr(gc, "w");
+                    // twips → px (1 twip = 1/15 px at 96dpi)
+                    int gridPx = (int)(gridTwips / 15);
+                    if (gridPx > boxWidthPx) boxWidthPx = gridPx;
+                }
+            }
+
+            // When the box widens to the table, never clip horizontally (the
+            // fill-confining overflow:hidden below would otherwise re-crush it);
+            // keep vertical clipping intent via the height path only.
+            bool widened = boxWidthPx > widthPx;
+            var heightProp = isFixedBox && hasFillBg && !widened
                 ? $"height:{heightPx}px;overflow:hidden"
                 : $"min-height:{heightPx}px";
 
@@ -1055,10 +1135,10 @@ public partial class WordHandler
             // wraps beside it; otherwise inline-block (inline / wrapNone /
             // behind / in-front-of-text).
             style = floatCss != null
-                ? $"{floatCss};width:{widthPx}px;{heightProp};box-sizing:border-box"
+                ? $"{floatCss};width:{boxWidthPx}px;{heightProp};box-sizing:border-box"
                 : isOverlayContainer
                     ? $"display:block;width:100%;{heightProp}"
-                    : $"display:inline-block;width:{widthPx}px;{heightProp};vertical-align:top";
+                    : $"display:inline-block;width:{boxWidthPx}px;{heightProp};vertical-align:top";
 
             // Rotation on standalone shapes too (was only applied inside groups)
             var sXfrm = spPr?.Elements().FirstOrDefault(e => e.LocalName == "xfrm");
@@ -1281,7 +1361,15 @@ public partial class WordHandler
             // surface as bare <p>s, losing the table structure). Mirror the
             // body-render pattern: Paragraph → RenderParagraphHtml,
             // Table → RenderTableHtml, SdtBlock → recurse into content.
-            RenderTextBoxContentChildren(sb, txbx);
+            // List grouping inside a text box mirrors the body/cell paths:
+            // a run of ListBullet/numbered paragraphs becomes <ul>/<ol> with
+            // <li> children instead of bare <p>s. Without this, a bullet list
+            // authored inside a DrawingML text box (e.g. a sidebar/cover layout
+            // box) lost every marker and collapsed to indented plain paragraphs.
+            var txbxOl = new OrderedListNumberingState();
+            string? txbxListTag = null;
+            RenderTextBoxContentChildren(sb, txbx, ref txbxListTag, txbxOl);
+            if (txbxListTag != null) sb.Append($"</{txbxListTag}>");
             sb.Append("</div>");
         }
         else
@@ -1309,16 +1397,31 @@ public partial class WordHandler
     /// paragraphs/tables; iterating only Paragraph/Table here lost every run
     /// nested under a <c>w:sdt</c>.
     /// </summary>
-    private void RenderTextBoxContentChildren(StringBuilder sb, OpenXmlElement container)
+    private void RenderTextBoxContentChildren(StringBuilder sb, OpenXmlElement container, ref string? txbxListTag, OrderedListNumberingState olState)
     {
         foreach (var child in container.ChildElements)
         {
             if (child is Paragraph para)
+            {
+                // List item → reuse the cell list renderer (opens <ul>/<ol>,
+                // renders the bullet glyph / ordered marker, carries indent).
+                var listStyle = GetParagraphListStyle(para);
+                if (listStyle != null)
+                {
+                    RenderCellListItem(sb, para, listStyle, ref txbxListTag, olState);
+                    continue;
+                }
+                // Non-list paragraph closes any open list, then renders flat.
+                if (txbxListTag != null) { sb.Append($"</{txbxListTag}>"); txbxListTag = null; }
                 RenderParagraphHtml(sb, para);
+            }
             else if (child is Table tbl)
+            {
+                if (txbxListTag != null) { sb.Append($"</{txbxListTag}>"); txbxListTag = null; }
                 RenderTableHtml(sb, tbl);
+            }
             else if (child is SdtBlock sdt && sdt.SdtContentBlock is { } content)
-                RenderTextBoxContentChildren(sb, content);
+                RenderTextBoxContentChildren(sb, content, ref txbxListTag, olState);
         }
     }
 

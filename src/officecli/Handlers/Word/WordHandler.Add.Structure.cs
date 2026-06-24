@@ -957,7 +957,21 @@ public partial class WordHandler
     {
         var revType = properties.GetValueOrDefault("reference.revision.type");
         bool isDel = string.Equals(revType, "del", StringComparison.OrdinalIgnoreCase);
-        if (!string.IsNullOrEmpty(customMark))
+        // BUG-DUMP-H97: a SYMBOL-glyph custom mark (<w:sym w:font=… w:char=…/>)
+        // round-trips via referenceCustomMarkSym ("font:char"); rebuild the <w:sym>
+        // element rather than a <w:t>. Takes precedence over the text mark (a sym
+        // mark carries no <w:t>, so customMark is empty for it).
+        if (properties.TryGetValue("referenceCustomMarkSym", out var symMark)
+            && !string.IsNullOrEmpty(symMark))
+        {
+            var sp = symMark.Split(':', 2);
+            refRun.AppendChild(new SymbolChar
+            {
+                Font = sp[0],
+                Char = sp.Length > 1 ? sp[1] : ""
+            });
+        }
+        else if (!string.IsNullOrEmpty(customMark))
             refRun.AppendChild(isDel
                 ? new DeletedText(customMark) { Space = SpaceProcessingModeValues.Preserve }
                 : (OpenXmlElement)new Text(customMark) { Space = SpaceProcessingModeValues.Preserve });

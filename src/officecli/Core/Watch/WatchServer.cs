@@ -1403,18 +1403,22 @@ internal class WatchServer : IDisposable
 
         if (patches.Count == 0) return null; // no changes
 
-        // A block that contains a mid-block page break (a paragraph with an
-        // inline <w:br type="page"/>) straddles a server page boundary: its
-        // <wb>…<we> span includes the structural
-        // </page-body></page></page-wrapper><div class="page-wrapper">…<page-body>
-        // markup of the next page. The section-count guard above does NOT catch
-        // this — the page (data-section) count is unchanged when you merely edit
-        // such a paragraph. Re-applying that span as a `replace`/`add` payload
-        // injects a whole page-wrapper INSIDE the current page-body, producing a
-        // visible page-nested-in-page. Detect the straddle directly on the patch
-        // payload and fall back to a full refresh.
+        // A block's <wb>…<we> markers can straddle a structural container, so its
+        // captured content is structurally unbalanced — it opens a container it
+        // never closes, or closes one it never opened. Known cases:
+        //   • a paragraph with an inline <w:br type="page"/> — its span includes
+        //     </page-body></page></page-wrapper><div class="page-wrapper">…<page-body>
+        //     (page count is unchanged, so the section-count guard misses it);
+        //   • a list — the <ol>/<ul> opens in the list block but the matching
+        //     </ol>/</ul> closes inside the NEXT block's span;
+        //   • multi-column / drop-cap wrappers split across blocks the same way.
+        // Re-applying such a payload via innerHTML corrupts the live DOM (the
+        // sibling-walk in wordPatchUpdate can't cross the container boundary):
+        // an injected page-wrapper nests a page inside a page; an orphaned
+        // </ol> wipes the list. Detect the straddle on the patch payload and
+        // fall back to a full refresh, which rebuilds the structure correctly.
         foreach (var p in patches)
-            if (p.Html != null && p.Html.Contains("class=\"page-wrapper\"", StringComparison.Ordinal))
+            if (WordPatchPayloadStraddlesStructure(p.Html))
                 return null;
 
         // If more than 60% of blocks changed (and enough blocks to matter), fallback to full refresh
@@ -1423,6 +1427,83 @@ internal class WatchServer : IDisposable
             return null;
 
         return patches;
+    }
+
+    // Matches any HTML start/end tag: group1 = "/" for an end tag, group2 = tag
+    // name, group3 = "/" for an explicit self-close (<x/>). Comments (<!-- -->)
+    // and the XML/doctype declarations don't match — group2 requires a leading
+    // ASCII letter. Attribute values never contain a raw '>' (the renderer
+    // HTML-encodes them), so a greedy `[^>]*?` to the tag's own '>' is safe.
+    private static readonly System.Text.RegularExpressions.Regex _htmlTagRx =
+        new(@"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)\b[^>]*?(/?)>",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Tags excluded from the balance count. Two groups, same reason — neither
+    // can make a block straddle a structural boundary:
+    //   • void elements — never carry children (<br>, <img>, <col> …);
+    //   • inline elements — the renderer always opens AND closes them within a
+    //     single run/paragraph render, so they are self-contained inside one
+    //     block by construction. Skipping them also hardens the balance count
+    //     against malformed inline markup buried in an attribute value (a raw
+    //     '>' the real renderer would have encoded as &gt;).
+    // Everything NOT in this set is treated as a potential block-level container
+    // and counted — so a future block container the renderer starts emitting is
+    // covered without editing this list. grep CONSISTENCY(word-patch-straddle).
+    private static readonly HashSet<string> _inlineOrVoidHtmlTags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // void
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr",
+        // inline / phrasing
+        "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "dfn", "em",
+        "font", "i", "kbd", "label", "mark", "q", "rp", "rt", "ruby", "s",
+        "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var",
+    };
+
+    /// <summary>
+    /// True when a Word block-diff patch payload is unsafe to splice into the
+    /// live DOM incrementally — i.e. the source block's &lt;wb&gt;/&lt;we&gt;
+    /// markers straddle a structural element.
+    ///
+    /// Root invariant (not a list of known cases): the client splice
+    /// (wordPatchUpdate) walks DOM *siblings* between the &lt;wb&gt; and
+    /// &lt;we&gt; markers. That only works when both markers sit at the same DOM
+    /// depth, which holds **iff** the captured payload is a well-balanced HTML
+    /// fragment with no leading orphan-close. So we test exactly that, over
+    /// EVERY element tag — no enumeration of containers (page-wrapper, ol/ul,
+    /// multi-column / drop-cap div, table, …). Any present-or-future renderer
+    /// shape that straddles a container is rejected, and the caller falls back
+    /// to a full refresh. CONSISTENCY(word-patch-straddle).
+    /// </summary>
+    internal static bool WordPatchPayloadStraddlesStructure(string? html)
+    {
+        if (string.IsNullOrEmpty(html)) return false;
+
+        var depth = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Text.RegularExpressions.Match m in _htmlTagRx.Matches(html))
+        {
+            var tag = m.Groups[2].Value;
+            if (m.Groups[3].Value == "/") continue;            // explicit self-close <x/>
+            if (_inlineOrVoidHtmlTags.Contains(tag)) continue; // inline / void — never straddles
+
+            if (m.Groups[1].Value == "/")
+            {
+                // A close whose matching open was never seen in this payload —
+                // it lives in a sibling block (e.g. </ol> after a list block,
+                // </page-wrapper> from a mid-paragraph page break). The markers
+                // are at different DOM depths → unsafe.
+                var d = depth.GetValueOrDefault(tag) - 1;
+                if (d < 0) return true;
+                depth[tag] = d;
+            }
+            else
+            {
+                depth[tag] = depth.GetValueOrDefault(tag) + 1;
+            }
+        }
+        // Any element left open at the end straddles into the next block.
+        foreach (var d in depth.Values) if (d != 0) return true;
+        return false;
     }
 
     private void SendSseWordPatch(List<WordPatch> patches, int version, int baseVersion, string? scrollTo)

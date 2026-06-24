@@ -1193,7 +1193,15 @@ public partial class WordHandler
 
         var hlRun = new Run(hlRProps);
         var hlText = properties.GetValueOrDefault("text", hlUrl ?? hlAnchor ?? "link");
-        hlRun.AppendChild(new Text(hlText) { Space = SpaceProcessingModeValues.Preserve });
+        // BUG-DUMP-H102: build the display text via AppendTextWithBreaks (same as
+        // AddRun) so a `\t` / `\n` in the hyperlink's text is rebuilt as a real
+        // <w:tab/> / <w:br/>, not a literal control char in <w:t>. A hyperlink
+        // whose leading content is a <w:tab/> (a TOC entry whose tab + page number
+        // sit inside the link) dumps as `add hyperlink text="\t…"`; the old literal
+        // `new Text` persisted the tab as a U+0009 character, which does NOT invoke
+        // the paragraph's right-tab-stop + dot leader — degrading the TOC layout.
+        // Empty text still yields an empty <w:t> (preserves the empty-wrapper case).
+        AppendTextWithBreaks(hlRun, hlText);
 
         var hyperlink = new Hyperlink(hlRun);
         if (hlRelId != null)

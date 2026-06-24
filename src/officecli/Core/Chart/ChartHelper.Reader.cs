@@ -1755,6 +1755,24 @@ internal static partial class ChartHelper
                 .ToArray();
         }
 
+        // Multi-level (grouped) category axis (<c:multiLvlStrRef>, emitted when Excel
+        // grouped row/column headers feed the category axis). PowerPoint draws a
+        // hierarchical axis; the FIRST <c:lvl> holds the innermost, per-point labels
+        // nearest the axis (later lvls are coarser groupings). The single-level renderer
+        // surfaces that innermost level (the grouping rows are a known limitation).
+        // Without this branch all category labels rendered blank.
+        var multiLvlRef = catData.Elements().FirstOrDefault(e => e.LocalName == "multiLvlStrRef");
+        var multiCache = multiLvlRef?.Elements().FirstOrDefault(e => e.LocalName == "multiLvlStrCache");
+        var firstLvl = multiCache?.Elements().FirstOrDefault(e => e.LocalName == "lvl");
+        if (firstLvl != null)
+        {
+            return firstLvl.Elements().Where(e => e.LocalName == "pt")
+                .OrderBy(p => uint.TryParse(
+                    p.GetAttributes().FirstOrDefault(a => a.LocalName == "idx").Value, out var n) ? n : 0u)
+                .Select(p => p.Elements().FirstOrDefault(e => e.LocalName == "v")?.InnerText ?? "")
+                .ToArray();
+        }
+
         // StringReference without cache — return null (data lives in cells)
         // The formula is read separately via ReadFormulaRef
         return null;

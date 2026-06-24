@@ -865,6 +865,16 @@ public partial class PowerPointHandler
             && (ln.GetFirstChild<Drawing.SolidFill>() != null
                 || ln.GetFirstChild<Drawing.GradientFill>() != null);
 
+        // Style-matrix fill/line (<p:style>/<a:fillRef>/<a:lnRef>) also make the shape
+        // visible — RenderShape falls back to GetStyleFillRefCss/GetStyleLineRefCss when
+        // spPr carries no fill/outline. A layout/master decoration styled only via the
+        // theme shape gallery (fillRef accent, empty spPr) was dropped by this guard
+        // while RenderShape would have drawn the themed fill. Mirror that fallback here.
+        if (!hasFill && !string.IsNullOrEmpty(GetStyleFillRefCss(shape.ShapeStyle, part, themeColors)))
+            hasFill = true;
+        if (!hasLine && !string.IsNullOrEmpty(GetStyleLineRefCss(shape.ShapeStyle, part, themeColors)))
+            hasLine = true;
+
         if (string.IsNullOrWhiteSpace(text) && !hasFill && !hasLine)
             return;
 

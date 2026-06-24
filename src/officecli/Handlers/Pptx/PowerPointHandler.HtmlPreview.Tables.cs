@@ -86,8 +86,15 @@ public partial class PowerPointHandler
             if (!string.IsNullOrEmpty(gradCss)) tblBgCss = $";background:{gradCss}";
         }
 
+        // Right-to-left table (<a:tblPr rtl="1">): PowerPoint reverses the visual column
+        // order (first column on the right). CSS direction:rtl on the <table> reverses the
+        // <td> order; cells then carry direction:ltr so their text stays laid out normally
+        // (matches PowerPoint, which reverses columns but keeps Latin cell text unchanged).
+        var tableRtl = tblPr?.RightToLeft?.Value == true;
+        var tableDirCss = tableRtl ? ";direction:rtl" : "";
+
         sb.AppendLine($"    <div class=\"table-container\"{dataPathAttr} style=\"left:{Units.EmuToPt(x)}pt;top:{Units.EmuToPt(y)}pt;width:{Units.EmuToPt(tableWidthEmu)}pt;height:{Units.EmuToPt(cy)}pt{tblBgCss}\">");
-        sb.AppendLine("      <table class=\"slide-table\">");
+        sb.AppendLine($"      <table class=\"slide-table\" style=\"{(tableRtl ? "direction:rtl" : "")}\">");
 
         // Column widths — emit absolute pt per <a:gridCol w>, not percentages.
         // table-layout:fixed + width:100% on .slide-table then preserves these
@@ -122,6 +129,10 @@ public partial class PowerPointHandler
             foreach (var cell in row.Elements<Drawing.TableCell>())
             {
                 var cellStyles = new List<string>();
+                // In an RTL table the <table> carries direction:rtl to reverse the column
+                // order; keep each cell's content laid out LTR so text/alignment is
+                // unchanged (PowerPoint reverses columns, not in-cell text flow).
+                if (tableRtl) cellStyles.Add("direction:ltr");
 
                 // Cell fill
                 var tcPr = cell.TableCellProperties ?? cell.GetFirstChild<Drawing.TableCellProperties>();

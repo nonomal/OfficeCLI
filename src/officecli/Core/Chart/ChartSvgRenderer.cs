@@ -86,6 +86,11 @@ internal partial class ChartSvgRenderer
     // axis tick labels and its (major+minor) gridlines are suppressed.
     public bool ValAxisVisible { get; set; } = true;
     public bool CatAxisVisible { get; set; } = true;
+    // <c:tickLblPos val="none"/>: hide the axis TICK LABELS while keeping the axis
+    // line, tick marks, and gridlines (distinct from <c:delete>, which hides the
+    // whole axis). Synced from ChartInfo. Gates only the label-text emit sites.
+    public bool ValTickLabelsHidden { get; set; }
+    public bool CatTickLabelsHidden { get; set; }
     // Major tick marks (<c:majorTickMark val="out|in|cross|none">). Short
     // perpendicular lines drawn at each major label position. Null/"none" => no
     // ticks. Synced from ChartInfo; only drawn when the element is present.
@@ -624,7 +629,7 @@ internal partial class ChartSvgRenderer
                 // Horizontal bars: category axis is VERTICAL on the left (x=plotOx).
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitVAxisTick(sb, plotOx, ly, CatMajorTickMark!);
-                if (CatTickLabelSkip <= 1 || dataIdx % CatTickLabelSkip == 0)
+                if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || dataIdx % CatTickLabelSkip == 0))
                     sb.AppendLine($"        <text x=\"{plotOx - 4}\" y=\"{ly:0.#}\" fill=\"{CatColor}\" font-size=\"{catFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{HtmlEncode(label)}</text>");
             }
             if (ValAxisVisible)
@@ -637,7 +642,8 @@ internal partial class ChartSvgRenderer
                 // Horizontal bars: value axis is HORIZONTAL at the bottom (y=oy+ph).
                 if (TickMarkVisible(ValMajorTickMark))
                     EmitHAxisTick(sb, tx, oy + ph, ValMajorTickMark!);
-                EmitBottomAxisLabel(sb, tx, oy + ph + 16, AxisColor, valFontSize, label, valLabelRotationDeg);
+                if (!ValTickLabelsHidden)
+                    EmitBottomAxisLabel(sb, tx, oy + ph + 16, AxisColor, valFontSize, label, valLabelRotationDeg);
             }
             // Reference-line overlays: horizontal bars → vertical line at value position on the X (value) axis.
             // For percentStacked charts, the value axis is 0–1 in OOXML but we display 0–100, so scale accordingly.
@@ -916,7 +922,7 @@ internal partial class ChartSvgRenderer
                 // Vertical columns: category axis is HORIZONTAL at the bottom (y=oy+ph).
                 if (TickMarkVisible(CatMajorTickMark))
                     EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
-                if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+                if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
                     EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, catFontSize, label, catLabelRotationDeg);
             }
             if (ValAxisVisible)
@@ -932,7 +938,8 @@ internal partial class ChartSvgRenderer
                 // Vertical columns: value axis is VERTICAL on the left (x=ox).
                 if (TickMarkVisible(ValMajorTickMark))
                     EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, valFontSize, label, valLabelRotationDeg);
+                if (!ValTickLabelsHidden)
+                    EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, valFontSize, label, valLabelRotationDeg);
             }
             // Reference-line overlays: vertical bars/columns → horizontal line at value position on the Y (value) axis.
             if (referenceLines != null)
@@ -1530,7 +1537,7 @@ internal partial class ChartSvgRenderer
             // horizontal <text>, dropping the category-axis label rotation that the
             // bar chart already applied (the bottom-margin reservation already fired
             // for all chart types, leaving the labels un-rotated in the gap).
-            if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+            if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
                 EmitBottomAxisLabel(sb, MapX(c), oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
 
@@ -1554,7 +1561,8 @@ internal partial class ChartSvgRenderer
             var ty = MapY(tickVal);
             if (ValAxisVisible && TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-            EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
+            if (!ValTickLabelsHidden)
+                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
         }
     }
 
@@ -2061,7 +2069,7 @@ internal partial class ChartSvgRenderer
             if (TickMarkVisible(CatMajorTickMark))
                 EmitHAxisTick(sb, lx, oy + ph, CatMajorTickMark!);
             // Honor the category-axis label rotation (mirrors bar/line via EmitBottomAxisLabel).
-            if (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0)
+            if (!CatTickLabelsHidden && (CatTickLabelSkip <= 1 || c % CatTickLabelSkip == 0))
                 EmitBottomAxisLabel(sb, lx, oy + ph + 16, CatColor, CatFontPx, label, catLabelRotationDeg);
         }
         if (ValAxisVisible)
@@ -2076,7 +2084,8 @@ internal partial class ChartSvgRenderer
             var ty = DataToY(val);
             if (TickMarkVisible(ValMajorTickMark))
                 EmitVAxisTick(sb, ox, ty, ValMajorTickMark!);
-            EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
+            if (!ValTickLabelsHidden)
+                EmitLeftAxisLabel(sb, ox - 4, ty, AxisColor, ValFontPx, label, valLabelRotationDeg);
         }
 
         // Data labels at each vertex (parity with bar/line/pie). The label TEXT is
@@ -3062,6 +3071,8 @@ internal partial class ChartSvgRenderer
         public bool CatMinorGridlines { get; set; }
         /// <summary>False when the value axis is deleted (&lt;c:delete val="1"/&gt;). Default true.</summary>
         public bool ValAxisVisible { get; set; } = true;
+        public bool ValTickLabelsHidden { get; set; }
+        public bool CatTickLabelsHidden { get; set; }
         /// <summary>False when the category axis is deleted (&lt;c:delete val="1"/&gt;). Default true.</summary>
         public bool CatAxisVisible { get; set; } = true;
         public string? AxisLineColor { get; set; }
@@ -3489,6 +3500,9 @@ internal partial class ChartSvgRenderer
             var valDeleteEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
             var valDelVal = valDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             info.ValAxisVisible = valDelVal != "1";
+            // <c:tickLblPos val="none"/>: hide value-axis labels (keep line/gridlines).
+            var valTlpEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "tickLblPos");
+            info.ValTickLabelsHidden = valTlpEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "none";
 
             // Axis line color
             var valSpPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "spPr");
@@ -3545,6 +3559,9 @@ internal partial class ChartSvgRenderer
             var catDeleteEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "delete");
             var catDelVal = catDeleteEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value;
             info.CatAxisVisible = catDelVal != "1";
+            // <c:tickLblPos val="none"/>: hide category-axis labels (keep line/gridlines).
+            var catTlpEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "tickLblPos");
+            info.CatTickLabelsHidden = catTlpEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value == "none";
             var catTitleEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
             info.CatAxisTitle = catTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
             var catTitleRPr = catTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
@@ -4270,6 +4287,8 @@ internal partial class ChartSvgRenderer
         ShowCatMinorGridlines = info.CatMinorGridlines;
         ValAxisVisible = info.ValAxisVisible;
         CatAxisVisible = info.CatAxisVisible;
+        ValTickLabelsHidden = info.ValTickLabelsHidden;
+        CatTickLabelsHidden = info.CatTickLabelsHidden;
         ValMajorTickMark = info.ValMajorTickMark;
         CatMajorTickMark = info.CatMajorTickMark;
         CatTickLabelSkip = info.CatTickLabelSkip;

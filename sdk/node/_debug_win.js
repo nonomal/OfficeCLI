@@ -14,6 +14,10 @@ console.log('SDK main pipe :', main);
 console.log('SDK ping pipe :', ping);
 
 const bin = path.join(process.env.LOCALAPPDATA || '', 'OfficeCLI', 'officecli.exe');
+if (!fs.existsSync(bin)) {
+  console.log('installing officecli first…');
+  try { oc.install(); } catch (e) { console.log('install threw:', e.message); }
+}
 console.log('BIN           :', bin, 'exists:', fs.existsSync(bin));
 
 const c = spawnSync(bin, ['create', f, '--force'], { encoding: 'utf8' });

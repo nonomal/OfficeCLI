@@ -16,8 +16,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (X.Y.Z). Required for manual runs.'
+        description: 'Version to publish (X.Y.Z, or X.Y.Z-pre for a test build). Required for manual runs.'
         required: false
+      dist_tag:
+        description: 'npm dist-tag (default: latest). Use e.g. "test" for a prerelease that must not move latest.'
+        required: false
+        default: 'latest'
 
 permissions:
   contents: read
@@ -69,4 +73,7 @@ jobs:
 
       - name: Publish to npm
         working-directory: npm
-        run: npm publish --provenance --access public
+        run: |
+          TAG='${{ github.event.inputs.dist_tag }}'
+          [ -z "$TAG" ] && TAG='latest'
+          npm publish --provenance --access public --tag "$TAG"

@@ -19,12 +19,17 @@ const MIRROR_BASE = 'https://d.officecli.ai';
 const GITHUB_BASE = 'https://github.com/' + REPO;
 
 // The package version is set to the release version at publish time, so the
-// tag we download from is derived directly from it (immutable, never stale).
+// release tag we download from is derived directly from it (immutable, never
+// stale). A prerelease/build suffix (e.g. 1.0.122-test.1) maps to the same
+// binary release v1.0.122 — strip everything after the first '-' or '+'.
 const VERSION = require('../package.json').version;
-const TAG = 'v' + VERSION;
+const TAG = 'v' + VERSION.split('+')[0].split('-')[0];
 
 const PKG_ROOT = path.join(__dirname, '..');
-const BIN_DIR = path.join(PKG_ROOT, 'bin');
+// Native binary lives under vendor/, NOT bin/: the repo's root .gitignore
+// ignores `bin/`, and keeping the download target out of bin/ avoids any
+// collision with the launcher shim.
+const BIN_DIR = path.join(PKG_ROOT, 'vendor');
 
 function log(msg) {
   // postinstall output goes to stderr so it never pollutes a command's stdout.

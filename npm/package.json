@@ -24,13 +24,13 @@
     "cli"
   ],
   "bin": {
-    "officecli": "bin/officecli.js"
+    "officecli": "officecli.js"
   },
   "scripts": {
     "postinstall": "node install.js"
   },
   "files": [
-    "bin/officecli.js",
+    "officecli.js",
     "lib/install-binary.js",
     "install.js",
     "README.md"

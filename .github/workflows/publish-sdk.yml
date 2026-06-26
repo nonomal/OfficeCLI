@@ -58,14 +58,9 @@ jobs:
         working-directory: sdk/node
         run: |
           npm pkg set name='${{ matrix.package }}'
-          # @aionui gets its own AionUI-branded README; the other names reuse
-          # README.md with their own name substituted into the examples.
-          # README.aionui.md is not in package.json "files", so it only ships
-          # after being copied over README.md here.
-          case '${{ matrix.package }}' in
-            @aionui/*) cp README.aionui.md README.md ;;
-            *) sed -i "s|@officecli/sdk|${{ matrix.package }}|g" README.md ;;
-          esac
+          # Only the package name differs per scope; links stay officecli.ai.
+          # Rewrite install/require examples to this package's name.
+          sed -i "s|@officecli/sdk|${{ matrix.package }}|g" README.md
           VERSION=$(node -p "require('./package.json').version")
           echo "Publishing candidate: ${{ matrix.package }}@$VERSION"
           if npm view "${{ matrix.package }}@$VERSION" version >/dev/null 2>&1; then

@@ -201,10 +201,17 @@ static partial class CommandBuilder
         // parent to child, so the caller's shell pipe (e.g. `| tail -1`,
         // $(...)) is NOT inherited and EOFs promptly when the client exits.
         // See ResidentStdoutInheritanceTests for the regression lock-in.
+        // CONSISTENCY(child-process-args): forward verb + path via ArgumentList,
+        // not a hand-quoted Arguments string. .NET re-parses the Arguments
+        // string with Windows-style quoting rules even on Unix, so a filePath
+        // containing a literal '"' (legal on macOS/Linux) or a trailing '\'
+        // would split into stray argv and the resident would reject startup.
+        // ArgumentList passes argv losslessly. Matches BlankDocCreator /
+        // FormatHandlerSession, which fork this same exe the same way.
         var startInfo = new ProcessStartInfo
         {
             FileName = exePath,
-            Arguments = $"__resident-serve__ \"{filePath}\"",
+            ArgumentList = { "__resident-serve__", filePath },
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,

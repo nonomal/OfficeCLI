@@ -458,31 +458,6 @@ public static class McpServer
         };
     }
 
-    private static string StatsWithOptionalPageCount(IDocumentHandler handler, JsonElement args, string file)
-    {
-        var stats = handler.ViewAsStats();
-        var wantPages = args.ValueKind == JsonValueKind.Object
-            && args.TryGetProperty("page_count", out var pcv)
-            && (pcv.ValueKind == JsonValueKind.True || (pcv.ValueKind == JsonValueKind.String && pcv.GetString() == "true"));
-        if (!wantPages || handler is not Handlers.WordHandler wh) return stats;
-        int? pages = null;
-        if (OperatingSystem.IsWindows())
-        {
-            try { pages = Core.WordPdfBackend.GetPageCount(file); } catch { pages = null; }
-        }
-        if (pages == null)
-        {
-            var tmpHtml = Path.Combine(Path.GetTempPath(), $"officecli_pc_{Path.GetFileNameWithoutExtension(file)}_{Guid.NewGuid():N}.html");
-            try
-            {
-                File.WriteAllText(tmpHtml, wh.ViewAsHtml(null));
-                pages = Core.HtmlScreenshot.GetPageCountFromDom(tmpHtml);
-            }
-            finally { try { File.Delete(tmpHtml); } catch { } }
-        }
-        return pages.HasValue ? $"Pages: {pages}\n" + stats : stats;
-    }
-
     // ====================================================================
     // Shared-grammar dispatch (Phase 1 of routing MCP through the CLI's one
     // System.CommandLine root). Translating the MCP JSON into the CLI token
@@ -610,35 +585,33 @@ public static class McpServer
             }
             case "view":
             {
-                var file = Arg("file");
+                // screenshot/pdf are intercepted multimodally before this switch
+                // (ExecuteToolMulti). Every other mode is routed through the
+                // shared CLI root, which gains the windowing/filter options the
+                // inline path dropped: issues --type (subtype filter), --limit,
+                // --cols, --page, --page-count.
                 var mode = Arg("mode");
-                var start = ArgIntOpt("start");
-                var end = ArgIntOpt("end");
-                var maxLines = ArgIntOpt("max_lines");
-                using var handler = DocumentHandlerFactory.Open(file);
-                if (mode is "html" or "h")
+                var ml = mode.ToLowerInvariant();
+                var argv = new List<string> { "view", Arg("file"), mode };
+                void Add(string flag, string? val) { if (!string.IsNullOrEmpty(val)) { argv.Add(flag); argv.Add(val); } }
+                var start = ArgIntOpt("start"); if (start.HasValue) Add("--start", start.Value.ToString());
+                var end = ArgIntOpt("end"); if (end.HasValue) Add("--end", end.Value.ToString());
+                var maxLines = ArgIntOpt("max_lines"); if (maxLines.HasValue) Add("--max-lines", maxLines.Value.ToString());
+                Add("--type", Arg("type"));   // issues subtype filter
+                Add("--cols", Arg("cols"));
+                Add("--page", Arg("page"));
+                var limit = ArgIntOpt("limit"); if (limit.HasValue) Add("--limit", limit.Value.ToString());
+                if (string.Equals(Arg("page_count"), "true", StringComparison.OrdinalIgnoreCase)) argv.Add("--page-count");
+
+                // issues/forms returned bare JSON from the inline path; ask the
+                // CLI for --json and unwrap the envelope to keep that shape. All
+                // other modes are plain text/HTML/SVG on stdout.
+                if (ml is "issues" or "i" or "forms" or "f")
                 {
-                    if (handler is Handlers.PowerPointHandler pptH)
-                        return pptH.ViewAsHtml(start, end);
-                    if (handler is Handlers.ExcelHandler excelH)
-                        return excelH.ViewAsHtml();
-                    if (handler is Handlers.WordHandler wordH)
-                        return wordH.ViewAsHtml();
+                    argv.Add("--json");
+                    return RunCliJsonData(argv.ToArray());
                 }
-                if (mode is "svg" or "g" && handler is Handlers.PowerPointHandler pptSvg)
-                    return pptSvg.ViewAsSvg(start ?? 1);
-                return mode.ToLowerInvariant() switch
-                {
-                    "text" or "t" => handler.ViewAsText(start, end, maxLines, null),
-                    "annotated" or "a" => handler.ViewAsAnnotated(start, end, maxLines, null),
-                    "outline" or "o" => handler.ViewAsOutline(),
-                    "stats" or "s" => StatsWithOptionalPageCount(handler, args, file),
-                    "issues" or "i" => OutputFormatter.FormatIssues(handler.ViewAsIssues(null, null), OutputFormat.Json),
-                    "forms" or "f" => handler is Handlers.WordHandler wfh
-                        ? wfh.ViewAsFormsJson().ToJsonString(OutputFormatter.PublicJsonOptions)
-                        : throw new ArgumentException("Forms view is only supported for .docx files."),
-                    _ => throw new ArgumentException($"Unknown mode: {mode}")
-                };
+                return RunCliText(argv.ToArray());
             }
             case "get":
             {
@@ -999,6 +972,10 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=val
         // locale / minimal (create)
         w.WriteStartObject("locale"); w.WriteString("type", "string"); w.WriteString("description", "For create (.docx): locale tag (e.g. zh-CN, ja, ar) setting per-script default fonts and RTL for Arabic/Hebrew. Pass en-US to force a deterministic LTR baseline."); w.WriteEndObject();
         w.WriteStartObject("minimal"); w.WriteString("type", "string"); w.WriteString("description", "For create (.docx): set 'true' to skip Word's Normal baseline and emit a raw OOXML-spec docx (compact / edge-case testing)."); w.WriteEndObject();
+        // page / limit / page_count (view)
+        w.WriteStartObject("page"); w.WriteString("type", "string"); w.WriteString("description", "Page/slide filter for view html mode (e.g. 1, 2-5, 1,3,5)."); w.WriteEndObject();
+        w.WriteStartObject("limit"); w.WriteString("type", "number"); w.WriteString("description", "For view issues mode: cap the number of issues returned."); w.WriteEndObject();
+        w.WriteStartObject("page_count"); w.WriteString("type", "string"); w.WriteString("description", "For view stats mode (.docx): set 'true' to also report total page count via Word repagination (Windows + Word required; slow)."); w.WriteEndObject();
         // format
         w.WriteStartObject("format"); w.WriteString("type", "string"); w.WriteString("description", "Document format for help: xlsx, pptx, docx"); w.WriteEndObject();
         // name (for load_skill)

@@ -182,9 +182,26 @@ public static class McpServer
 
         try
         {
-            // Unified tool: route by "command" arg; legacy: route by tool name
-            var toolName = name == "officecli" && args.ValueKind == JsonValueKind.Object && args.TryGetProperty("command", out var cmd)
-                ? cmd.GetString() ?? name : name;
+            // Unified tool: route by "command" arg; legacy: route by tool name.
+            // When the unified tool is invoked with no (or empty) "command", the
+            // old code fell back to the tool name and the switch reported
+            // "Unknown tool: officecli" — which misleads, since the tool is fine
+            // and it is the command field that is missing. Detect that here and
+            // name the actual gap, listing the valid commands.
+            string toolName;
+            if (name == "officecli")
+            {
+                var commandVal = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("command", out var cmd)
+                    ? cmd.GetString() : null;
+                if (string.IsNullOrWhiteSpace(commandVal))
+                    throw new ArgumentException(
+                        "Missing required 'command' field. Set command to one of: " + string.Join(", ", CommandNames) + ".");
+                toolName = commandVal;
+            }
+            else
+            {
+                toolName = name;
+            }
             var contents = ExecuteToolMulti(toolName, args);
             return WriteJson(w =>
             {
@@ -788,6 +805,11 @@ public static class McpServer
 
     // ==================== Tool Definitions ====================
 
+    // Single source of truth for the unified-tool command set: the inputSchema
+    // enum AND the missing-command guard both read this, so they cannot drift.
+    private static readonly string[] CommandNames =
+        { "create", "view", "get", "query", "set", "add", "remove", "move", "swap", "validate", "batch", "raw", "help", "load_skill" };
+
     // MCP-specific guidance prepended to every help response. Cannot be derived
     // from schemas/help/*.json — it's about how to use the *tool*, not what the
     // *document model* exposes.
@@ -821,7 +843,7 @@ Paths are 1-based: /slide[1]/shape[2], /body/p[3], /Sheet1/A1. Props are key=val
         // command
         w.WriteStartObject("command"); w.WriteString("type", "string");
         w.WriteStartArray("enum");
-        foreach (var c in new[] { "create", "view", "get", "query", "set", "add", "remove", "move", "swap", "validate", "batch", "raw", "help", "load_skill" })
+        foreach (var c in CommandNames)
             w.WriteStringValue(c);
         w.WriteEndArray();
         w.WriteString("description", "Command to execute");

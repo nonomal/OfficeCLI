@@ -340,7 +340,15 @@ public static class McpServer
             if (quote != '\0')
             {
                 if (ch == quote) quote = '\0';
-                else if (ch == '\\' && quote == '"' && i + 1 < s.Length) sb.Append(s[++i]);
+                // Inside double quotes a backslash only escapes the two chars
+                // that would otherwise affect quoting itself (" and \), matching
+                // bash double-quote semantics. ANY other backslash sequence is
+                // preserved verbatim — crucially `\n` / `\t` stay two characters
+                // so the downstream prop parser can turn them into a newline/tab.
+                // (The old "escape the next char" rule swallowed the backslash,
+                // turning text="A\nB" into the literal "AnB".)
+                else if (ch == '\\' && quote == '"' && i + 1 < s.Length && (s[i + 1] == '"' || s[i + 1] == '\\'))
+                    sb.Append(s[++i]);
                 else sb.Append(ch);
                 inTok = true;
             }

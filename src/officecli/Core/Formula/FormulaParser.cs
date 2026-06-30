@@ -2413,6 +2413,16 @@ internal static class FormulaParser
                     // '|' (vertical rule) and any other char: ignored.
                 }
             }
+            // R2-fuzz-2: the cell/row clamp above (MatrixMaxDim) caps m:mr/m:e,
+            // but the array COLSPEC builds one m:mc per colspec letter. A
+            // 65-letter colspec ({rrr…r}) would emit 65 m:mc into m:mcs, which
+            // CT_MCS caps at 64 — schema-invalid. Clamp the colspec-derived
+            // columns to 64 too (same warning style as the cell/row clamp).
+            if (justs.Count > MatrixMaxDim)
+            {
+                RecordUnrecognized($"\\begin{{{envName}}} (>{MatrixMaxDim} columns, truncated)");
+                justs = justs.Take(MatrixMaxDim).ToList();
+            }
             if (justs.Count > 0)
             {
                 var mPr = matrix.GetFirstChild<M.MatrixProperties>();

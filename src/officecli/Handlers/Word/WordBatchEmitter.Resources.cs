@@ -3527,7 +3527,20 @@ public static partial class WordBatchEmitter
                 // scalar formatting props are intentionally dropped here.
                 var shellProps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var k in s_styleShellProps)
-                    if (props.TryGetValue(k, out var pv)) shellProps[k] = pv;
+                    if (props.TryGetValue(k, out var pv))
+                    {
+                        // BUG-DUMP-STYLE-EMPTY-NAME: a <w:style> with no <w:name>
+                        // child surfaces as name="" in props. Emitting it makes the
+                        // shell `add style` materialize a spurious <w:name w:val=""/>
+                        // the source never had — breaking the recursive path's
+                        // exact-element-multiset guarantee. (The legacy raw-set path
+                        // hides this because its verbatim whole-style replace
+                        // overwrites the shell's empty name; the recursive path has no
+                        // such replace.) Skip the empty name so nameless styles —
+                        // typically auto table sub-styles — round-trip unchanged.
+                        if (k == "name" && string.IsNullOrEmpty(pv)) continue;
+                        shellProps[k] = pv;
+                    }
                 items.Add(new BatchItem
                 {
                     Command = "add",

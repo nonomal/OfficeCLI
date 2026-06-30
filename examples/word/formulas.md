@@ -1,8 +1,8 @@
 # Math / Formula Showcase
 
-Generates a Word document with 57 equations spanning algebra, calculus, linear algebra, statistics, number theory, chemistry, physics, and advanced LaTeX notation. Three files:
+Generates a Word document with 67 equations spanning algebra, calculus, linear algebra, statistics, number theory, chemistry, physics, advanced LaTeX notation, and a coverage-completeness catalog. Three files:
 
-- **formulas.sh** — builds the document with `officecli` (222 lines, 57 equations).
+- **formulas.sh** — builds the document with `officecli` (67 equations).
 - **formulas.docx** — generated output; open in Word to see OMML-rendered equations.
 - **formulas.md** — this file.
 
@@ -286,6 +286,54 @@ officecli add formulas.docx /body --type equation \
 
 **Features:** `mode` (display/inline — `display` wraps in `oMathPara` as a block; `inline` inserts `oMath` as a run inside the current paragraph)
 
+## X. Coverage Completeness — Additional Supported Commands
+
+A representative catalog of supported commands not exercised above: n-ary contour integrals, limit-style operators with under-limits, explicit limits placement, products, binary operators, arrows, additional math fonts, over/under-set, and legacy fraction syntax.
+
+```bash
+# 58. N-ary Contour Integrals (oint / oiint / oiiint)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\oint_C \vec{F} \cdot d\vec{r} = \iint_S (\nabla \times \vec{F}) \cdot d\vec{S}, \quad \oiint_S \vec{E} \cdot d\vec{A} = \frac{Q}{\epsilon_0}, \quad \oiiint_V \rho \, dV'
+
+# 59. Limit-style Operators with Under-limits (max / min / sup / inf)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\max_{1 \le i \le n} a_i \geq \min_{1 \le i \le n} a_i, \quad \sup_{x \in S} f(x) \geq \inf_{x \in S} f(x)'
+
+# 60. More Limit Operators (limsup / liminf / argmax / argmin)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\limsup_{n \to \infty} x_n \geq \liminf_{n \to \infty} x_n, \quad \hat{\theta} = \argmax_{\theta} L(\theta) = \argmin_{\theta} (-L(\theta))'
+
+# 61. Named Operators with Limits (det / gcd / Pr)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\det_{A \in M} A, \quad \gcd_{i} a_i, \quad \Pr_{x \sim D}[X = x]'
+
+# 62. Limits Placement Control (\limits / \nolimits)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\lim\limits_{x \to 0} \frac{\sin x}{x} = 1, \quad \sum\nolimits_{i=1}^{n} i = \frac{n(n+1)}{2}'
+
+# 63. N-ary Product (prod)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=n! = \prod_{k=1}^{n} k, \quad \prod_{p \text{ prime}} \frac{1}{1 - p^{-s}} = \zeta(s)'
+
+# 64. Binary Operators (div / ast / star / circ / oplus / ominus / otimes / odot / bullet)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=a \div b, \quad f \ast g, \quad a \star b, \quad f \circ g, \quad a \oplus b \ominus c, \quad u \otimes v \odot w, \quad x \bullet y'
+
+# 65. Arrows (leftarrow / uparrow / downarrow / leftrightarrow / Rightarrow / Leftarrow / Leftrightarrow / gets / implies)
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=a \leftarrow b \uparrow c \downarrow d \leftrightarrow e, \quad P \Rightarrow Q, \quad R \Leftarrow S, \quad X \Leftrightarrow Y, \quad n \gets n+1, \quad p \implies q'
+
+# 66. Math Fonts (boldsymbol / mathit) and Over/Under-set
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=\boldsymbol{\alpha} + \mathit{xyz}, \quad \overset{!}{=} \quad \underset{n \to \infty}{\lim} a_n'
+
+# 67. Relations, Logic, Sets, Trig, and Legacy Fraction
+officecli add formulas.docx /body --type equation \
+  --prop 'formula=a \neq b \sim c, \quad A \subset B \supset C, \quad p \lor \neg q \wedge r, \quad u \vee v, \quad \ell_1 \parallel \ell_2, \quad \varnothing = \complement_U U, \quad \cos^2 x + \tan x - \ln x, \quad {a \over b}'
+```
+
+**Features:** `\oint`, `\oiint`, `\oiiint` (n-ary contour integrals), `\max`, `\min`, `\sup`, `\inf`, `\limsup`, `\liminf`, `\argmax`, `\argmin`, `\det`, `\gcd`, `\Pr` (limit-style operators with under-limits), `\limits`, `\nolimits` (limits placement), `\prod` (n-ary product), `\div`, `\ast`, `\star`, `\circ`, `\oplus`, `\ominus`, `\otimes`, `\odot`, `\bullet` (binary operators), `\leftarrow`, `\uparrow`, `\downarrow`, `\leftrightarrow`, `\Rightarrow`, `\Leftarrow`, `\Leftrightarrow`, `\gets`, `\implies` (arrows), `\boldsymbol`, `\mathit` (math fonts), `\underset` (under-set), `\neq`, `\sim`, `\subset`, `\supset`, `\lor`, `\neg`, `\wedge`, `\vee`, `\parallel` (relations/logic), `\varnothing`, `\complement` (sets), `\cos`, `\tan`, `\ln` (trig/functions), `{a \over b}` (legacy fraction syntax)
+
 ## Complete Feature Coverage
 
 | Feature | Section |
@@ -304,6 +352,14 @@ officecli add formulas.docx /body --type equation \
 | Math fonts (`\mathbb`, `\mathcal`, `\mathbf`, `\mathrm`) | VIII |
 | Colored math (`\textcolor`, `\color`) | VIII |
 | Spacing control (`\,`, `\;`, `\quad`, `\qquad`) | II, VI, VIII |
+| N-ary contour integrals (`\oint`, `\oiint`, `\oiiint`) | X |
+| Limit-style operators (`\max`, `\min`, `\sup`, `\inf`, `\limsup`, `\liminf`, `\argmax`, `\argmin`, `\det`, `\gcd`, `\Pr`) | X |
+| Limits placement (`\limits`, `\nolimits`), product (`\prod`) | X |
+| Binary operators (`\div`, `\ast`, `\star`, `\circ`, `\oplus`, `\ominus`, `\otimes`, `\odot`, `\bullet`) | X |
+| Arrows (`\leftarrow`, `\uparrow`, `\downarrow`, `\leftrightarrow`, `\Rightarrow`, `\Leftarrow`, `\Leftrightarrow`, `\gets`, `\implies`) | X |
+| Additional math fonts (`\boldsymbol`, `\mathit`), over/under-set (`\underset`) | X |
+| Relations/logic/sets (`\neq`, `\sim`, `\subset`, `\supset`, `\lor`, `\neg`, `\wedge`, `\vee`, `\parallel`, `\varnothing`, `\complement`) | X |
+| Trig/functions (`\cos`, `\tan`, `\ln`), legacy fraction (`{a \over b}`) | X |
 
 ## Inspect the Generated File
 

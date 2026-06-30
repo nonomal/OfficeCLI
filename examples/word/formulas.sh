@@ -215,6 +215,39 @@ $CLI add "$OUT" /body --type equation --prop 'formula=E = mc^{2}' --prop mode=di
 $CLI add "$OUT" /body --type paragraph --prop text="57. Inline mode — equation embedded mid-sentence:"
 $CLI add "$OUT" /body --type equation --prop 'formula=A = \pi r^{2}' --prop mode=inline
 
+# ==================== X. Coverage Completeness — Additional Supported Commands ====================
+$CLI add "$OUT" /body --type paragraph --prop text="X. Coverage Completeness — Additional Supported Commands" --prop style=Heading2
+
+$CLI add "$OUT" /body --type paragraph --prop text="58. N-ary Contour Integrals (oint / oiint / oiiint):"
+$CLI add "$OUT" /body --type equation --prop 'formula=\oint_C \vec{F} \cdot d\vec{r} = \iint_S (\nabla \times \vec{F}) \cdot d\vec{S}, \quad \oiint_S \vec{E} \cdot d\vec{A} = \frac{Q}{\epsilon_0}, \quad \oiiint_V \rho \, dV'
+
+$CLI add "$OUT" /body --type paragraph --prop text="59. Limit-style Operators with Under-limits (max / min / sup / inf):"
+$CLI add "$OUT" /body --type equation --prop 'formula=\max_{1 \le i \le n} a_i \geq \min_{1 \le i \le n} a_i, \quad \sup_{x \in S} f(x) \geq \inf_{x \in S} f(x)'
+
+$CLI add "$OUT" /body --type paragraph --prop text="60. More Limit Operators (limsup / liminf / argmax / argmin):"
+$CLI add "$OUT" /body --type equation --prop 'formula=\limsup_{n \to \infty} x_n \geq \liminf_{n \to \infty} x_n, \quad \hat{\theta} = \argmax_{\theta} L(\theta) = \argmin_{\theta} (-L(\theta))'
+
+$CLI add "$OUT" /body --type paragraph --prop text="61. Named Operators with Limits (det / gcd / Pr):"
+$CLI add "$OUT" /body --type equation --prop 'formula=\det_{A \in M} A, \quad \gcd_{i} a_i, \quad \Pr_{x \sim D}[X = x]'
+
+$CLI add "$OUT" /body --type paragraph --prop text="62. Limits Placement Control (\\limits / \\nolimits):"
+$CLI add "$OUT" /body --type equation --prop 'formula=\lim\limits_{x \to 0} \frac{\sin x}{x} = 1, \quad \sum\nolimits_{i=1}^{n} i = \frac{n(n+1)}{2}'
+
+$CLI add "$OUT" /body --type paragraph --prop text="63. N-ary Product (prod):"
+$CLI add "$OUT" /body --type equation --prop 'formula=n! = \prod_{k=1}^{n} k, \quad \prod_{p \text{ prime}} \frac{1}{1 - p^{-s}} = \zeta(s)'
+
+$CLI add "$OUT" /body --type paragraph --prop text="64. Binary Operators (div / ast / star / circ / oplus / ominus / otimes / odot / bullet):"
+$CLI add "$OUT" /body --type equation --prop 'formula=a \div b, \quad f \ast g, \quad a \star b, \quad f \circ g, \quad a \oplus b \ominus c, \quad u \otimes v \odot w, \quad x \bullet y'
+
+$CLI add "$OUT" /body --type paragraph --prop text="65. Arrows (leftarrow / uparrow / downarrow / leftrightarrow / Rightarrow / Leftarrow / Leftrightarrow / gets / implies):"
+$CLI add "$OUT" /body --type equation --prop 'formula=a \leftarrow b \uparrow c \downarrow d \leftrightarrow e, \quad P \Rightarrow Q, \quad R \Leftarrow S, \quad X \Leftrightarrow Y, \quad n \gets n+1, \quad p \implies q'
+
+$CLI add "$OUT" /body --type paragraph --prop text="66. Math Fonts (boldsymbol / mathit) and Over/Under-set:"
+$CLI add "$OUT" /body --type equation --prop 'formula=\boldsymbol{\alpha} + \mathit{xyz}, \quad \overset{!}{=} \quad \underset{n \to \infty}{\lim} a_n'
+
+$CLI add "$OUT" /body --type paragraph --prop text="67. Relations, Logic, Sets, Trig, and Legacy Fraction (\\neq / \\sim / \\subset / \\lor / \\neg / \\wedge / \\parallel / \\varnothing / \\complement / \\cos / \\tan / \\ln / {a \\over b}):"
+$CLI add "$OUT" /body --type equation --prop 'formula=a \neq b \sim c, \quad A \subset B \supset C, \quad p \lor \neg q \wedge r, \quad u \vee v, \quad \ell_1 \parallel \ell_2, \quad \varnothing = \complement_U U, \quad \cos^2 x + \tan x - \ln x, \quad {a \over b}'
+
 $CLI close "$OUT"
 
 $CLI validate "$OUT"

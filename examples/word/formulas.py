@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
 Formula Showcase — generates formulas.docx exercising the docx `equation`
-element: 57 LaTeX formulas across algebra, calculus, linear algebra, probability,
+element: 67 LaTeX formulas across algebra, calculus, linear algebra, probability,
 number theory, chemistry, physics, and advanced notation (matrices, cases,
-delimiters, accents, big operators, colored math, display vs inline mode).
+delimiters, accents, big operators, colored math, display vs inline mode),
+plus a coverage-completeness section (contour integrals, limit-style operators,
+\limits/\nolimits, products, binary operators, arrows, math fonts, legacy
+fraction syntax).
 
 SDK twin of formulas.sh (officecli CLI). Both produce an equivalent
 formulas.docx. This one drives the **officecli Python SDK**
@@ -196,6 +199,30 @@ with officecli.create(FILE, "--force") as doc:
         # mode=inline: equation is appended to the parent paragraph as an oMath child
         para("57. Inline mode — equation embedded mid-sentence:"),
         eqn(r"A = \pi r^{2}", mode="inline"),
+
+        # ====== X. Coverage Completeness — Additional Supported Commands ======
+        para("X. Coverage Completeness — Additional Supported Commands",
+             style="Heading2"),
+        para("58. N-ary Contour Integrals (oint / oiint / oiiint):"),
+        eqn(r"\oint_C \vec{F} \cdot d\vec{r} = \iint_S (\nabla \times \vec{F}) \cdot d\vec{S}, \quad \oiint_S \vec{E} \cdot d\vec{A} = \frac{Q}{\epsilon_0}, \quad \oiiint_V \rho \, dV"),
+        para("59. Limit-style Operators with Under-limits (max / min / sup / inf):"),
+        eqn(r"\max_{1 \le i \le n} a_i \geq \min_{1 \le i \le n} a_i, \quad \sup_{x \in S} f(x) \geq \inf_{x \in S} f(x)"),
+        para("60. More Limit Operators (limsup / liminf / argmax / argmin):"),
+        eqn(r"\limsup_{n \to \infty} x_n \geq \liminf_{n \to \infty} x_n, \quad \hat{\theta} = \argmax_{\theta} L(\theta) = \argmin_{\theta} (-L(\theta))"),
+        para("61. Named Operators with Limits (det / gcd / Pr):"),
+        eqn(r"\det_{A \in M} A, \quad \gcd_{i} a_i, \quad \Pr_{x \sim D}[X = x]"),
+        para("62. Limits Placement Control (\\limits / \\nolimits):"),
+        eqn(r"\lim\limits_{x \to 0} \frac{\sin x}{x} = 1, \quad \sum\nolimits_{i=1}^{n} i = \frac{n(n+1)}{2}"),
+        para("63. N-ary Product (prod):"),
+        eqn(r"n! = \prod_{k=1}^{n} k, \quad \prod_{p \text{ prime}} \frac{1}{1 - p^{-s}} = \zeta(s)"),
+        para("64. Binary Operators (div / ast / star / circ / oplus / ominus / otimes / odot / bullet):"),
+        eqn(r"a \div b, \quad f \ast g, \quad a \star b, \quad f \circ g, \quad a \oplus b \ominus c, \quad u \otimes v \odot w, \quad x \bullet y"),
+        para("65. Arrows (leftarrow / uparrow / downarrow / leftrightarrow / Rightarrow / Leftarrow / Leftrightarrow / gets / implies):"),
+        eqn(r"a \leftarrow b \uparrow c \downarrow d \leftrightarrow e, \quad P \Rightarrow Q, \quad R \Leftarrow S, \quad X \Leftrightarrow Y, \quad n \gets n+1, \quad p \implies q"),
+        para("66. Math Fonts (boldsymbol / mathit) and Over/Under-set:"),
+        eqn(r"\boldsymbol{\alpha} + \mathit{xyz}, \quad \overset{!}{=} \quad \underset{n \to \infty}{\lim} a_n"),
+        para("67. Relations, Logic, Sets, Trig, and Legacy Fraction (\\neq / \\sim / \\subset / \\lor / \\neg / \\wedge / \\parallel / \\varnothing / \\complement / \\cos / \\tan / \\ln / {a \\over b}):"),
+        eqn(r"a \neq b \sim c, \quad A \subset B \supset C, \quad p \lor \neg q \wedge r, \quad u \vee v, \quad \ell_1 \parallel \ell_2, \quad \varnothing = \complement_U U, \quad \cos^2 x + \tan x - \ln x, \quad {a \over b}"),
     ]
 
     doc.batch(items)

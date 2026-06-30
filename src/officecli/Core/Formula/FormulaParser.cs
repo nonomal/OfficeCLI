@@ -1636,23 +1636,34 @@ internal static class FormulaParser
                 // italic) like \text; \textit re-introduces italic via m:sty.
                 var content = ParseBracedArg(tokens, ref pos);
                 var text = ExtractText(content);
-                var rPr = new M.RunProperties(new M.NormalText());
+                // ECMA-376 CT_MathRPr is (lit?, (nor | (scr?, sty?)), ...):
+                // m:nor (NormalText) is mutually exclusive with BOTH m:scr
+                // (script alphabet) and m:sty (weight/posture). Emitting m:nor
+                // alongside either yields a schema-invalid run Word refuses
+                // ("unexpected child element 'sty'/'scr'"). So a styled text
+                // command carries ONLY its axis (no m:nor): \textbf/\textit/
+                // \emph → m:sty=b/i (renders upright bold/italic for letters,
+                // same as \mathbf/\mathit); \texttt/\textsf → m:scr; plain
+                // \text/\textrm keep bare m:nor for upright text.
+                M.RunProperties rPr;
                 switch (cmd)
                 {
                     case "textbf":
-                        rPr.AppendChild(new M.Style { Val = M.StyleValues.Bold });
+                        rPr = new M.RunProperties(new M.Style { Val = M.StyleValues.Bold });
                         break;
                     case "textit":
                     case "emph":
-                        rPr.AppendChild(new M.Style { Val = M.StyleValues.Italic });
+                        rPr = new M.RunProperties(new M.Style { Val = M.StyleValues.Italic });
                         break;
                     case "texttt":
-                        rPr.AppendChild(new M.Script { Val = M.ScriptValues.Monospace });
+                        rPr = new M.RunProperties(new M.Script { Val = M.ScriptValues.Monospace });
                         break;
                     case "textsf":
-                        rPr.AppendChild(new M.Script { Val = M.ScriptValues.SansSerif });
+                        rPr = new M.RunProperties(new M.Script { Val = M.ScriptValues.SansSerif });
                         break;
-                    // "text", "textrm": plain upright, no extra axis.
+                    default: // "text", "textrm": plain upright, no extra axis.
+                        rPr = new M.RunProperties(new M.NormalText());
+                        break;
                 }
                 return new M.Run(
                     rPr,

@@ -563,6 +563,7 @@ internal static class FormulaParser
                             ("[", "]") => "bmatrix",
                             ("{", "}") => "Bmatrix",
                             ("|", "|") => "vmatrix",
+                            ("‖", "‖") => "Vmatrix",
                             _ => null
                         };
                         var matrixContent = ToLatexByName(inner);
@@ -1385,7 +1386,7 @@ internal static class FormulaParser
                 // bracket is absent.
                 string? starAlign = null;
                 if (envName is "matrix*" or "pmatrix*" or "bmatrix*"
-                    or "Bmatrix*" or "vmatrix*")
+                    or "Bmatrix*" or "vmatrix*" or "Vmatrix*")
                 {
                     if (pos < tokens.Count && tokens[pos].Type == TokenType.LBracket)
                     {
@@ -1403,7 +1404,8 @@ internal static class FormulaParser
                     envName = envName[..^1]; // drop trailing '*'
                 }
 
-                if (envName is "matrix" or "pmatrix" or "bmatrix" or "Bmatrix" or "vmatrix" or "cases"
+                if (envName is "matrix" or "pmatrix" or "bmatrix" or "Bmatrix" or "vmatrix"
+                    or "Vmatrix" or "cases"
                     or "rcases" or "array" or "smallmatrix")
                 {
                     // For array, read the column spec like {l|c|r} and honor the
@@ -2561,6 +2563,8 @@ internal static class FormulaParser
             "bmatrix" => ("[", "]"),
             "Bmatrix" => ("{", "}"),
             "vmatrix" => ("|", "|"),
+            // \begin{Vmatrix}: double-bar (norm) delimiters ‖ (U+2016).
+            "Vmatrix" => ("‖", "‖"),
             "cases" => ("{", ""),
             // \begin{rcases}…\end{rcases}: brace on the RIGHT — the opening
             // delimiter is empty and the closing one is "}". Mirror of cases.

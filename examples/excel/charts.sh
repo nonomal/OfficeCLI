@@ -146,376 +146,71 @@ done
 echo "  Done: Sheet4 data"
 
 ###############################################################################
-# Chart 1: Combo chart (bar + line dual axis)
+# Charts 1-8 — HIGH-LEVEL API (`officecli add --type chart`).
+# Each chart is one `add` call: chartType + a cell dataRange (or inline data for
+# the pie/doughnut, whose source cells aren't contiguous) + styling props
+# (title, colors, legend, 3D view, trendline, secondary axis, radar fill, stock
+# up/down bars). Positioned with x/y/width/height in cell units.
+# Exception: Chart 5 (bubble) stays on raw-set — the high-level command can't yet
+# map a dataRange to a single x/y/size series (see its note below).
 ###############################################################################
-echo "  -> Chart 1: Combo chart (bar + line dual axis)"
 
-CHART1_REL=$(officecli add-part "$XLSX" /Sheet1 --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
+# Chart 1: Combo — regional sales columns + YoY-growth line on a secondary axis.
+echo "  -> Chart 1: Combo chart (columns + secondary-axis line)"
+officecli add "$XLSX" /Sheet1 --type chart \
+  --prop chartType=combo \
+  --prop title="Monthly Sales and YoY Growth Trend" \
+  --prop dataRange=Sheet1!A1:F13 \
+  --prop combotypes=column,column,column,column,line \
+  --prop secondaryaxis=5 \
+  --prop colors=2E75B6,9DC3E6,BDD7EE,C55A11,FF0000 \
+  --prop legend=b --prop axisTitle="Sales (10K)" \
+  --prop x=7 --prop y=0 --prop width=11 --prop height=18
 
-officecli raw-set "$XLSX" '/Sheet1/chart[1]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr rot="0" /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill><a:latin typeface="Microsoft YaHei" /><a:ea typeface="Microsoft YaHei" /></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:rPr><a:t>Monthly Sales and YoY Growth Trend</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:barChart>
-        <c:barDir val="col" /><c:grouping val="clustered" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="1F4E79" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="2E75B6" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$2:$B$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Sheet1!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="C55A11" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="ED7D31" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$C$2:$C$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Sheet1!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="548235" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="70AD47" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$D$2:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:axId val="1" /><c:axId val="2" />
-      </c:barChart>
-      <c:lineChart>
-        <c:grouping val="standard" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="3" /><c:order val="3" />
-          <c:tx><c:strRef><c:f>Sheet1!$F$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="38100" cap="rnd"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:prstDash val="solid" /><a:round /></a:ln></c:spPr>
-          <c:marker><c:symbol val="circle" /><c:size val="8" />
-            <c:spPr><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:ln></c:spPr>
-          </c:marker>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="1" /><c:showCatName val="0" /><c:showSerName val="0" /><c:showPercent val="0" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$F$2:$F$13</c:f></c:numRef></c:val>
-          <c:smooth val="1" />
-        </c:ser>
-        <c:marker val="1" />
-        <c:axId val="1" /><c:axId val="3" />
-      </c:lineChart>
-      <c:catAx>
-        <c:axId val="1" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-        <c:crossAx val="2" />
-      </c:catAx>
-      <c:valAx>
-        <c:axId val="2" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Sales (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="1" />
-      </c:valAx>
-      <c:valAx>
-        <c:axId val="3" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="r" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>YoY Growth (%)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="FF0000"><a:alpha val="50000" /></a:srgbClr></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="1" /><c:crosses val="max" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" />
-      <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-    </c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Sheet1/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>18</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>18</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart 1\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART1_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 1 combo chart"
-
-###############################################################################
-# Chart 2: 3D bar chart
-###############################################################################
+# Chart 2: 3D clustered column — regional comparison.
 echo "  -> Chart 2: 3D bar chart"
+officecli add "$XLSX" /Sheet1 --type chart \
+  --prop chartType=column3d \
+  --prop title="3D Regional Sales Comparison" \
+  --prop dataRange=Sheet1!A1:D13 \
+  --prop view3d=15,20,30 \
+  --prop colors=4472C4,ED7D31,70AD47 \
+  --prop legend=b \
+  --prop x=7 --prop y=19 --prop width=11 --prop height=18
 
-CHART2_REL=$(officecli add-part "$XLSX" /Sheet1 --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/Sheet1/chart[2]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>3D Regional Sales Comparison</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:view3D>
-      <c:rotX val="15" /><c:rotY val="20" /><c:depthPercent val="100" /><c:rAngAx val="1" /><c:perspective val="30" />
-    </c:view3D>
-    <c:plotArea>
-      <c:layout />
-      <c:bar3DChart>
-        <c:barDir val="col" /><c:grouping val="clustered" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="4472C4" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="5B9BD5" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="9DC3E6" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$2:$B$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Sheet1!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="ED7D31" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="F4B183" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="F8CBAD" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$C$2:$C$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Sheet1!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="70AD47" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="A9D18E" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="C5E0B4" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$D$2:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:shape val="cylinder" />
-        <c:axId val="10" /><c:axId val="20" /><c:axId val="30" />
-      </c:bar3DChart>
-      <c:catAx><c:axId val="10" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="20" /></c:catAx>
-      <c:valAx><c:axId val="20" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" /><c:numFmt formatCode="#,##0" sourceLinked="0" /><c:crossAx val="10" /></c:valAx>
-      <c:serAx><c:axId val="30" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="20" /></c:serAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Sheet1/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>19</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>18</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>37</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"3\" name=\"Chart 2\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART2_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 2 3D bar chart"
-
-###############################################################################
-# Chart 3: Scatter plot + trendline (Sheet2)
-###############################################################################
+# Chart 3: Scatter + linear trendline — ad spend vs sales.
 echo "  -> Chart 3: Scatter plot + trendline"
+officecli add "$XLSX" /Analysis --type chart \
+  --prop chartType=scatter \
+  --prop title="Ad Spend vs Sales Correlation" \
+  --prop dataRange=Analysis!A1:B16 \
+  --prop trendline=linear \
+  --prop colors=7030A0 \
+  --prop catTitle="Ad Spend (10K)" --prop axisTitle="Sales (10K)" \
+  --prop legend=b \
+  --prop x=5 --prop y=0 --prop width=11 --prop height=18
 
-CHART3_REL=$(officecli add-part "$XLSX" /Analysis --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/Analysis/chart[1]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="7030A0" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Ad Spend vs Sales Correlation</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:scatterChart>
-        <c:scatterStyle val="lineMarker" />
-        <c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Analysis!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="circle" /><c:size val="10" />
-            <c:spPr>
-              <a:solidFill><a:srgbClr val="7030A0"><a:alpha val="70000" /></a:srgbClr></a:solidFill>
-              <a:ln w="19050"><a:solidFill><a:srgbClr val="7030A0" /></a:solidFill></a:ln>
-              <a:effectLst><a:outerShdw blurRad="40000" dist="20000" dir="5400000"><a:srgbClr val="000000"><a:alpha val="30000" /></a:srgbClr></a:outerShdw></a:effectLst>
-            </c:spPr>
-          </c:marker>
-          <c:trendline>
-            <c:spPr><a:ln w="25400" cap="rnd"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:prstDash val="dash" /><a:round /></a:ln></c:spPr>
-            <c:trendlineType val="linear" />
-            <c:dispRSqr val="1" /><c:dispEq val="1" />
-          </c:trendline>
-          <c:xVal><c:numRef><c:f>Analysis!$A$2:$A$16</c:f></c:numRef></c:xVal>
-          <c:yVal><c:numRef><c:f>Analysis!$B$2:$B$16</c:f></c:numRef></c:yVal>
-          <c:smooth val="0" />
-        </c:ser>
-        <c:axId val="100" /><c:axId val="200" />
-      </c:scatterChart>
-      <c:valAx>
-        <c:axId val="100" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:title><c:tx><c:rich><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000" /></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Ad Spend (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="200" />
-      </c:valAx>
-      <c:valAx>
-        <c:axId val="200" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000" /></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Sales (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="100" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Analysis/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>16</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>18</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart 3\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART3_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 3 scatter plot"
-
-###############################################################################
-# Chart 4: 3D pie chart (exploded)
-###############################################################################
+# Chart 4: Exploded 3D pie — July regional share. Values live in one row
+# (B8:D8) with category labels in another (B1:D1), so they're passed inline.
 echo "  -> Chart 4: 3D pie chart (exploded)"
+officecli add "$XLSX" /Sheet1 --type chart \
+  --prop chartType=pie3d \
+  --prop title="July Regional Sales Share (3D)" \
+  --prop categories="East Sales,South Sales,North Sales" \
+  --prop series1="Jul:195,168,145" \
+  --prop explosion=10 --prop view3d=30,70,30 \
+  --prop dataLabels=percent \
+  --prop colors=1F4E79,C55A11,548235 \
+  --prop legend=b \
+  --prop x=19 --prop y=0 --prop width=9 --prop height=18
 
-CHART4_REL=$(officecli add-part "$XLSX" /Sheet1 --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/Sheet1/chart[3]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Annual Regional Sales Share (3D)</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:view3D>
-      <c:rotX val="30" /><c:rotY val="70" /><c:rAngAx val="0" /><c:perspective val="30" />
-    </c:view3D>
-    <c:plotArea>
-      <c:layout />
-      <c:pie3DChart>
-        <c:varyColors val="1" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:explosion val="10" />
-          <c:dPt><c:idx val="0" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="1F4E79" /></a:gs><a:gs pos="100000"><a:srgbClr val="4472C4" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dPt><c:idx val="1" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="C55A11" /></a:gs><a:gs pos="100000"><a:srgbClr val="ED7D31" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dPt><c:idx val="2" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="548235" /></a:gs><a:gs pos="100000"><a:srgbClr val="70AD47" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="1" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$8:$D$8</c:f></c:numRef></c:val>
-        </c:ser>
-      </c:pie3DChart>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Sheet1/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>19</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>28</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>18</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"4\" name=\"Chart 4\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART4_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 4 3D pie chart"
-
-###############################################################################
-# Chart 5: Bubble chart (Sheet2)
-###############################################################################
-echo "  -> Chart 5: Bubble chart"
-
+# Chart 5: Bubble — ad spend (x) vs sales (y), bubble size = market share.
+# KEPT ON raw-set: the high-level `add --type chart --prop chartType=bubble`
+# reads a multi-column dataRange as several y-series sharing column A as x — it
+# cannot map three columns to a single x / y / size series (multi-point bubble).
+# Until that mapping exists, the faithful single-series bubble needs raw XML.
+echo "  -> Chart 5: Bubble chart (raw-set — see note)"
 CHART5_REL=$(officecli add-part "$XLSX" /Analysis --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
 officecli raw-set "$XLSX" '/Analysis/chart[2]' --xpath "/c:chartSpace" --action replace --xml '
 <c:chartSpace>
   <c:chart>
@@ -536,7 +231,6 @@ officecli raw-set "$XLSX" '/Analysis/chart[2]' --xpath "/c:chartSpace" --action 
           <c:spPr>
             <a:solidFill><a:srgbClr val="7030A0"><a:alpha val="60000" /></a:srgbClr></a:solidFill>
             <a:ln w="19050"><a:solidFill><a:srgbClr val="7030A0" /></a:solidFill></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000"><a:srgbClr val="000000"><a:alpha val="25000" /></a:srgbClr></a:outerShdw></a:effectLst>
           </c:spPr>
           <c:xVal><c:numRef><c:f>Analysis!$A$2:$A$16</c:f></c:numRef></c:xVal>
           <c:yVal><c:numRef><c:f>Analysis!$B$2:$B$16</c:f></c:numRef></c:yVal>
@@ -560,7 +254,6 @@ officecli raw-set "$XLSX" '/Analysis/chart[2]' --xpath "/c:chartSpace" --action 
     <c:plotVisOnly val="1" />
   </c:chart>
 </c:chartSpace>'
-
 officecli raw-set "$XLSX" '/Analysis/drawing' --xpath "//xdr:wsDr" --action append --xml "
 <xdr:twoCellAnchor>
   <xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>19</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
@@ -573,245 +266,40 @@ officecli raw-set "$XLSX" '/Analysis/drawing' --xpath "//xdr:wsDr" --action appe
   <xdr:clientData />
 </xdr:twoCellAnchor>"
 
-echo "  Done: Chart 5 bubble chart"
-
-###############################################################################
-# Chart 6: Stock OHLC candlestick chart (red up, green down)
-###############################################################################
+# Chart 6: Stock OHLC candlestick — hi-low lines + up/down bars (red up, green down).
 echo "  -> Chart 6: Stock OHLC chart"
+officecli add "$XLSX" /StockData --type chart \
+  --prop chartType=stock \
+  --prop title="Stock Candlestick Chart (OHLC)" \
+  --prop dataRange=StockData!A1:E21 \
+  --prop hilowlines=true \
+  --prop updownbars=100:FF0000:00B050 \
+  --prop legend=b \
+  --prop x=7 --prop y=0 --prop width=13 --prop height=22
 
-CHART6_REL=$(officecli add-part "$XLSX" /StockData --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/StockData/chart[1]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="C00000" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Stock Candlestick Chart (OHLC)</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:stockChart>
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>StockData!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$B$2:$B$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>StockData!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$C$2:$C$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>StockData!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$D$2:$D$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="3" /><c:order val="3" />
-          <c:tx><c:strRef><c:f>StockData!$E$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$E$2:$E$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:hiLowLines>
-          <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:ln></c:spPr>
-        </c:hiLowLines>
-        <c:upDownBars>
-          <c:gapWidth val="100" />
-          <c:upBars><c:spPr><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="C00000" /></a:solidFill></a:ln></c:spPr></c:upBars>
-          <c:downBars><c:spPr><a:solidFill><a:srgbClr val="00B050" /></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="006400" /></a:solidFill></a:ln></c:spPr></c:downBars>
-        </c:upDownBars>
-        <c:axId val="500" /><c:axId val="600" />
-      </c:stockChart>
-      <c:catAx>
-        <c:axId val="500" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:txPr><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="800" /></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-        <c:crossAx val="600" />
-      </c:catAx>
-      <c:valAx>
-        <c:axId val="600" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:numFmt formatCode="0.00" sourceLinked="0" />
-        <c:crossAx val="500" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/StockData/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>7</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>20</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>22</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart 6\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART6_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 6 stock OHLC chart"
-
-###############################################################################
-# Chart 7: Filled radar chart (Sheet4)
-###############################################################################
+# Chart 7: Filled radar — product capability comparison.
 echo "  -> Chart 7: Filled radar chart"
+officecli add "$XLSX" /Assessment --type chart \
+  --prop chartType=radar --prop radarStyle=filled \
+  --prop title="Product Capability Radar Comparison" \
+  --prop dataRange=Assessment!A1:D9 \
+  --prop colors=4472C4,00B050,FFC000 \
+  --prop legend=b \
+  --prop x=5 --prop y=0 --prop width=11 --prop height=20
 
-CHART7_REL=$(officecli add-part "$XLSX" /Assessment --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/Assessment/chart[1]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="002060" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Product Capability Radar Comparison</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:radarChart>
-        <c:radarStyle val="filled" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Assessment!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="4472C4"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="4472C4" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$B$2:$B$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Assessment!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="00B050"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="00B050" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$C$2:$C$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Assessment!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="FFC000"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="FFC000" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$D$2:$D$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:axId val="700" /><c:axId val="800" />
-      </c:radarChart>
-      <c:catAx><c:axId val="700" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="800" /></c:catAx>
-      <c:valAx><c:axId val="800" /><c:scaling><c:orientation val="minMax" /><c:max val="100" /><c:min val="0" /></c:scaling><c:delete val="0" /><c:axPos val="l" /><c:crossAx val="700" /></c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Assessment/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>16</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"2\" name=\"Chart 7\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART7_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 7 radar chart"
-
-###############################################################################
-# Chart 8: Multi-ring doughnut chart (2 nested series)
-###############################################################################
+# Chart 8: Multi-ring doughnut — Aug vs Dec regional share (two rings). The two
+# source rows aren't adjacent, so the ring values are passed inline.
 echo "  -> Chart 8: Multi-ring doughnut chart"
-
-CHART8_REL=$(officecli add-part "$XLSX" /Sheet1 --type chart 2>&1 | grep -o 'relId=[^ ]*' | cut -d= -f2)
-
-officecli raw-set "$XLSX" '/Sheet1/chart[4]' --xpath "/c:chartSpace" --action replace --xml '
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Q3 vs Q4 Regional Sales Multi-Ring</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:doughnutChart>
-        <c:varyColors val="1" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:v>Q3</c:v></c:tx>
-          <c:dPt><c:idx val="0" /><c:spPr><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="1" /><c:spPr><a:solidFill><a:srgbClr val="C55A11" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="2" /><c:spPr><a:solidFill><a:srgbClr val="548235" /></a:solidFill></c:spPr></c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="0" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$9:$D$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:v>Q4</c:v></c:tx>
-          <c:dPt><c:idx val="0" /><c:spPr><a:solidFill><a:srgbClr val="4472C4" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="1" /><c:spPr><a:solidFill><a:srgbClr val="ED7D31" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="2" /><c:spPr><a:solidFill><a:srgbClr val="70AD47" /></a:solidFill></c:spPr></c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="1" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$13:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:holeSize val="40" />
-      </c:doughnutChart>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-  </c:chart>
-</c:chartSpace>'
-
-officecli raw-set "$XLSX" '/Sheet1/drawing' --xpath "//xdr:wsDr" --action append --xml "
-<xdr:twoCellAnchor>
-  <xdr:from><xdr:col>19</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>19</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
-  <xdr:to><xdr:col>28</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>37</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
-  <xdr:graphicFrame macro=\"\">
-    <xdr:nvGraphicFramePr><xdr:cNvPr id=\"5\" name=\"Chart 8\" /><xdr:cNvGraphicFramePr /></xdr:nvGraphicFramePr>
-    <xdr:xfrm><a:off x=\"0\" y=\"0\" /><a:ext cx=\"0\" cy=\"0\" /></xdr:xfrm>
-    <a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/chart\"><c:chart r:id=\"${CHART8_REL}\" /></a:graphicData></a:graphic>
-  </xdr:graphicFrame>
-  <xdr:clientData />
-</xdr:twoCellAnchor>"
-
-echo "  Done: Chart 8 multi-ring doughnut chart"
+officecli add "$XLSX" /Sheet1 --type chart \
+  --prop chartType=doughnut \
+  --prop title="Aug vs Dec Regional Sales Multi-Ring" \
+  --prop categories="East,South,North" \
+  --prop series1="Aug:210,175,152" \
+  --prop series2="Dec:198,158,142" \
+  --prop dataLabels=percent \
+  --prop colors=1F4E79,C55A11,548235 \
+  --prop legend=b \
+  --prop x=19 --prop y=19 --prop width=9 --prop height=18
 
 ###############################################################################
 # Validation

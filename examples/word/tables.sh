@@ -396,67 +396,54 @@ rm -f "$PPTX"
 officecli create "$PPTX"
 officecli open "$PPTX"
 
-# Slide 1: Title Page
+# Slide 1: Title Page — HIGH-LEVEL (slide background + two text shapes)
 echo "  -> Slide 1: Title Page"
 officecli add "$PPTX" / --type slide
-officecli raw-set "$PPTX" '/slide[1]' --xpath "/p:sld" --action replace --xml '<p:sld>
-  <p:cSld>
-    <p:bg><p:bgPr><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>
-    <p:spTree>
-      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-      <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
-      <p:sp>
-        <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-        <p:spPr><a:xfrm><a:off x="1500000" y="2000000"/><a:ext cx="9192000" cy="1200000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
-        <p:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="4000" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>2025 Annual Data Analysis Report</a:t></a:r></a:p></p:txBody>
-      </p:sp>
-      <p:sp>
-        <p:nvSpPr><p:cNvPr id="3" name="Subtitle"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-        <p:spPr><a:xfrm><a:off x="2500000" y="3500000"/><a:ext cx="7192000" cy="800000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
-        <p:txBody><a:bodyPr anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="2000" dirty="0"><a:solidFill><a:srgbClr val="BDD7EE"/></a:solidFill></a:rPr><a:t>Dept Comparison | Performance Overview | Financial Summary</a:t></a:r></a:p></p:txBody>
-      </p:sp>
-    </p:spTree>
-  </p:cSld>
-</p:sld>'
+officecli set "$PPTX" '/slide[1]' --prop background=1F3864
+officecli add "$PPTX" '/slide[1]' --type shape --prop text="2025 Annual Data Analysis Report" \
+  --prop x=1500000 --prop y=2000000 --prop width=9192000 --prop height=1200000 \
+  --prop size=40 --prop bold=true --prop color=FFFFFF --prop align=center --prop valign=middle
+officecli add "$PPTX" '/slide[1]' --type shape --prop text="Dept Comparison | Performance Overview | Financial Summary" \
+  --prop x=2500000 --prop y=3500000 --prop width=7192000 --prop height=800000 \
+  --prop size=20 --prop color=BDD7EE --prop align=center --prop valign=middle
 
-# Slide 2: Data Table
+# Slide 2: Data Table — HIGH-LEVEL (title shape + styled table via add table + per-cell set).
+# Cell values carry thousands separators ("128,000"), so they can't go through the
+# comma-delimited `data=` seed — the table is created empty (rows/cols) and each cell
+# is set individually. headerFill styles row 0; first column gets a light-blue band.
 echo "  -> Slide 2: Data Table"
 officecli add "$PPTX" / --type slide
-officecli raw-set "$PPTX" '/slide[2]' --xpath "/p:sld" --action replace --xml '<p:sld>
-  <p:cSld>
-    <p:spTree>
-      <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
-      <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
-      <p:sp>
-        <p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr>
-        <p:spPr><a:xfrm><a:off x="500000" y="200000"/><a:ext cx="11192000" cy="600000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>
-        <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="l"/><a:r><a:rPr lang="en-US" sz="2800" b="1" dirty="0"><a:solidFill><a:srgbClr val="1F3864"/></a:solidFill></a:rPr><a:t>Quarterly Sales by Department</a:t></a:r></a:p></p:txBody>
-      </p:sp>
-      <p:graphicFrame>
-        <p:nvGraphicFramePr><p:cNvPr id="4" name="Table"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>
-        <p:xfrm><a:off x="500000" y="1000000"/><a:ext cx="11192000" cy="4500000"/></p:xfrm>
-        <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
-          <a:tbl>
-            <a:tblPr firstRow="1" bandRow="1"/>
-            <a:tblGrid><a:gridCol w="2238400"/><a:gridCol w="2238400"/><a:gridCol w="2238400"/><a:gridCol w="2238400"/><a:gridCol w="2238400"/></a:tblGrid>
-            <a:tr h="700000">
-              <a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>Department</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="2E75B6"/></a:solidFill></a:tcPr></a:tc>
-              <a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>Q1</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="2E75B6"/></a:solidFill></a:tcPr></a:tc>
-              <a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>Q2</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="2E75B6"/></a:solidFill></a:tcPr></a:tc>
-              <a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>Q3</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="2E75B6"/></a:solidFill></a:tcPr></a:tc>
-              <a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1600" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>Q4</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="2E75B6"/></a:solidFill></a:tcPr></a:tc>
-            </a:tr>
-            <a:tr h="700000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>Engineering</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="DEEAF6"/></a:solidFill></a:tcPr></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>128,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>156,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>189,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>210,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr>
-            <a:tr h="700000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>Marketing</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="DEEAF6"/></a:solidFill></a:tcPr></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>95,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>112,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>138,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>165,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr>
-            <a:tr h="700000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>Operations</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="DEEAF6"/></a:solidFill></a:tcPr></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>76,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>89,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>102,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>118,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr>
-            <a:tr h="700000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>Sales</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="DEEAF6"/></a:solidFill></a:tcPr></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>230,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>275,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>310,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>356,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr>
-            <a:tr h="700000"><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>HR</a:t></a:r></a:p></a:txBody><a:tcPr><a:solidFill><a:srgbClr val="DEEAF6"/></a:solidFill></a:tcPr></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>45,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>48,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>52,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc><a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="en-US" sz="1400" dirty="0"/><a:t>55,000</a:t></a:r></a:p></a:txBody><a:tcPr/></a:tc></a:tr>
-          </a:tbl>
-        </a:graphicData></a:graphic>
-      </p:graphicFrame>
-    </p:spTree>
-  </p:cSld>
-</p:sld>'
+officecli add "$PPTX" '/slide[2]' --type shape --prop text="Quarterly Sales by Department" \
+  --prop x=500000 --prop y=200000 --prop width=11192000 --prop height=600000 \
+  --prop size=28 --prop bold=true --prop color=1F3864
+officecli add "$PPTX" '/slide[2]' --type table --prop rows=6 --prop cols=5 \
+  --prop headerFill=2E75B6 --prop firstRow=true \
+  --prop x=500000 --prop y=1000000 --prop width=11192000 --prop height=4500000
+
+# Header row (white, bold, centered).
+c=1
+for h in Department Q1 Q2 Q3 Q4; do
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[1,$c]" --prop text="$h" --prop bold=true --prop color=FFFFFF --prop align=center
+  c=$((c+1))
+done
+
+# Body rows: "label|Q1|Q2|Q3|Q4" ('|' avoids clashing with the values' commas).
+# First column carries a light-blue band fill; the rest are plain centered.
+r_idx=2
+for row in \
+  "Engineering|128,000|156,000|189,000|210,000" \
+  "Marketing|95,000|112,000|138,000|165,000" \
+  "Operations|76,000|89,000|102,000|118,000" \
+  "Sales|230,000|275,000|310,000|356,000" \
+  "HR|45,000|48,000|52,000|55,000"; do
+  IFS='|' read -r label q1 q2 q3 q4 <<< "$row"
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[$r_idx,1]" --prop text="$label" --prop fill=DEEAF6 --prop align=center
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[$r_idx,2]" --prop text="$q1" --prop align=center
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[$r_idx,3]" --prop text="$q2" --prop align=center
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[$r_idx,4]" --prop text="$q3" --prop align=center
+  officecli set "$PPTX" "/slide[2]/table[1]/cell[$r_idx,5]" --prop text="$q4" --prop align=center
+  r_idx=$((r_idx+1))
+done
 
 # Slide 3: Pie Chart Analysis
 echo "  -> Slide 3: Pie Chart Analysis"

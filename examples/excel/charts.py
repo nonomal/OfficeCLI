@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Beautiful Charts Showcase — generates charts.xlsx with 8 chart types built from
-raw chart XML: combo (bar+line dual axis), 3D cylinder bar, scatter+trendline,
-exploded 3D pie, 3D bubble, stock OHLC candlestick (red up / green down), filled
-radar, and a multi-ring (nested) doughnut. 4 data sheets feed them: monthly
-sales (Sheet1), spend/sales analysis (Analysis), OHLC stock data (StockData),
-and capability assessment (Assessment).
+Beautiful Charts Showcase — generates charts.xlsx with 8 chart types: combo
+(columns + secondary-axis line), 3D bar, scatter+trendline, exploded 3D pie,
+bubble, stock OHLC candlestick (red up / green down), filled radar, and a
+multi-ring (nested) doughnut. 4 data sheets feed them: monthly sales (Sheet1),
+spend/sales analysis (Analysis), OHLC stock data (StockData), and capability
+assessment (Assessment).
 
 SDK twin of charts.sh (officecli CLI). Both produce an equivalent charts.xlsx.
 This one drives the **officecli Python SDK** (`pip install officecli-sdk`): one
 resident is started and every command is shipped over the named pipe. Cell data
-goes out per-sheet in a single `doc.batch(...)` round-trip; each chart is then a
-short sequence of `doc.send(...)` calls — `add-part` (whose returned relId is
-captured and substituted into the drawing anchor) plus two `raw-set` calls that
-replace the chartSpace XML and append the worksheet drawing anchor. Each item is
-the same `{"command",...,"props"}` dict you'd put in an `officecli batch` list;
-`add-part`/`raw-set` forward their `type`/`xpath`/`action`/`xml` fields verbatim.
+goes out per-sheet in a single `doc.batch(...)` round-trip; seven of the charts
+are then a single high-level `add --type chart` send each (chartType + dataRange
+or inline data + styling props). The bubble (Chart 5) stays on raw-set — the
+high-level command can't map a dataRange to a single x/y/size series — so it uses
+`add-part` (relId captured into the anchor) + two `raw-set` calls. Each item is
+the same `{"command",...,"props"}` dict you'd put in an `officecli batch` list.
 
 Usage:
   pip install officecli-sdk          # plus the `officecli` binary on PATH
@@ -101,286 +101,6 @@ def add_anchor(doc, sheet, from_col, from_row, to_col, to_row, cnvpr_id, name, r
 
 
 # ---------------------------------------------------------------- chart XML
-CHART1_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr rot="0" /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill><a:latin typeface="Microsoft YaHei" /><a:ea typeface="Microsoft YaHei" /></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:rPr><a:t>Monthly Sales and YoY Growth Trend</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:barChart>
-        <c:barDir val="col" /><c:grouping val="clustered" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="1F4E79" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="2E75B6" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$2:$B$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Sheet1!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="C55A11" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="ED7D31" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$C$2:$C$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Sheet1!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill rotWithShape="1"><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="548235" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="70AD47" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:ln w="0"><a:noFill /></a:ln>
-            <a:effectLst><a:outerShdw blurRad="40000" dist="23000" dir="5400000" rotWithShape="0"><a:srgbClr val="000000"><a:alpha val="35000" /></a:srgbClr></a:outerShdw></a:effectLst>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$D$2:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:axId val="1" /><c:axId val="2" />
-      </c:barChart>
-      <c:lineChart>
-        <c:grouping val="standard" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="3" /><c:order val="3" />
-          <c:tx><c:strRef><c:f>Sheet1!$F$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="38100" cap="rnd"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:prstDash val="solid" /><a:round /></a:ln></c:spPr>
-          <c:marker><c:symbol val="circle" /><c:size val="8" />
-            <c:spPr><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:ln w="19050"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:ln></c:spPr>
-          </c:marker>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="1" /><c:showCatName val="0" /><c:showSerName val="0" /><c:showPercent val="0" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$F$2:$F$13</c:f></c:numRef></c:val>
-          <c:smooth val="1" />
-        </c:ser>
-        <c:marker val="1" />
-        <c:axId val="1" /><c:axId val="3" />
-      </c:lineChart>
-      <c:catAx>
-        <c:axId val="1" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-        <c:crossAx val="2" />
-      </c:catAx>
-      <c:valAx>
-        <c:axId val="2" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Sales (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="1" />
-      </c:valAx>
-      <c:valAx>
-        <c:axId val="3" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="r" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>YoY Growth (%)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="FF0000"><a:alpha val="50000" /></a:srgbClr></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="1" /><c:crosses val="max" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" />
-      <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-    </c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'''
-
-CHART2_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>3D Regional Sales Comparison</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:view3D>
-      <c:rotX val="15" /><c:rotY val="20" /><c:depthPercent val="100" /><c:rAngAx val="1" /><c:perspective val="30" />
-    </c:view3D>
-    <c:plotArea>
-      <c:layout />
-      <c:bar3DChart>
-        <c:barDir val="col" /><c:grouping val="clustered" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Sheet1!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="4472C4" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="5B9BD5" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="9DC3E6" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$2:$B$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Sheet1!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="ED7D31" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="F4B183" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="F8CBAD" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$C$2:$C$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Sheet1!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:gradFill><a:gsLst>
-              <a:gs pos="0"><a:srgbClr val="70AD47" /></a:gs>
-              <a:gs pos="50000"><a:srgbClr val="A9D18E" /></a:gs>
-              <a:gs pos="100000"><a:srgbClr val="C5E0B4" /></a:gs>
-            </a:gsLst><a:lin ang="5400000" /></a:gradFill>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Sheet1!$A$2:$A$13</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$D$2:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:shape val="cylinder" />
-        <c:axId val="10" /><c:axId val="20" /><c:axId val="30" />
-      </c:bar3DChart>
-      <c:catAx><c:axId val="10" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="20" /></c:catAx>
-      <c:valAx><c:axId val="20" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" /><c:numFmt formatCode="#,##0" sourceLinked="0" /><c:crossAx val="10" /></c:valAx>
-      <c:serAx><c:axId val="30" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="20" /></c:serAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'''
-
-CHART3_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="7030A0" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Ad Spend vs Sales Correlation</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:scatterChart>
-        <c:scatterStyle val="lineMarker" />
-        <c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Analysis!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="circle" /><c:size val="10" />
-            <c:spPr>
-              <a:solidFill><a:srgbClr val="7030A0"><a:alpha val="70000" /></a:srgbClr></a:solidFill>
-              <a:ln w="19050"><a:solidFill><a:srgbClr val="7030A0" /></a:solidFill></a:ln>
-              <a:effectLst><a:outerShdw blurRad="40000" dist="20000" dir="5400000"><a:srgbClr val="000000"><a:alpha val="30000" /></a:srgbClr></a:outerShdw></a:effectLst>
-            </c:spPr>
-          </c:marker>
-          <c:trendline>
-            <c:spPr><a:ln w="25400" cap="rnd"><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:prstDash val="dash" /><a:round /></a:ln></c:spPr>
-            <c:trendlineType val="linear" />
-            <c:dispRSqr val="1" /><c:dispEq val="1" />
-          </c:trendline>
-          <c:xVal><c:numRef><c:f>Analysis!$A$2:$A$16</c:f></c:numRef></c:xVal>
-          <c:yVal><c:numRef><c:f>Analysis!$B$2:$B$16</c:f></c:numRef></c:yVal>
-          <c:smooth val="0" />
-        </c:ser>
-        <c:axId val="100" /><c:axId val="200" />
-      </c:scatterChart>
-      <c:valAx>
-        <c:axId val="100" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:title><c:tx><c:rich><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000" /></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Ad Spend (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="200" />
-      </c:valAx>
-      <c:valAx>
-        <c:axId val="200" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:title><c:tx><c:rich><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1000" /></a:pPr><a:r><a:rPr lang="en-US" sz="1000" /><a:t>Sales (10K)</a:t></a:r></a:p></c:rich></c:tx></c:title>
-        <c:numFmt formatCode="#,##0" sourceLinked="0" />
-        <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF" /></a:solidFill></a:ln></c:spPr>
-        <c:crossAx val="100" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'''
-
-CHART4_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Annual Regional Sales Share (3D)</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:view3D>
-      <c:rotX val="30" /><c:rotY val="70" /><c:rAngAx val="0" /><c:perspective val="30" />
-    </c:view3D>
-    <c:plotArea>
-      <c:layout />
-      <c:pie3DChart>
-        <c:varyColors val="1" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:explosion val="10" />
-          <c:dPt><c:idx val="0" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="1F4E79" /></a:gs><a:gs pos="100000"><a:srgbClr val="4472C4" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dPt><c:idx val="1" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="C55A11" /></a:gs><a:gs pos="100000"><a:srgbClr val="ED7D31" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dPt><c:idx val="2" />
-            <c:spPr><a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="548235" /></a:gs><a:gs pos="100000"><a:srgbClr val="70AD47" /></a:gs></a:gsLst><a:lin ang="5400000" /></a:gradFill>
-            <a:effectLst><a:outerShdw blurRad="50800" dist="38100" dir="5400000"><a:srgbClr val="000000"><a:alpha val="40000" /></a:srgbClr></a:outerShdw></a:effectLst></c:spPr>
-          </c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="1100" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="1" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$8:$D$8</c:f></c:numRef></c:val>
-        </c:ser>
-      </c:pie3DChart>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-  </c:chart>
-</c:chartSpace>'''
-
 CHART5_XML = '''
 <c:chartSpace>
   <c:chart>
@@ -423,181 +143,6 @@ CHART5_XML = '''
     </c:plotArea>
     <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
     <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'''
-
-CHART6_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="C00000" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Stock Candlestick Chart (OHLC)</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:stockChart>
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>StockData!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$B$2:$B$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>StockData!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$C$2:$C$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>StockData!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$D$2:$D$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="3" /><c:order val="3" />
-          <c:tx><c:strRef><c:f>StockData!$E$1</c:f></c:strRef></c:tx>
-          <c:spPr><a:ln w="0"><a:noFill /></a:ln></c:spPr>
-          <c:marker><c:symbol val="none" /></c:marker>
-          <c:cat><c:strRef><c:f>StockData!$A$2:$A$21</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>StockData!$E$2:$E$21</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:hiLowLines>
-          <c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="404040" /></a:solidFill></a:ln></c:spPr>
-        </c:hiLowLines>
-        <c:upDownBars>
-          <c:gapWidth val="100" />
-          <c:upBars><c:spPr><a:solidFill><a:srgbClr val="FF0000" /></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="C00000" /></a:solidFill></a:ln></c:spPr></c:upBars>
-          <c:downBars><c:spPr><a:solidFill><a:srgbClr val="00B050" /></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="006400" /></a:solidFill></a:ln></c:spPr></c:downBars>
-        </c:upDownBars>
-        <c:axId val="500" /><c:axId val="600" />
-      </c:stockChart>
-      <c:catAx>
-        <c:axId val="500" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" />
-        <c:txPr><a:bodyPr rot="-5400000" /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="800" /></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-        <c:crossAx val="600" />
-      </c:catAx>
-      <c:valAx>
-        <c:axId val="600" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="l" />
-        <c:numFmt formatCode="0.00" sourceLinked="0" />
-        <c:crossAx val="500" />
-      </c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-    <c:plotVisOnly val="1" />
-  </c:chart>
-</c:chartSpace>'''
-
-CHART7_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="002060" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Product Capability Radar Comparison</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:radarChart>
-        <c:radarStyle val="filled" /><c:varyColors val="0" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:strRef><c:f>Assessment!$B$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="4472C4"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="4472C4" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$B$2:$B$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:strRef><c:f>Assessment!$C$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="00B050"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="00B050" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$C$2:$C$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="2" /><c:order val="2" />
-          <c:tx><c:strRef><c:f>Assessment!$D$1</c:f></c:strRef></c:tx>
-          <c:spPr>
-            <a:solidFill><a:srgbClr val="FFC000"><a:alpha val="40000" /></a:srgbClr></a:solidFill>
-            <a:ln w="28575"><a:solidFill><a:srgbClr val="FFC000" /></a:solidFill></a:ln>
-          </c:spPr>
-          <c:cat><c:strRef><c:f>Assessment!$A$2:$A$9</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Assessment!$D$2:$D$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:axId val="700" /><c:axId val="800" />
-      </c:radarChart>
-      <c:catAx><c:axId val="700" /><c:scaling><c:orientation val="minMax" /></c:scaling><c:delete val="0" /><c:axPos val="b" /><c:crossAx val="800" /></c:catAx>
-      <c:valAx><c:axId val="800" /><c:scaling><c:orientation val="minMax" /><c:max val="100" /><c:min val="0" /></c:scaling><c:delete val="0" /><c:axPos val="l" /><c:crossAx val="700" /></c:valAx>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
-  </c:chart>
-</c:chartSpace>'''
-
-CHART8_XML = '''
-<c:chartSpace>
-  <c:chart>
-    <c:title>
-      <c:tx><c:rich><a:bodyPr /><a:lstStyle />
-        <a:p><a:pPr><a:defRPr sz="1600" b="1"><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></a:defRPr></a:pPr>
-        <a:r><a:rPr lang="en-US" sz="1600" b="1" /><a:t>Q3 vs Q4 Regional Sales Multi-Ring</a:t></a:r></a:p>
-      </c:rich></c:tx>
-      <c:overlay val="0" />
-    </c:title>
-    <c:plotArea>
-      <c:layout />
-      <c:doughnutChart>
-        <c:varyColors val="1" />
-        <c:ser>
-          <c:idx val="0" /><c:order val="0" />
-          <c:tx><c:v>Q3</c:v></c:tx>
-          <c:dPt><c:idx val="0" /><c:spPr><a:solidFill><a:srgbClr val="1F4E79" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="1" /><c:spPr><a:solidFill><a:srgbClr val="C55A11" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="2" /><c:spPr><a:solidFill><a:srgbClr val="548235" /></a:solidFill></c:spPr></c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="0" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$9:$D$9</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:ser>
-          <c:idx val="1" /><c:order val="1" />
-          <c:tx><c:v>Q4</c:v></c:tx>
-          <c:dPt><c:idx val="0" /><c:spPr><a:solidFill><a:srgbClr val="4472C4" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="1" /><c:spPr><a:solidFill><a:srgbClr val="ED7D31" /></a:solidFill></c:spPr></c:dPt>
-          <c:dPt><c:idx val="2" /><c:spPr><a:solidFill><a:srgbClr val="70AD47" /></a:solidFill></c:spPr></c:dPt>
-          <c:dLbls>
-            <c:numFmt formatCode="0.0&quot;%&quot;" sourceLinked="0" />
-            <c:spPr><a:noFill /><a:ln><a:noFill /></a:ln></c:spPr>
-            <c:txPr><a:bodyPr /><a:lstStyle /><a:p><a:pPr><a:defRPr sz="900" b="1"><a:solidFill><a:srgbClr val="FFFFFF" /></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="en-US" /></a:p></c:txPr>
-            <c:showLegendKey val="0" /><c:showVal val="0" /><c:showCatName val="1" /><c:showSerName val="0" /><c:showPercent val="1" />
-          </c:dLbls>
-          <c:cat><c:strRef><c:f>Sheet1!$B$1:$D$1</c:f></c:strRef></c:cat>
-          <c:val><c:numRef><c:f>Sheet1!$B$13:$D$13</c:f></c:numRef></c:val>
-        </c:ser>
-        <c:holeSize val="40" />
-      </c:doughnutChart>
-    </c:plotArea>
-    <c:legend><c:legendPos val="b" /><c:overlay val="0" /></c:legend>
   </c:chart>
 </c:chartSpace>'''
 
@@ -716,55 +261,68 @@ with officecli.create(FILE, "--force") as doc:
     print("  Done: Sheet4 data")
 
     # ======================================================================
-    # Charts — each: add-part (capture relId) → replace chartSpace → anchor
+    # Charts — HIGH-LEVEL API. Each chart is a single `add --type chart` send
+    # (chartType + a cell dataRange, or inline data for the pie/doughnut whose
+    # source cells aren't contiguous) with styling props. Exception: Chart 5
+    # (bubble) stays on raw-set — the high-level command can't map a dataRange
+    # to a single x/y/size series (multi-point bubble). Positions use
+    # x/y/width/height in cell units.
     # ======================================================================
-    print("  -> Chart 1: Combo chart (bar + line dual axis)")
-    rel = add_chart_part(doc, "/Sheet1")
-    set_chart_xml(doc, "/Sheet1/chart[1]", CHART1_XML)
-    add_anchor(doc, "Sheet1", 7, 0, 18, 18, 2, "Chart 1", rel)
-    print("  Done: Chart 1 combo chart")
+    def add_chart(parent, **props):
+        doc.send({"command": "add", "parent": parent, "type": "chart", "props": props})
+
+    print("  -> Chart 1: Combo (columns + secondary-axis line)")
+    add_chart("/Sheet1", chartType="combo",
+              title="Monthly Sales and YoY Growth Trend",
+              dataRange="Sheet1!A1:F13",
+              combotypes="column,column,column,column,line",
+              secondaryaxis="5", colors="2E75B6,9DC3E6,BDD7EE,C55A11,FF0000",
+              legend="b", axisTitle="Sales (10K)", x="7", y="0", width="11", height="18")
 
     print("  -> Chart 2: 3D bar chart")
-    rel = add_chart_part(doc, "/Sheet1")
-    set_chart_xml(doc, "/Sheet1/chart[2]", CHART2_XML)
-    add_anchor(doc, "Sheet1", 7, 19, 18, 37, 3, "Chart 2", rel)
-    print("  Done: Chart 2 3D bar chart")
+    add_chart("/Sheet1", chartType="column3d", title="3D Regional Sales Comparison",
+              dataRange="Sheet1!A1:D13", view3d="15,20,30",
+              colors="4472C4,ED7D31,70AD47", legend="b",
+              x="7", y="19", width="11", height="18")
 
     print("  -> Chart 3: Scatter plot + trendline")
-    rel = add_chart_part(doc, "/Analysis")
-    set_chart_xml(doc, "/Analysis/chart[1]", CHART3_XML)
-    add_anchor(doc, "Analysis", 5, 0, 16, 18, 2, "Chart 3", rel)
-    print("  Done: Chart 3 scatter plot")
+    add_chart("/Analysis", chartType="scatter", title="Ad Spend vs Sales Correlation",
+              dataRange="Analysis!A1:B16", trendline="linear", colors="7030A0",
+              catTitle="Ad Spend (10K)", axisTitle="Sales (10K)", legend="b",
+              x="5", y="0", width="11", height="18")
 
     print("  -> Chart 4: 3D pie chart (exploded)")
-    rel = add_chart_part(doc, "/Sheet1")
-    set_chart_xml(doc, "/Sheet1/chart[3]", CHART4_XML)
-    add_anchor(doc, "Sheet1", 19, 0, 28, 18, 4, "Chart 4", rel)
-    print("  Done: Chart 4 3D pie chart")
+    add_chart("/Sheet1", chartType="pie3d", title="July Regional Sales Share (3D)",
+              categories="East Sales,South Sales,North Sales", series1="Jul:195,168,145",
+              explosion="10", view3d="30,70,30", dataLabels="percent",
+              colors="1F4E79,C55A11,548235", legend="b",
+              x="19", y="0", width="9", height="18")
 
-    print("  -> Chart 5: Bubble chart")
+    # Chart 5 (bubble) — raw-set (see note above): high-level can't express a
+    # single multi-point x/y/size bubble series from a dataRange.
+    print("  -> Chart 5: Bubble chart (raw-set)")
     rel = add_chart_part(doc, "/Analysis")
     set_chart_xml(doc, "/Analysis/chart[2]", CHART5_XML)
     add_anchor(doc, "Analysis", 5, 19, 16, 37, 3, "Chart 5", rel)
-    print("  Done: Chart 5 bubble chart")
 
     print("  -> Chart 6: Stock OHLC chart")
-    rel = add_chart_part(doc, "/StockData")
-    set_chart_xml(doc, "/StockData/chart[1]", CHART6_XML)
-    add_anchor(doc, "StockData", 7, 0, 20, 22, 2, "Chart 6", rel)
-    print("  Done: Chart 6 stock OHLC chart")
+    add_chart("/StockData", chartType="stock", title="Stock Candlestick Chart (OHLC)",
+              dataRange="StockData!A1:E21", hilowlines="true",
+              updownbars="100:FF0000:00B050", legend="b",
+              x="7", y="0", width="13", height="22")
 
     print("  -> Chart 7: Filled radar chart")
-    rel = add_chart_part(doc, "/Assessment")
-    set_chart_xml(doc, "/Assessment/chart[1]", CHART7_XML)
-    add_anchor(doc, "Assessment", 5, 0, 16, 20, 2, "Chart 7", rel)
-    print("  Done: Chart 7 radar chart")
+    add_chart("/Assessment", chartType="radar", radarStyle="filled",
+              title="Product Capability Radar Comparison", dataRange="Assessment!A1:D9",
+              colors="4472C4,00B050,FFC000", legend="b",
+              x="5", y="0", width="11", height="20")
 
     print("  -> Chart 8: Multi-ring doughnut chart")
-    rel = add_chart_part(doc, "/Sheet1")
-    set_chart_xml(doc, "/Sheet1/chart[4]", CHART8_XML)
-    add_anchor(doc, "Sheet1", 19, 19, 28, 37, 5, "Chart 8", rel)
-    print("  Done: Chart 8 multi-ring doughnut chart")
+    add_chart("/Sheet1", chartType="doughnut", title="Aug vs Dec Regional Sales Multi-Ring",
+              categories="East,South,North", series1="Aug:210,175,152",
+              series2="Dec:198,158,142", dataLabels="percent",
+              colors="1F4E79,C55A11,548235", legend="b",
+              x="19", y="19", width="9", height="18")
 
     doc.send({"command": "save"})
 # context exit closes the resident, flushing the workbook to disk.

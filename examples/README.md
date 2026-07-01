@@ -96,8 +96,8 @@ bash revisions.sh            # Tracked-change (revision) API — ins/del/format/
 ```bash
 cd excel
 python cell-formatting.py    # Full cell property surface: fonts, fills, borders, number formats, formulas/links
-bash charts.sh               # Master chart showcase
-bash charts/charts-demo.sh   # 14+ chart types
+bash charts.sh               # Master chart showcase (8 chart types in one workbook)
+bash charts/charts-basic.sh  # Per-type high-level examples (any charts/charts-<type>.sh)
 python charts/charts-line.py # Single-type example (any charts/charts-<type>.py)
 python pivot-tables.py       # Pivot tables
 ```

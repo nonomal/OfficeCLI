@@ -722,37 +722,41 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 string? drawingXml  = properties != null && properties.TryGetValue("drawingXml", out var drxv) ? drxv : null;
                 string? drawingRelId = properties != null && properties.TryGetValue("drawingRelId", out var drrv) ? drrv : null;
 
-                DiagramDataPart   dataPart   = !string.IsNullOrEmpty(dataRid)
-                    ? saSlidePart.AddNewPart<DiagramDataPart>(dataRid)
-                    : saSlidePart.AddNewPart<DiagramDataPart>();
-                DiagramLayoutDefinitionPart layoutPart = !string.IsNullOrEmpty(layoutRid)
-                    ? saSlidePart.AddNewPart<DiagramLayoutDefinitionPart>(layoutRid)
-                    : saSlidePart.AddNewPart<DiagramLayoutDefinitionPart>();
-                DiagramColorsPart colorsPart = !string.IsNullOrEmpty(colorsRid)
-                    ? saSlidePart.AddNewPart<DiagramColorsPart>(colorsRid)
-                    : saSlidePart.AddNewPart<DiagramColorsPart>();
-                DiagramStylePart  stylePart  = !string.IsNullOrEmpty(qsRid)
-                    ? saSlidePart.AddNewPart<DiagramStylePart>(qsRid)
-                    : saSlidePart.AddNewPart<DiagramStylePart>();
+                // Reuse-aware creation: a second SmartArt on the same slide may
+                // share the layout/colors/quickStyle parts (see GetOrAddPinnedPart).
+                // Data parts are per-diagram unique, but the helper handles all
+                // four uniformly and skips rewriting a reused part's content.
+                DiagramDataPart   dataPart   = GetOrAddPinnedPart<DiagramDataPart>(saSlidePart, dataRid, out var dataCreated);
+                DiagramLayoutDefinitionPart layoutPart = GetOrAddPinnedPart<DiagramLayoutDefinitionPart>(saSlidePart, layoutRid, out var layoutCreated);
+                DiagramColorsPart colorsPart = GetOrAddPinnedPart<DiagramColorsPart>(saSlidePart, colorsRid, out var colorsCreated);
+                DiagramStylePart  stylePart  = GetOrAddPinnedPart<DiagramStylePart>(saSlidePart, qsRid, out var styleCreated);
 
                 // Write the real content when supplied; else seed a minimal
                 // typed root (keeps direct CLI `add-part smartart` usable).
-                WriteDiagramPartXml(dataPart, dataXml, () =>
-                    new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot(
-                        new DocumentFormat.OpenXml.Drawing.Diagrams.PointList(),
-                        new DocumentFormat.OpenXml.Drawing.Diagrams.ConnectionList()));
-                // Pictures embedded in the diagram are referenced from the data
-                // part's own .rels; re-attach them with pinned rIds.
-                AttachDiagramImages(dataPart, properties, "dataImage");
-                // External hyperlinks on diagram nodes (<a:hlinkClick r:id>) live
-                // on the data part's own .rels; re-add with pinned rIds.
-                AttachDiagramHyperlinks(dataPart, properties, "dataHlink");
-                WriteDiagramPartXml(layoutPart, layoutXml,
-                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.LayoutDefinition());
-                WriteDiagramPartXml(colorsPart, colorsXml,
-                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.ColorsDefinition());
-                WriteDiagramPartXml(stylePart, qsXml,
-                    () => new DocumentFormat.OpenXml.Drawing.Diagrams.StyleDefinition());
+                // Skip parts reused from a prior SmartArt — their content is
+                // already written and the second op may not carry it.
+                if (dataCreated)
+                {
+                    WriteDiagramPartXml(dataPart, dataXml, () =>
+                        new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot(
+                            new DocumentFormat.OpenXml.Drawing.Diagrams.PointList(),
+                            new DocumentFormat.OpenXml.Drawing.Diagrams.ConnectionList()));
+                    // Pictures embedded in the diagram are referenced from the data
+                    // part's own .rels; re-attach them with pinned rIds.
+                    AttachDiagramImages(dataPart, properties, "dataImage");
+                    // External hyperlinks on diagram nodes (<a:hlinkClick r:id>) live
+                    // on the data part's own .rels; re-add with pinned rIds.
+                    AttachDiagramHyperlinks(dataPart, properties, "dataHlink");
+                }
+                if (layoutCreated)
+                    WriteDiagramPartXml(layoutPart, layoutXml,
+                        () => new DocumentFormat.OpenXml.Drawing.Diagrams.LayoutDefinition());
+                if (colorsCreated)
+                    WriteDiagramPartXml(colorsPart, colorsXml,
+                        () => new DocumentFormat.OpenXml.Drawing.Diagrams.ColorsDefinition());
+                if (styleCreated)
+                    WriteDiagramPartXml(stylePart, qsXml,
+                        () => new DocumentFormat.OpenXml.Drawing.Diagrams.StyleDefinition());
 
                 // The DSP cached-drawing part is referenced from the data XML
                 // via <dsp:dataModelExt relId="...">. That relId resolves
@@ -764,17 +768,22 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 // refuses the file (0x80070570).
                 if (!string.IsNullOrEmpty(drawingXml) && !string.IsNullOrEmpty(drawingRelId))
                 {
-                    var drawingPart = saSlidePart.AddNewPart<DiagramPersistLayoutPart>(
-                        "application/vnd.ms-office.drawingml.diagramDrawing+xml", drawingRelId);
-                    // drawingXml is always present on this branch; the seed
-                    // fallback is unreachable here but supplied for the typed
-                    // signature.
-                    WriteDiagramPartXml(drawingPart, drawingXml,
-                        () => new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot());
-                    // The DSP cached drawing re-references the same pictures for
-                    // rendering via its own .rels; re-attach with pinned rIds.
-                    AttachDiagramImages(drawingPart, properties, "drawingImage");
-                    AttachDiagramHyperlinks(drawingPart, properties, "drawingHlink");
+                    var existingDrawing = saSlidePart.Parts
+                        .FirstOrDefault(p => p.RelationshipId == drawingRelId).OpenXmlPart;
+                    if (existingDrawing is not DiagramPersistLayoutPart)
+                    {
+                        var drawingPart = saSlidePart.AddNewPart<DiagramPersistLayoutPart>(
+                            "application/vnd.ms-office.drawingml.diagramDrawing+xml", drawingRelId);
+                        // drawingXml is always present on this branch; the seed
+                        // fallback is unreachable here but supplied for the typed
+                        // signature.
+                        WriteDiagramPartXml(drawingPart, drawingXml,
+                            () => new DocumentFormat.OpenXml.Drawing.Diagrams.DataModelRoot());
+                        // The DSP cached drawing re-references the same pictures for
+                        // rendering via its own .rels; re-attach with pinned rIds.
+                        AttachDiagramImages(drawingPart, properties, "drawingImage");
+                        AttachDiagramHyperlinks(drawingPart, properties, "drawingHlink");
+                    }
                 }
 
                 // Encode all four rIds in the RelId field — callers (batch
@@ -1849,6 +1858,36 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Create a slide sub-part with a pinned relationship id, OR reuse the
+    /// existing part when that rId is already present. Two SmartArt
+    /// graphicFrames on one slide may SHARE a diagram layout/colors/quickStyle
+    /// part (distinct data models, common styling — e.g. data1 + data2 both
+    /// referencing a single layout1/colors1/quickStyle1 set).
+    /// The dump emitter emits the shared rId on BOTH add-part ops, so the second
+    /// call must reuse the first call's part instead of re-pinning the same rId,
+    /// which otherwise throws "Id conflicts with the Id of an existing
+    /// relationship" and leaves the package unopenable (0x80070570).
+    /// <paramref name="created"/> is false when an existing part was reused, so
+    /// the caller can skip rewriting content already written by the first call.
+    /// </summary>
+    private static T GetOrAddPinnedPart<T>(SlidePart slidePart, string? pinnedRid, out bool created)
+        where T : OpenXmlPart, DocumentFormat.OpenXml.Packaging.IFixedContentTypePart
+    {
+        if (!string.IsNullOrEmpty(pinnedRid))
+        {
+            var existing = slidePart.Parts.FirstOrDefault(p => p.RelationshipId == pinnedRid).OpenXmlPart;
+            if (existing is T typed) { created = false; return typed; }
+            // rId taken by a different part type (malformed dump): let the SDK
+            // allocate a fresh rId rather than collide.
+            if (existing != null) { created = true; return slidePart.AddNewPart<T>(); }
+            created = true;
+            return slidePart.AddNewPart<T>(pinnedRid);
+        }
+        created = true;
+        return slidePart.AddNewPart<T>();
     }
 
     private static void WriteDiagramPartXml(

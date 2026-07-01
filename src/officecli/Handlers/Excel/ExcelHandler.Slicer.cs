@@ -266,7 +266,17 @@ public partial class ExcelHandler
         slicersContainer.Save(slicersPart);
 
         // 8. Add drawing anchor --------------------------------------------
-        AddSlicerDrawingAnchor(hostWorksheet, slicerName, properties);
+        // CONSISTENCY(slicer-drawing-binds-cache-name): the drawing's
+        // <sle:slicer name="..."/> must carry the slicer CACHE name, not the
+        // slicer's display name. Excel resolves the on-sheet slicer graphic by
+        // cache name; a display name that differs from the cache name leaves
+        // the graphic dangling and Excel rejects the whole workbook on open
+        // (0x800A03EC "We found a problem"), even though the SDK validator
+        // passes. Excel-authored reference files always emit the cache name
+        // here (they happen to name the slicer == cache, hiding the
+        // distinction). Pass cacheName so the binding resolves regardless of
+        // the user-chosen display name.
+        AddSlicerDrawingAnchor(hostWorksheet, cacheName, properties);
 
         SaveWorksheet(hostWorksheet);
         workbookPart.Workbook!.Save();
@@ -526,8 +536,13 @@ public partial class ExcelHandler
 
     // ==================== Drawing anchor ====================
 
+    // NOTE: slicerCacheName (not the slicer display name) is used for the
+    // graphicFrame cNvPr name and the <sle:slicer name>. Excel binds the
+    // on-sheet slicer graphic to the slicer CACHE by name; using the display
+    // name breaks the binding and corrupts the workbook on open. See the
+    // CONSISTENCY(slicer-drawing-binds-cache-name) note at the call site.
     private void AddSlicerDrawingAnchor(
-        WorksheetPart worksheetPart, string slicerName, Dictionary<string, string> properties)
+        WorksheetPart worksheetPart, string slicerCacheName, Dictionary<string, string> properties)
     {
         var worksheet = GetSheet(worksheetPart);
         var drawingsPart = worksheetPart.DrawingsPart ?? worksheetPart.AddNewPart<DrawingsPart>();
@@ -638,7 +653,7 @@ public partial class ExcelHandler
         var fallbackId = nextId + 1;
 
         graphicFrame.NonVisualGraphicFrameProperties = new XDR.NonVisualGraphicFrameProperties(
-            new XDR.NonVisualDrawingProperties { Id = nextId, Name = slicerName },
+            new XDR.NonVisualDrawingProperties { Id = nextId, Name = slicerCacheName },
             new XDR.NonVisualGraphicFrameDrawingProperties());
         graphicFrame.Transform = new XDR.Transform(
             new A.Offset { X = 0L, Y = 0L },
@@ -646,7 +661,7 @@ public partial class ExcelHandler
 
         var graphic = new A.Graphic();
         var graphicData = new A.GraphicData { Uri = SlicerDrawingNsUri };
-        var sleSlicer = new Sle.Slicer { Name = slicerName };
+        var sleSlicer = new Sle.Slicer { Name = slicerCacheName };
         sleSlicer.AddNamespaceDeclaration("sle", SlicerDrawingNsUri);
         graphicData.Append(sleSlicer);
         graphic.Append(graphicData);
@@ -655,7 +670,7 @@ public partial class ExcelHandler
         choice.Append(graphicFrame);
 
         var fallback = new AlternateContentFallback();
-        fallback.Append(BuildSlicerFallbackShape(fallbackId, slicerName));
+        fallback.Append(BuildSlicerFallbackShape(fallbackId, slicerCacheName));
 
         altContent.Append(choice);
         altContent.Append(fallback);

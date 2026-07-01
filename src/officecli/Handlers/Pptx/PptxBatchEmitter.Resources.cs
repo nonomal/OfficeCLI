@@ -215,6 +215,31 @@ public static partial class PptxBatchEmitter
         }
         catch { /* best-effort — master raw replace still runs */ }
 
+        // External hyperlink relationships on the master — the raw-set XML below
+        // carries <a:hlinkClick r:id="rIdN"> to a URL, but that relationship is
+        // external (not an embedded part) so the ImagePart carrier above never
+        // re-creates it. Without this the rebuilt master's .rels drops rIdN and
+        // PowerPoint refuses the whole deck (0x80070570). Pin each id BEFORE the
+        // raw-set replace. Mirrors EmitLayoutRawOne's hyperlink carrier.
+        try
+        {
+            foreach (var (relId, target) in ppt.GetMasterExternalHyperlinks(idx))
+            {
+                items.Add(new BatchItem
+                {
+                    Command = "add-part",
+                    Parent = $"/slideMaster[{idx}]",
+                    Type = "hyperlink",
+                    Props = new Dictionary<string, string>
+                    {
+                        ["rid"] = relId,
+                        ["target"] = target,
+                    },
+                });
+            }
+        }
+        catch { /* best-effort */ }
+
         // Emit THIS master's own theme part for masters 2..N (distinct content).
         // master1's theme is the shared /ppt/theme/theme1.xml that the scaffold
         // already wires to BOTH the presentation and master1 — EmitThemeRaw

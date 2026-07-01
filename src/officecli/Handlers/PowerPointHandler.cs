@@ -2281,6 +2281,29 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         return result;
     }
 
+    /// <summary>Same as <see cref="GetLayoutExternalHyperlinks"/> for a slideMaster.
+    /// A master shape (e.g. a footer / "designed by" credit) can carry
+    /// <c>&lt;a:hlinkClick r:id="rIdN"/&gt;</c> to an external URL. The master is
+    /// replayed via raw-set which keeps the reference, but the ImagePart carrier
+    /// never re-creates an external hyperlink rel, so the rebuilt master's .rels
+    /// lost rIdN and PowerPoint refused the whole deck (0x80070570 OPC corrupt).
+    /// Surfaced as (rId, target) so the emitter pins each id via an
+    /// <c>add-part hyperlink</c> row before the master raw-set replace.</summary>
+    internal IReadOnlyList<(string RelId, string Target)> GetMasterExternalHyperlinks(int masterIdx)
+    {
+        var result = new List<(string, string)>();
+        var pp = _doc.PresentationPart;
+        if (pp == null) return result;
+        var masters = pp.SlideMasterParts.ToList();
+        if (masterIdx < 1 || masterIdx > masters.Count) return result;
+        foreach (var rel in masters[masterIdx - 1].HyperlinkRelationships)
+        {
+            if (rel.IsExternal)
+                result.Add((rel.Id, rel.Uri.OriginalString));
+        }
+        return result;
+    }
+
     /// <summary>
     /// UserDefinedTags parts (programmability metadata, <c>&lt;p:tagLst&gt;</c>)
     /// attached to a slideLayout, surfaced as (rId, verbatim tag XML) pairs.

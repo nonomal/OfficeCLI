@@ -165,13 +165,17 @@ public static partial class PptxBatchEmitter
         if (xpath == null) return;
         var slideRoot = System.Text.RegularExpressions.Regex.Match(
             replayPath, @"^/slide\[\d+\]").Value;
+        // Empty Xml marks the bare-blipFill form (no <a:tile>, no <a:stretch>
+        // — PowerPoint renders it tiled): remove the <a:stretch> the replay's
+        // ApplyShapeImageFill wrote instead of replacing it with a tile.
+        var bareBlip = string.IsNullOrEmpty(tile.Value.Xml);
         items.Add(new BatchItem
         {
             Command = "raw-set",
             Part = slideRoot,
             Xpath = xpath,
-            Action = "replace",
-            Xml = tile.Value.Xml,
+            Action = bareBlip ? "remove" : "replace",
+            Xml = bareBlip ? null : tile.Value.Xml,
         });
     }
 

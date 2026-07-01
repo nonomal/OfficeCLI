@@ -540,8 +540,7 @@ public partial class PowerPointHandler
     /// </summary>
     internal static SlideLayoutPart? ResolveSlideLayout(PresentationPart presentationPart, string? layoutHint)
     {
-        var allLayouts = presentationPart.SlideMasterParts
-            .SelectMany(m => m.SlideLayoutParts).ToList();
+        var allLayouts = PowerPointHandler.LayoutsInOrder(presentationPart);
         if (allLayouts.Count == 0) return null;
 
         if (string.IsNullOrEmpty(layoutHint))

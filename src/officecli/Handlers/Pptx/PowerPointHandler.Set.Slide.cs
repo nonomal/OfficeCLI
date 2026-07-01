@@ -97,8 +97,7 @@ public partial class PowerPointHandler
         }
         else
         {
-            var layouts = presentationPart.SlideMasterParts
-                .SelectMany(m => m.SlideLayoutParts).ToList();
+            var layouts = PowerPointHandler.LayoutsInOrder(presentationPart);
             if (partIdx < 1 || partIdx > layouts.Count)
                 throw new ArgumentException($"SlideLayout {partIdx} not found (total: {layouts.Count})");
             ownerPart = layouts[partIdx - 1];

@@ -66,7 +66,7 @@ public partial class PowerPointHandler
         {
             var mIdx = int.Parse(nested.Groups[1].Value);
             var lIdx = int.Parse(nested.Groups[2].Value);
-            var masters = presentationPart.SlideMasterParts.ToList();
+            var masters = PowerPointHandler.MastersInOrder(presentationPart);
             if (mIdx < 1 || mIdx > masters.Count)
                 throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
             var layouts = masters[mIdx - 1].SlideLayoutParts.ToList();
@@ -86,7 +86,7 @@ public partial class PowerPointHandler
         if (masterOnly.Success)
         {
             var mIdx = int.Parse(masterOnly.Groups[1].Value);
-            var masters = presentationPart.SlideMasterParts.ToList();
+            var masters = PowerPointHandler.MastersInOrder(presentationPart);
             if (mIdx < 1 || mIdx > masters.Count)
                 throw new ArgumentException($"Slide master {mIdx} not found (total: {masters.Count})");
             var mp = masters[mIdx - 1];
@@ -103,8 +103,7 @@ public partial class PowerPointHandler
         if (layoutOnly.Success)
         {
             var lIdx = int.Parse(layoutOnly.Groups[1].Value);
-            var allLayouts = presentationPart.SlideMasterParts
-                .SelectMany(m => m.SlideLayoutParts).ToList();
+            var allLayouts = PowerPointHandler.LayoutsInOrder(presentationPart);
             if (lIdx < 1 || lIdx > allLayouts.Count)
                 throw new ArgumentException($"Slide layout {lIdx} not found (total: {allLayouts.Count})");
             var lp = allLayouts[lIdx - 1];

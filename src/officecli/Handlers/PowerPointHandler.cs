@@ -189,7 +189,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         if (masterMatch.Success)
         {
             var idx = int.Parse(masterMatch.Groups[1].Value);
-            var masters = presentationPart.SlideMasterParts.ToList();
+            var masters = PowerPointHandler.MastersInOrder(presentationPart);
             if (idx < 1 || idx > masters.Count)
                 throw new ArgumentException($"slideMaster[{idx}] not found (total: {masters.Count})");
             return masters[idx - 1].SlideMaster?.OuterXml
@@ -200,8 +200,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         if (layoutMatch.Success)
         {
             var idx = int.Parse(layoutMatch.Groups[1].Value);
-            var layouts = presentationPart.SlideMasterParts
-                .SelectMany(m => m.SlideLayoutParts).ToList();
+            var layouts = PowerPointHandler.LayoutsInOrder(presentationPart);
             if (idx < 1 || idx > layouts.Count)
                 throw new ArgumentException($"slideLayout[{idx}] not found (total: {layouts.Count})");
             return layouts[idx - 1].SlideLayout?.OuterXml
@@ -276,7 +275,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         else if (Regex.Match(partPath, @"^/slideMaster\[(\d+)\]$") is { Success: true } masterMatch)
         {
             var idx = int.Parse(masterMatch.Groups[1].Value);
-            var masters = presentationPart.SlideMasterParts.ToList();
+            var masters = PowerPointHandler.MastersInOrder(presentationPart);
             if (idx < 1)
                 throw new ArgumentException($"SlideMaster {idx} not found (total: {masters.Count})");
             if (idx > masters.Count)
@@ -291,7 +290,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 // sldLayoutIdLst, which GrowSlideLayoutParts consults when the
                 // subsequent /slideLayout[K] raw-sets land.
                 GrowSlideMasterParts(idx);
-                masters = presentationPart.SlideMasterParts.ToList();
+                masters = PowerPointHandler.MastersInOrder(presentationPart);
                 if (idx > masters.Count)
                     throw new ArgumentException($"SlideMaster {idx} not found (total: {masters.Count})");
             }
@@ -301,8 +300,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         else if (Regex.Match(partPath, @"^/slideLayout\[(\d+)\]$") is { Success: true } layoutMatch)
         {
             var idx = int.Parse(layoutMatch.Groups[1].Value);
-            var layouts = presentationPart.SlideMasterParts
-                .SelectMany(m => m.SlideLayoutParts).ToList();
+            var layouts = PowerPointHandler.LayoutsInOrder(presentationPart);
             if (idx < 1)
                 throw new ArgumentException($"SlideLayout {idx} not found (total: {layouts.Count})");
             if (idx > layouts.Count)
@@ -315,8 +313,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 // missing layout parts under the appropriate master based on the
                 // post-master-replace sldLayoutIdLst, then re-resolve.
                 GrowSlideLayoutParts(idx);
-                layouts = presentationPart.SlideMasterParts
-                    .SelectMany(m => m.SlideLayoutParts).ToList();
+                layouts = PowerPointHandler.LayoutsInOrder(presentationPart);
                 if (idx > layouts.Count)
                     throw new ArgumentException($"SlideLayout {idx} not found (total: {layouts.Count})");
             }
@@ -458,7 +455,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var presentationPart = _doc.PresentationPart
             ?? throw new InvalidOperationException("No presentation part");
-        var masters = presentationPart.SlideMasterParts.ToList();
+        var masters = PowerPointHandler.MastersInOrder(presentationPart);
         int seen = 0;
         foreach (var mp in masters)
         {
@@ -1357,7 +1354,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                     if (smMatch.Success)
                     {
                         var smIdx = int.Parse(smMatch.Groups[1].Value);
-                        var smParts = presentationPart.SlideMasterParts.ToList();
+                        var smParts = PowerPointHandler.MastersInOrder(presentationPart);
                         if (smIdx < 1) throw new ArgumentException($"slideMaster index {smIdx} out of range");
                         if (smIdx > smParts.Count)
                         {
@@ -1367,7 +1364,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                             // doesn't exist yet — grow to idx so the ImagePart can
                             // attach to the right host.
                             GrowSlideMasterParts(smIdx);
-                            smParts = presentationPart.SlideMasterParts.ToList();
+                            smParts = PowerPointHandler.MastersInOrder(presentationPart);
                             if (smIdx > smParts.Count)
                                 throw new ArgumentException($"slideMaster index {smIdx} out of range (total {smParts.Count})");
                         }
@@ -1376,12 +1373,12 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                     else if (slMatch != null && slMatch.Success)
                     {
                         var slIdx = int.Parse(slMatch.Groups[1].Value);
-                        var slParts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+                        var slParts = PowerPointHandler.LayoutsInOrder(presentationPart);
                         if (slIdx < 1) throw new ArgumentException($"slideLayout index {slIdx} out of range");
                         if (slIdx > slParts.Count)
                         {
                             GrowSlideLayoutParts(slIdx);
-                            slParts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+                            slParts = PowerPointHandler.LayoutsInOrder(presentationPart);
                             if (slIdx > slParts.Count)
                                 throw new ArgumentException($"slideLayout index {slIdx} out of range (total {slParts.Count})");
                         }
@@ -1520,16 +1517,16 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (hlSmMatch.Success)
                 {
                     var i = int.Parse(hlSmMatch.Groups[1].Value);
-                    var parts = presentationPart.SlideMasterParts.ToList();
-                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    var parts = PowerPointHandler.MastersInOrder(presentationPart);
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = PowerPointHandler.MastersInOrder(presentationPart); }
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
                     hlHost = parts[i - 1];
                 }
                 else if (hlSlMatch != null && hlSlMatch.Success)
                 {
                     var i = int.Parse(hlSlMatch.Groups[1].Value);
-                    var parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
-                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList(); }
+                    var parts = PowerPointHandler.LayoutsInOrder(presentationPart);
+                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = PowerPointHandler.LayoutsInOrder(presentationPart); }
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slideLayout index {i} out of range");
                     hlHost = parts[i - 1];
                 }
@@ -1593,16 +1590,16 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (tgSmMatch.Success)
                 {
                     var i = int.Parse(tgSmMatch.Groups[1].Value);
-                    var parts = presentationPart.SlideMasterParts.ToList();
-                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    var parts = PowerPointHandler.MastersInOrder(presentationPart);
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = PowerPointHandler.MastersInOrder(presentationPart); }
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
                     tagHost = parts[i - 1];
                 }
                 else if (tgSlMatch != null && tgSlMatch.Success)
                 {
                     var i = int.Parse(tgSlMatch.Groups[1].Value);
-                    var parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
-                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = presentationPart.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList(); }
+                    var parts = PowerPointHandler.LayoutsInOrder(presentationPart);
+                    if (i > parts.Count) { GrowSlideLayoutParts(i); parts = PowerPointHandler.LayoutsInOrder(presentationPart); }
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slideLayout index {i} out of range");
                     tagHost = parts[i - 1];
                 }
@@ -1751,16 +1748,16 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (epSmMatch.Success)
                 {
                     var i = int.Parse(epSmMatch.Groups[1].Value);
-                    var ps = presentationPart.SlideMasterParts.ToList();
-                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = presentationPart.SlideMasterParts.ToList(); }
+                    var ps = PowerPointHandler.MastersInOrder(presentationPart);
+                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = PowerPointHandler.MastersInOrder(presentationPart); }
                     if (i < 1 || i > ps.Count) throw new ArgumentException($"slideMaster index {i} out of range");
                     epHost = ps[i - 1];
                 }
                 else if (epSlMatch != null && epSlMatch.Success)
                 {
                     var i = int.Parse(epSlMatch.Groups[1].Value);
-                    var ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList();
-                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList(); }
+                    var ps = PowerPointHandler.LayoutsInOrder(presentationPart);
+                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = PowerPointHandler.LayoutsInOrder(presentationPart); }
                     if (i < 1 || i > ps.Count) throw new ArgumentException($"slideLayout index {i} out of range");
                     epHost = ps[i - 1];
                 }
@@ -1866,16 +1863,16 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (erSm.Success)
                 {
                     var i = int.Parse(erSm.Groups[1].Value);
-                    var ps = presentationPart.SlideMasterParts.ToList();
-                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = presentationPart.SlideMasterParts.ToList(); }
+                    var ps = PowerPointHandler.MastersInOrder(presentationPart);
+                    if (i > ps.Count) { GrowSlideMasterParts(i); ps = PowerPointHandler.MastersInOrder(presentationPart); }
                     if (i < 1 || i > ps.Count) throw new ArgumentException($"slideMaster index {i} out of range");
                     erHost = ps[i - 1];
                 }
                 else if (erSl != null && erSl.Success)
                 {
                     var i = int.Parse(erSl.Groups[1].Value);
-                    var ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList();
-                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = presentationPart.SlideMasterParts.SelectMany(mm => mm.SlideLayoutParts).ToList(); }
+                    var ps = PowerPointHandler.LayoutsInOrder(presentationPart);
+                    if (i > ps.Count) { GrowSlideLayoutParts(i); ps = PowerPointHandler.LayoutsInOrder(presentationPart); }
                     if (i < 1 || i > ps.Count) throw new ArgumentException($"slideLayout index {i} out of range");
                     erHost = ps[i - 1];
                 }
@@ -1921,8 +1918,8 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
                 if (tmMatch.Success)
                 {
                     var i = int.Parse(tmMatch.Groups[1].Value);
-                    var parts = presentationPart.SlideMasterParts.ToList();
-                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = presentationPart.SlideMasterParts.ToList(); }
+                    var parts = PowerPointHandler.MastersInOrder(presentationPart);
+                    if (i > parts.Count) { GrowSlideMasterParts(i); parts = PowerPointHandler.MastersInOrder(presentationPart); }
                     if (i < 1 || i > parts.Count) throw new ArgumentException($"slideMaster index {i} out of range");
                     themeHost = parts[i - 1];
                 }
@@ -2144,13 +2141,74 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         _backingStream = null;
     }
 
+    // Canonical, RELOAD-STABLE ordering for masters and layouts.
+    //
+    // The SDK's SlideMasterParts / SlideLayoutParts enumerate the part
+    // dictionary, whose order can differ between the moment parts are created
+    // (dump replay: prune scaffold + grow from source) and a later reload —
+    // sample05 bound `add slide layout=1` to a DIFFERENT part than the one
+    // raw-set /slideLayout[1] had just written, chaining the slide to the
+    // blank layout instead of the title layout. Order by the presentation's
+    // sldMasterIdLst and each master's sldLayoutIdLst (XML document order,
+    // stable across save/reload); rel-linked-but-undeclared layouts follow
+    // their master's declared ones, ordered by part URI as a stable tiebreak.
+    internal static List<SlideMasterPart> MastersInOrder(PresentationPart pp)
+    {
+        var all = pp.SlideMasterParts.ToList();
+        var ordered = new List<SlideMasterPart>();
+        var seen = new HashSet<SlideMasterPart>();
+        var idList = pp.Presentation?.SlideMasterIdList;
+        if (idList != null)
+        {
+            foreach (var id in idList.Elements<SlideMasterId>())
+            {
+                var rid = id.RelationshipId?.Value;
+                if (string.IsNullOrEmpty(rid)) continue;
+                try
+                {
+                    if (pp.GetPartById(rid) is SlideMasterPart smp && seen.Add(smp))
+                        ordered.Add(smp);
+                }
+                catch { }
+            }
+        }
+        foreach (var m in all.OrderBy(m => m.Uri.OriginalString, StringComparer.Ordinal))
+            if (seen.Add(m)) ordered.Add(m);
+        return ordered;
+    }
+
+    internal static List<SlideLayoutPart> LayoutsInOrder(PresentationPart pp)
+    {
+        var result = new List<SlideLayoutPart>();
+        foreach (var mp in MastersInOrder(pp))
+        {
+            var seen = new HashSet<SlideLayoutPart>();
+            var declared = mp.SlideMaster?.SlideLayoutIdList?.Elements<SlideLayoutId>()
+                ?? Enumerable.Empty<SlideLayoutId>();
+            foreach (var id in declared)
+            {
+                var rid = id.RelationshipId?.Value;
+                if (string.IsNullOrEmpty(rid)) continue;
+                try
+                {
+                    if (mp.GetPartById(rid) is SlideLayoutPart lp && seen.Add(lp))
+                        result.Add(lp);
+                }
+                catch { }
+            }
+            foreach (var lp in mp.SlideLayoutParts.OrderBy(l => l.Uri.OriginalString, StringComparer.Ordinal))
+                if (seen.Add(lp)) result.Add(lp);
+        }
+        return result;
+    }
+
     // Internal accessors used by PptxBatchEmitter (resource enumeration).
     // Keep the PresentationPart itself private; expose only the counts and
     // a binary getter that the emitter needs.
     internal int SlideMasterCount =>
         _doc.PresentationPart?.SlideMasterParts.Count() ?? 0;
     internal int SlideLayoutCount =>
-        _doc.PresentationPart?.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).Count() ?? 0;
+        _doc.PresentationPart is { } ppLc ? LayoutsInOrder(ppLc).Count : 0;
 
     /// <summary>
     /// Enumerate ImageParts attached to a slideMaster — one entry per
@@ -2167,7 +2225,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var result = new List<MasterImageInfo>();
         var pp = _doc.PresentationPart;
         if (pp == null) return result;
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return result;
         var master = masters[masterIdx - 1];
         foreach (var img in master.ImageParts)
@@ -2193,7 +2251,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return null;
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return null;
         var master = masters[masterIdx - 1];
         var themePart = master.ThemePart;
@@ -2213,7 +2271,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return false;
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return false;
         var mt = masters[masterIdx - 1].ThemePart;
         return mt != null && !ReferenceEquals(mt, pp.ThemePart);
@@ -2242,7 +2300,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<MasterImageInfo>();
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<MasterImageInfo>();
         var themePart = masters[masterIdx - 1].ThemePart;
         return themePart == null ? Array.Empty<MasterImageInfo>() : ReadImagePartInfos(themePart);
@@ -2293,7 +2351,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         if (slideNum < 1 || slideNum > slideParts.Count) return null;
         var layoutPart = slideParts[slideNum - 1].SlideLayoutPart;
         if (layoutPart == null) return null;
-        var allLayouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var allLayouts = PowerPointHandler.LayoutsInOrder(pp);
         var idx = allLayouts.IndexOf(layoutPart);
         return idx >= 0 ? idx + 1 : null;
     }
@@ -2328,7 +2386,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var result = new List<MasterImageInfo>();
         var pp = _doc.PresentationPart;
         if (pp == null) return result;
-        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var layouts = PowerPointHandler.LayoutsInOrder(pp);
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return result;
         var layout = layouts[layoutIdx - 1];
         foreach (var img in layout.ImageParts)
@@ -2356,7 +2414,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<BlipCompanionInfo>();
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<BlipCompanionInfo>();
         return ReadExtendedPartInfos(masters[masterIdx - 1]);
     }
@@ -2384,7 +2442,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<BlipCompanionInfo>();
-        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var layouts = PowerPointHandler.LayoutsInOrder(pp);
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<BlipCompanionInfo>();
         return ReadExtendedPartInfos(layouts[layoutIdx - 1]);
     }
@@ -2404,7 +2462,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<(string, string, string)>();
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string, string)>();
         return ReadExternalImageLinks(masters[masterIdx - 1]);
     }
@@ -2414,7 +2472,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<(string, string, string)>();
-        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var layouts = PowerPointHandler.LayoutsInOrder(pp);
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string, string)>();
         return ReadExternalImageLinks(layouts[layoutIdx - 1]);
     }
@@ -2479,7 +2537,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var result = new List<(string, string)>();
         var pp = _doc.PresentationPart;
         if (pp == null) return result;
-        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var layouts = PowerPointHandler.LayoutsInOrder(pp);
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return result;
         var layout = layouts[layoutIdx - 1];
         foreach (var rel in layout.HyperlinkRelationships)
@@ -2503,7 +2561,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         var result = new List<(string, string)>();
         var pp = _doc.PresentationPart;
         if (pp == null) return result;
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return result;
         foreach (var rel in masters[masterIdx - 1].HyperlinkRelationships)
         {
@@ -2529,7 +2587,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<(string, string)>();
-        var layouts = pp.SlideMasterParts.SelectMany(m => m.SlideLayoutParts).ToList();
+        var layouts = PowerPointHandler.LayoutsInOrder(pp);
         if (layoutIdx < 1 || layoutIdx > layouts.Count) return Array.Empty<(string, string)>();
         return ReadTagParts(layouts[layoutIdx - 1]);
     }
@@ -2539,7 +2597,7 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
     {
         var pp = _doc.PresentationPart;
         if (pp == null) return Array.Empty<(string, string)>();
-        var masters = pp.SlideMasterParts.ToList();
+        var masters = MastersInOrder(pp);
         if (masterIdx < 1 || masterIdx > masters.Count) return Array.Empty<(string, string)>();
         return ReadTagParts(masters[masterIdx - 1]);
     }
@@ -4290,10 +4348,17 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
             shape = shapes[shapeIdx - 1];
             ordinal = shapeIdx;
         }
-        var tile = shape.ShapeProperties?.GetFirstChild<DocumentFormat.OpenXml.Drawing.BlipFill>()
-            ?.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>();
-        if (tile == null) return null;
-        return (tile.OuterXml, ordinal);
+        var blipFill = shape.ShapeProperties?.GetFirstChild<DocumentFormat.OpenXml.Drawing.BlipFill>();
+        if (blipFill == null) return null;
+        var tile = blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Tile>();
+        if (tile != null) return (tile.OuterXml, ordinal);
+        // Bare blipFill: NEITHER <a:tile> nor <a:stretch>. PowerPoint renders
+        // this mode-less form TILED (sample06), but ApplyShapeImageFill always
+        // writes <a:stretch> on replay — the emitter must strip it back off.
+        // Signal with an empty Xml so EmitBlipTileReplace emits a remove.
+        if (blipFill.GetFirstChild<DocumentFormat.OpenXml.Drawing.Stretch>() == null)
+            return ("", ordinal);
+        return null;
     }
 
     // Text-field (<a:fld>) round-trip for a shape/placeholder. A slide-number /

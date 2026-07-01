@@ -1722,7 +1722,8 @@ public partial class WordHandler
     // inline path already wraps there; for display, Body uniquely tolerates a
     // bare m:oMathPara child (schema-legal) and is handled by its own branch.
     private static bool IsMathBlockContainer(OpenXmlElement parent) =>
-        parent is Body or SdtBlock or Footnote or Endnote or Header or Footer;
+        parent is Body or SdtBlock or Footnote or Endnote or Header or Footer
+              or TextBoxContent or Comment;
 
     // BUG-DUMP-COMMENT-IN-MATH: remove comment-range markers (commentRangeStart /
     // commentRangeEnd / commentReference, any prefix) from a verbatim math fragment

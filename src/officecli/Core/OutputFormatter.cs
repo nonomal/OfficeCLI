@@ -342,6 +342,17 @@ internal static class OutputFormatter
             return;
         }
 
+        // Pattern: "diagram type 'X' is not supported yet (currently: ...)" —
+        // DiagramCompiler rejects a mermaid diagram kind it can't render. It's a
+        // bad-input value (fix by choosing a supported type), not a handler
+        // crash, so it must not fall through to internal_error.
+        if (msg.StartsWith("diagram type '", StringComparison.Ordinal)
+            && msg.Contains("is not supported yet", StringComparison.Ordinal))
+        {
+            result.Code = "unsupported_type";
+            return;
+        }
+
         // Pattern: "Row <N> in cell reference '...' is out of valid range. …" /
         // "Column '<X>' in cell reference '...' is out of range. …" —
         // raised by ParseCellReference (ExcelHandler.Selector.cs) when a

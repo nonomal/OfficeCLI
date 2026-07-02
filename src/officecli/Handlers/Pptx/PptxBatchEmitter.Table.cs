@@ -36,6 +36,26 @@ public static partial class PptxBatchEmitter
             Props = props.Count > 0 ? props : null,
         });
 
+        // Whole-table effects (<a:tblPr><a:effectLst> — e.g. an outerShdw
+        // with sx/sy/algn the semantic shadow= compound cannot express,
+        // sample15). Carry the verbatim block and PREPEND it into the
+        // replayed tblPr (schema: effectLst precedes tableStyleId).
+        var tblFx = ppt.GetTableEffectsXmlWithOrdinal(tableNode.Path ?? "");
+        if (tblFx.HasValue
+            && System.Text.RegularExpressions.Regex.Match(replayPath, @"^/slide\[\d+\]/table\[\d+\]$").Success)
+        {
+            var slideRoot = System.Text.RegularExpressions.Regex.Match(
+                replayPath, @"^/slide\[\d+\]").Value;
+            items.Add(new BatchItem
+            {
+                Command = "raw-set",
+                Part = slideRoot,
+                Xpath = $"/p:sld/p:cSld/p:spTree/p:graphicFrame[{tblFx.Value.GfOrdinal}]/a:graphic/a:graphicData/a:tbl/a:tblPr",
+                Action = "prepend",
+                Xml = tblFx.Value.Xml,
+            });
+        }
+
         var tablePath = replayPath;
         if (fullTable.Children == null) return;
         var rows = fullTable.Children.Where(c => c.Type == "tr").ToList();

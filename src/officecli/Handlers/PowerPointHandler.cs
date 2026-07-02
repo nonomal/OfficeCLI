@@ -4441,6 +4441,38 @@ public partial class PowerPointHandler : IDocumentHandler, Rendering.IRenderMode
         return (styleEl.OuterXml, ordinal);
     }
 
+    // Whole-table effects: <a:tblPr><a:effectLst> verbatim + the hosting
+    // graphicFrame's 1-based ordinal among the slide's graphicFrames, so the
+    // emitter can raw-set PREPEND it into the replayed tblPr (schema places
+    // effectLst before tableStyleId). Null when the table has none.
+    internal (string Xml, int GfOrdinal)? GetTableEffectsXmlWithOrdinal(string tablePath)
+    {
+        var m = Regex.Match(tablePath, @"^/slide\[(\d+)\]/table\[(@id=)?(\d+)\]$");
+        if (!m.Success) return null;
+        var slideIdx = int.Parse(m.Groups[1].Value);
+        var byId = m.Groups[2].Value.Length > 0;
+        var tblIdx = int.Parse(m.Groups[3].Value);
+        var parts = GetSlideParts().ToList();
+        if (slideIdx < 1 || slideIdx > parts.Count) return null;
+        var spTree = GetSlide(parts[slideIdx - 1]).CommonSlideData?.ShapeTree;
+        if (spTree == null) return null;
+        var gfs = spTree.Elements<GraphicFrame>().ToList();
+        var tableGfs = gfs.Where(g => g.Descendants<DocumentFormat.OpenXml.Drawing.Table>().Any()).ToList();
+        GraphicFrame? gf;
+        if (byId)
+            gf = tableGfs.FirstOrDefault(g =>
+                g.NonVisualGraphicFrameProperties?.NonVisualDrawingProperties?.Id?.Value == (uint)tblIdx);
+        else
+            gf = (tblIdx >= 1 && tblIdx <= tableGfs.Count) ? tableGfs[tblIdx - 1] : null;
+        if (gf == null) return null;
+        var fx = gf.Descendants<DocumentFormat.OpenXml.Drawing.Table>().FirstOrDefault()
+            ?.GetFirstChild<DocumentFormat.OpenXml.Drawing.TableProperties>()
+            ?.GetFirstChild<DocumentFormat.OpenXml.Drawing.EffectList>();
+        if (fx == null) return null;
+        var gfOrd = gfs.IndexOf(gf) + 1;
+        return (fx.OuterXml, gfOrd);
+    }
+
     // Connector <p:style> round-trip, mirroring GetShapeStyleXmlWithOrdinal.
     // A <p:cxnSp>'s theme-reference block (<a:lnRef>/<a:fillRef>/<a:effectRef>/
     // <a:fontRef>) has no typed Add/Set vocabulary and NodeBuilder doesn't

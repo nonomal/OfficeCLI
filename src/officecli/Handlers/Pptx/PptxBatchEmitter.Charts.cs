@@ -289,6 +289,16 @@ public static partial class PptxBatchEmitter
                 props.Remove("trendline.dispRSqr");
                 props.Remove("trendline.dispEq");
             }
+            // Same double-send rationale for data labels: when the verbatim
+            // per-series dlbls rides the add row, the chart-level dataLabels
+            // flag summary (Reader's first-series view) would fan out at
+            // replay and rebuild every series' dLbls over the verbatim block.
+            if (fullChart.Children != null
+                && fullChart.Children.Any(s => s.Type == "series"
+                    && s.Format.ContainsKey("dlbls")))
+            {
+                props.Remove("dataLabels");
+            }
         }
 
         // Chart-internal picture fills can't round-trip. AddChart rebuilds the

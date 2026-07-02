@@ -712,6 +712,7 @@ internal static partial class ChartHelper
         "combotypes", "combo.types",
         "preset", "style.preset", "theme",
         "view3d", "camera", "perspective",
+        "floorraw", "sidewallraw", "backwallraw",
         "holesize", "firstsliceangle", "sliceangle",
         "axisvisible", "axis.visible", "axis.delete",
         "cataxisvisible", "valaxisvisible",

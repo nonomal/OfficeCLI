@@ -1383,6 +1383,33 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                case "floorraw" or "sidewallraw" or "backwallraw":
+                {
+                    // Verbatim 3D wall/floor elements (<c:floor>/<c:sideWall>/
+                    // <c:backWall>) — sources hide the wall grid with
+                    // <a:ln><a:noFill/> spPr; without them the rebuilt 3D
+                    // chart shows PowerPoint's default wall outlines.
+                    if (string.IsNullOrWhiteSpace(value)) break;
+                    OpenXmlCompositeElement wallEl = key.ToLowerInvariant() switch
+                    {
+                        "floorraw" => new C.Floor(),
+                        "sidewallraw" => new C.SideWall(),
+                        _ => new C.BackWall(),
+                    };
+                    wallEl.InnerXml = value;
+                    switch (wallEl)
+                    {
+                        case C.Floor: chart.RemoveAllChildren<C.Floor>(); break;
+                        case C.SideWall: chart.RemoveAllChildren<C.SideWall>(); break;
+                        default: chart.RemoveAllChildren<C.BackWall>(); break;
+                    }
+                    // Schema: view3D?, floor?, sideWall?, backWall?, plotArea.
+                    var wallPlotArea = chart.GetFirstChild<C.PlotArea>();
+                    if (wallPlotArea != null) chart.InsertBefore(wallEl, wallPlotArea);
+                    else chart.AppendChild(wallEl);
+                    break;
+                }
+
                 case "areafill" or "area.fill":
                 {
                     // Apply gradient fill to area chart series. Format: "color1-color2[:angle]"

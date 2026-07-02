@@ -53,6 +53,23 @@ internal static partial class ChartHelper
             if (rootTxPr != null)
                 node.InternalFormat["chartTxPrRaw"] = rootTxPr.OuterXml;
 
+            // 3D wall/floor elements — sources hide the wall grid with
+            // <a:ln><a:noFill/> spPr; without carrying them the rebuilt 3D
+            // chart shows PowerPoint's default wall outlines.
+            var chartForWalls = chartSpace.GetFirstChild<C.Chart>();
+            if (chartForWalls != null)
+            {
+                var floorEl2 = chartForWalls.GetFirstChild<C.Floor>();
+                if (floorEl2?.HasChildren == true)
+                    node.InternalFormat["floorRaw"] = floorEl2.InnerXml;
+                var sideWallEl = chartForWalls.GetFirstChild<C.SideWall>();
+                if (sideWallEl?.HasChildren == true)
+                    node.InternalFormat["sideWallRaw"] = sideWallEl.InnerXml;
+                var backWallEl = chartForWalls.GetFirstChild<C.BackWall>();
+                if (backWallEl?.HasChildren == true)
+                    node.InternalFormat["backWallRaw"] = backWallEl.InnerXml;
+            }
+
             // 1904 date epoch flag — Builder always writes an explicit
             // <c:date1904>, so only the non-default true needs surfacing.
             if (chartSpace.GetFirstChild<C.Date1904>()?.Val?.Value == true)
@@ -1421,14 +1438,14 @@ internal static partial class ChartHelper
                     if (dlFlags.Count > 0)
                         seriesNode.Format["dataLabels"] = string.Join(",", dlFlags);
 
-                    // Per-point <c:dLbl>, a numFmt, or a separator go beyond
-                    // the flag summary — carry the whole <c:dLbls> verbatim
-                    // (the per-series `series{N}.dlbls` Set case re-inserts
-                    // it in schema order).
-                    if (serDLbls.Elements<C.DataLabel>().Any()
-                        || serDLbls.GetFirstChild<C.NumberingFormat>() != null
-                        || serDLbls.GetFirstChild<C.Separator>() != null)
-                        seriesNode.Format["dlbls"] = serDLbls.OuterXml;
+                    // Carry the whole <c:dLbls> verbatim whenever present —
+                    // per-point dLbl, numFmt, separator, positions AND the
+                    // plain show flags all ride it (the flag summary above is
+                    // Get-friendly but was never replayed; a 3D bar's
+                    // showVal=1 was silently dropped). The per-series
+                    // `series{N}.dlbls` Set case re-inserts it in schema
+                    // order.
+                    seriesNode.Format["dlbls"] = serDLbls.OuterXml;
                 }
                 var serDlDefRp = serDLbls?.GetFirstChild<C.TextProperties>()
                     ?.GetFirstChild<Drawing.Paragraph>()

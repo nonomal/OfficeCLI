@@ -583,23 +583,34 @@ officecli merge invoice-template.docx invoice-001.docx '{"client":"Acme","total"
 officecli validate report.docx && officecli view report.docx issues --json
 ```
 
-**From Python** — install the thin `officecli-sdk` (resident-pipe wrapper, no per-call process spawn) or wrap subprocess directly:
+**From Python or Node.js** — install one of the thin resident-pipe SDKs (no per-call process spawn):
 
 ```python
-# Option A: thin SDK over the resident pipe
+# Python — `pip install officecli-sdk`
 from officecli import Doc
 with Doc("deck.pptx") as d:
     d.add("/", type="slide", title="Q4 Report")
     print(d.get("/slide[1]"))
+```
 
-# Option B: subprocess wrapper (one-shot, no resident)
+```javascript
+// Node.js — `npm install @officecli/sdk`
+import { Doc } from "@officecli/sdk";
+await using d = await Doc.open("deck.pptx");
+await d.add("/", { type: "slide", title: "Q4 Report" });
+console.log(await d.get("/slide[1]"));
+```
+
+Both SDKs auto-provision the native CLI when missing (mirror-first, Windows-capable) and announce the install rather than doing it silently.
+
+Or wrap subprocess directly, one-shot:
+
+```python
 import json, subprocess
 def cli(*args):
     return json.loads(subprocess.check_output(["officecli", *args, "--json"], text=True))
 cli("create", "deck.pptx")
 ```
-
-The SDK falls back to the default install dir when `officecli` is not on PATH.
 
 ## Documentation
 

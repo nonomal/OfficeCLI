@@ -234,7 +234,7 @@ with officecli.create(FILE, "--force") as doc:
         eqn(r"a \cong b \simeq c \asymp d \doteq e, \quad f \propto g, \quad x \prec y \succ z, \quad p \preceq q \succeq r, \quad m \ll n \gg k, \quad \Gamma \models \phi \vdash \psi \dashv \chi \Vdash \omega, \quad u \perp v, \quad \top, \quad a \ni b, \quad S \sqsubset T \sqsubseteq U \sqsupset V \sqsupseteq W, \quad A \subsetneq B \supsetneq C"),
         # Negated relations — \nleq \ngeq \nmid \nsubseteq \nsupseteq \nexists
         para("70. Negated Relations:"),
-        eqn(r"a \nleq b, \quad c \ngeq d, \quad e \nmid f, \quad A \nsubseteq B, \quad C \nsupseteq D, \quad \nexists x"),
+        eqn(r"a \nleq b, \quad c \ngeq d, \quad e \nmid f, \quad g \nparallel h, \quad A \nsubseteq B, \quad C \nsupseteq D, \quad \nexists x"),
         # Arrows — \longleftarrow \longrightarrow \longleftrightarrow \longmapsto \hookleftarrow \hookrightarrow \twoheadrightarrow \rightsquigarrow \leftharpoonup \leftharpoondown \rightharpoonup \rightharpoondown \nearrow \searrow \swarrow \nwarrow \curvearrowleft \curvearrowright \impliedby
         para("71. Extended Arrows:"),
         eqn(r"a \longleftarrow b \longrightarrow c \longleftrightarrow d, \quad x \longmapsto y, \quad e \hookleftarrow f \hookrightarrow g, \quad p \twoheadrightarrow q \rightsquigarrow r, \quad u \leftharpoonup v \leftharpoondown w \rightharpoonup s \rightharpoondown t, \quad \nearrow \searrow \swarrow \nwarrow, \quad \alpha \curvearrowleft \beta \curvearrowright \gamma, \quad P \impliedby Q"),

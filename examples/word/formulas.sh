@@ -259,9 +259,9 @@ $CLI add "$OUT" /body --type equation --prop 'formula=\chi, \iota, \kappa, \omeg
 $CLI add "$OUT" /body --type paragraph --prop text="69. Relation Symbols:"
 $CLI add "$OUT" /body --type equation --prop 'formula=a \cong b \simeq c \asymp d \doteq e, \quad f \propto g, \quad x \prec y \succ z, \quad p \preceq q \succeq r, \quad m \ll n \gg k, \quad \Gamma \models \phi \vdash \psi \dashv \chi \Vdash \omega, \quad u \perp v, \quad \top, \quad a \ni b, \quad S \sqsubset T \sqsubseteq U \sqsupset V \sqsupseteq W, \quad A \subsetneq B \supsetneq C'
 
-# Features: negated relations — \nleq \ngeq \nmid \nsubseteq \nsupseteq \nexists
+# Features: negated relations — \nleq \ngeq \nmid \nparallel \nsubseteq \nsupseteq \nexists
 $CLI add "$OUT" /body --type paragraph --prop text="70. Negated Relations:"
-$CLI add "$OUT" /body --type equation --prop 'formula=a \nleq b, \quad c \ngeq d, \quad e \nmid f, \quad A \nsubseteq B, \quad C \nsupseteq D, \quad \nexists x'
+$CLI add "$OUT" /body --type equation --prop 'formula=a \nleq b, \quad c \ngeq d, \quad e \nmid f, \quad g \nparallel h, \quad A \nsubseteq B, \quad C \nsupseteq D, \quad \nexists x'
 
 # Features: arrows — \longleftarrow \longrightarrow \longleftrightarrow \longmapsto \hookleftarrow \hookrightarrow \twoheadrightarrow \rightsquigarrow \leftharpoonup \leftharpoondown \rightharpoonup \rightharpoondown \nearrow \searrow \swarrow \nwarrow \curvearrowleft \curvearrowright \impliedby
 $CLI add "$OUT" /body --type paragraph --prop text="71. Extended Arrows:"

@@ -395,8 +395,9 @@ officecli add formulas.docx /body --type equation \
 | Math font families | `\mathfrak` `\mathsf` `\mathtt` `\textbf` `\textit` `\textsf` `\texttt` |
 | Environments | `Bmatrix` `Vmatrix` `smallmatrix` `array` (colspec) `aligned` `align` (multi-point) `gather` `split` `substack` |
 
-> Note: `\nparallel` (LaTeX "not parallel") is **not** supported by the current
-> parser and is intentionally omitted.
+This section exercises every command the parser recognizes; `\nparallel`
+(∦, "not parallel") is included — its forward mapping was added so it now
+parses and round-trips symmetrically with the reverse dump.
 
 ## Complete Feature Coverage
 

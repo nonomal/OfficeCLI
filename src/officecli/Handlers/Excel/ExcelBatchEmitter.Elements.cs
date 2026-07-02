@@ -376,12 +376,28 @@ public static partial class ExcelBatchEmitter
             {
                 ["src"] = dataUri,
             };
-            // Anchor readback is from/to markers in column/row units — the
-            // same x/y/width/height vocabulary AddPicture consumes.
-            CopyValue(pic, "x", props, "x");
-            CopyValue(pic, "y", props, "y");
-            CopyValue(pic, "width", props, "width");
-            CopyValue(pic, "height", props, "height");
+            // Exact anchor rectangle (x/y cell origin + EMU dimensions), not
+            // the Get surface's whole-cell width/height deltas — those drop
+            // sub-cell To offsets, so replay would snap the picture to cell
+            // boundaries (visible drift in real Excel rendering).
+            var picAnchor = xl.GetDumpPictureAnchorEmu(sheetName, i);
+            if (picAnchor != null)
+            {
+                props["x"] = picAnchor.X.ToString();
+                props["y"] = picAnchor.Y.ToString();
+                props["width"] = $"{picAnchor.WidthEmu}emu";
+                props["height"] = $"{picAnchor.HeightEmu}emu";
+                if (picAnchor.HasFromOffset)
+                    warnings.Add(new UnsupportedWarning("picture", pic.Path ?? sheetPath,
+                        "picture From marker has a sub-cell offset; replay anchors at the cell origin (add vocabulary cannot express from-offsets)"));
+            }
+            else
+            {
+                CopyValue(pic, "x", props, "x");
+                CopyValue(pic, "y", props, "y");
+                CopyValue(pic, "width", props, "width");
+                CopyValue(pic, "height", props, "height");
+            }
             CopyString(pic, "alt", props, "alt");
             CopyString(pic, "name", props, "name");
             CopyValue(pic, "rotation", props, "rotation");

@@ -213,6 +213,8 @@ public partial class ExcelHandler
         ParseCellReference(cmtRef);
         var cmtText = properties.GetValueOrDefault("text", "");
         var cmtAuthor = properties.GetValueOrDefault("author", "Author");
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(cmtText, "comment text");
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(cmtAuthor, "comment author");
 
         var commentsPart = cmtWorksheet.WorksheetCommentsPart
             ?? cmtWorksheet.AddNewPart<WorksheetCommentsPart>();

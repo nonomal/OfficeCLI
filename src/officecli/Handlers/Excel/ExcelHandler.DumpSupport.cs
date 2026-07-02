@@ -527,6 +527,53 @@ public partial class ExcelHandler
         return (pictures, shapes);
     }
 
+    /// <summary>Exact twoCellAnchor rectangle for a drawing, in the x/y +
+    /// EMU width/height vocabulary AddPicture/AddShape consume. Width and
+    /// height invert the Add path's whole-cells + remainder-offset split
+    /// (EmuPerColApprox / EmuPerRowApprox), so replaying `width=NNNemu`
+    /// reconstructs the source's To marker bit-for-bit — unlike the Get
+    /// surface's whole-cell col/row deltas, which discard sub-cell offsets.
+    /// HasFromOffset flags anchors whose From marker carries a non-zero
+    /// offset (real-Excel-authored); the add vocabulary cannot express that,
+    /// so the emitter surfaces it as a warning.</summary>
+    public sealed record DumpAnchorEmu(int X, int Y, long WidthEmu, long HeightEmu, bool HasFromOffset);
+
+    public DumpAnchorEmu? GetDumpPictureAnchorEmu(string sheetName, int index)
+    {
+        var wsDrawing = FindWorksheet(sheetName)?.DrawingsPart?.WorksheetDrawing;
+        if (wsDrawing == null) return null;
+        var picAnchors = wsDrawing.Elements<DocumentFormat.OpenXml.Drawing.Spreadsheet.TwoCellAnchor>()
+            .Where(a => a.Descendants<DocumentFormat.OpenXml.Drawing.Spreadsheet.Picture>().Any())
+            .ToList();
+        if (index < 1 || index > picAnchors.Count) return null;
+        return AnchorToEmuRect(picAnchors[index - 1]);
+    }
+
+    public DumpAnchorEmu? GetDumpShapeAnchorEmu(string sheetName, int index)
+    {
+        var wsDrawing = FindWorksheet(sheetName)?.DrawingsPart?.WorksheetDrawing;
+        if (wsDrawing == null) return null;
+        var shapes = EnumerateLeafShapes(wsDrawing).ToList();
+        if (index < 1 || index > shapes.Count) return null;
+        return AnchorToEmuRect(shapes[index - 1].anchor);
+    }
+
+    private static DumpAnchorEmu? AnchorToEmuRect(
+        DocumentFormat.OpenXml.Drawing.Spreadsheet.TwoCellAnchor anchor)
+    {
+        var from = anchor.FromMarker;
+        var to = anchor.ToMarker;
+        if (from == null || to == null) return null;
+        static int P(string? s) => int.TryParse(s, out var v) ? v : 0;
+        static long PL(string? s) => long.TryParse(s, out var v) ? v : 0;
+        int fc = P(from.ColumnId?.Text), fr = P(from.RowId?.Text);
+        long fcOff = PL(from.ColumnOffset?.Text), frOff = PL(from.RowOffset?.Text);
+        long wEmu = (P(to.ColumnId?.Text) - fc) * EmuPerColApprox + PL(to.ColumnOffset?.Text) - fcOff;
+        long hEmu = (P(to.RowId?.Text) - fr) * EmuPerRowApprox + PL(to.RowOffset?.Text) - frOff;
+        if (wEmu <= 0 || hEmu <= 0) return null;
+        return new DumpAnchorEmu(fc, fr, wEmu, hEmu, fcOff != 0 || frOff != 0);
+    }
+
     /// <summary>
     /// Extract picture[index]'s image bytes as a data URI for the emit's
     /// `add picture src=` prop (ImageSource.Resolve round-trips data URIs).

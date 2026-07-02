@@ -492,7 +492,26 @@ public partial class ExcelHandler
                 // any non-finite double (NaN/Infinity), matching the
                 // already-string behavior of "Infinity"/"-Infinity" (which
                 // TryParse rejects under default culture).
-                if (!double.TryParse(safeValue, out var dbl) || !double.IsFinite(dbl))
+                // R-bt-1: an ISO-date value combined with an explicit date-like
+                // numberformat and no type= means the user unambiguously wants
+                // a date cell. Without coercion the numberformat is inert on a
+                // t="str" cell — displays/sorts/filters as text in real Excel.
+                // Import's type detection already coerces ISO dates; mirror it
+                // here for this intent-clear case only (bare ISO strings
+                // without a format keep their existing string semantics).
+                if (!properties.ContainsKey("type")
+                    && (properties.GetValueOrDefault("numberformat")
+                        ?? properties.GetValueOrDefault("numfmt")
+                        ?? properties.GetValueOrDefault("format")) is { } nfRaw
+                    && System.Text.RegularExpressions.Regex.IsMatch(nfRaw, "[ymdhs]", System.Text.RegularExpressions.RegexOptions.IgnoreCase)
+                    && TryParseIsoDateFlexible(safeValue.Trim(), out var inferredDate)
+                    && inferredDate >= new System.DateTime(1900, 1, 1))
+                {
+                    cell.CellValue = new CellValue(
+                        inferredDate.ToOADate().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                    cell.DataType = null;
+                }
+                else if (!double.TryParse(safeValue, out var dbl) || !double.IsFinite(dbl))
                     cell.DataType = new EnumValue<CellValues>(CellValues.String);
             }
         }
@@ -994,6 +1013,7 @@ public partial class ExcelHandler
         var newRun = new Run();
         var newRunProps = new RunProperties();
         var runText = properties.GetValueOrDefault("text", "");
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(runText, "run text");
 
         // CONSISTENCY(tracking-dict): read each prop via TryGetValue (not a
         // foreach over the dictionary). The foreach went through
@@ -1179,6 +1199,7 @@ public partial class ExcelHandler
                         if (p.NameEquals("text")) text = sv;
                         else pd[p.Name] = sv;
                     }
+                    OfficeCli.Core.ParseHelpers.ValidateXmlText(text, "richtext run text");
                     gatheredRuns.Add((text, pd));
                 }
             }

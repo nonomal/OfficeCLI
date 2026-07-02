@@ -356,5 +356,11 @@ public partial class ExcelHandler
             throw new ArgumentException(
                 $"Cell value{where} exceeds Excel's {MaxCellTextLength}-character limit (got {value.Length})");
         }
+        // XML-illegal control chars / lone surrogates: without this the value
+        // enters the in-memory DOM fine and only fails at close-time save —
+        // "save failed during shutdown", leaving sheetData empty on disk
+        // (total data loss). Same guard Word text paths already use.
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(value,
+            string.IsNullOrEmpty(cellRef) ? "cell value" : $"cell value at {cellRef}");
     }
 }

@@ -565,6 +565,7 @@ public partial class ExcelHandler
             (sx, sy, sw, sh) = ParseAnchorBounds(properties, "1", "1", "5", "3");
         }
         var shpText = properties.GetValueOrDefault("text", "") ?? "";
+        OfficeCli.Core.ParseHelpers.ValidateXmlText(shpText, "shape text");
         var shpName = properties.GetValueOrDefault("name", "");
 
         var shpDrawingsPart = shpWorksheet.DrawingsPart

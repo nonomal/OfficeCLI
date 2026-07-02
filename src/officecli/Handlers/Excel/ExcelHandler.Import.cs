@@ -96,6 +96,14 @@ public partial class ExcelHandler
                     if (existingCell.CellReference?.Value is { } cr)
                         cellByRef[cr] = existingCell;
             }
+            else if (fields.All(string.IsNullOrEmpty))
+            {
+                // All-empty row on a row that doesn't exist yet: nothing to
+                // write. Materializing it would add phantom <row>/<c> elements
+                // absent from the imported data (dump's gap-bridge "," rows
+                // land here), inflating UsedRange and non-empty iteration.
+                continue;
+            }
             else
             {
                 row = new Row { RowIndex = rowIdx };
@@ -119,6 +127,11 @@ public partial class ExcelHandler
                 cellByRef?.TryGetValue(cellRef, out cell);
                 if (cell == null)
                 {
+                    // Empty field, no pre-existing cell: skip. Creating an
+                    // empty <c> here would fabricate cells the source never
+                    // had; when the cell DOES exist, the empty field keeps
+                    // its clear-the-value semantics below.
+                    if (string.IsNullOrEmpty(fields[c])) continue;
                     cell = new Cell { CellReference = cellRef };
                     row.Append(cell);
                 }
@@ -219,9 +232,21 @@ public partial class ExcelHandler
         }
 
         // Number (integer or decimal)
-        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var numVal))
+        if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var numVal)
+            && double.IsFinite(numVal)) // "Infinity"/"NaN" parse but have no OOXML numeric form — fall through to string
         {
-            cell.CellValue = new CellValue(numVal.ToString(CultureInfo.InvariantCulture));
+            // Preserve the literal digits when the input is already a plain
+            // canonical numeric literal. Round-tripping through double
+            // silently rounds >15-16 significant digits (e.g. 18-digit IDs
+            // stored as numbers by openpyxl-authored files), so dump→replay
+            // would corrupt them. Normalization is kept for the non-canonical
+            // spellings double.TryParse accepts (whitespace padding,
+            // thousands separators, "Infinity"/"NaN").
+            var isCanonicalNumericLiteral = System.Text.RegularExpressions.Regex.IsMatch(
+                value, @"^-?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$");
+            cell.CellValue = new CellValue(isCanonicalNumericLiteral
+                ? value
+                : numVal.ToString(CultureInfo.InvariantCulture));
             cell.DataType = null; // numeric is default
             return;
         }

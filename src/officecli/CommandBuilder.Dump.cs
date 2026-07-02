@@ -18,7 +18,8 @@ static partial class CommandBuilder
             Description = "DOM path of the subtree to dump. Defaults to '/' (whole document) when omitted. "
                         + "Supported docx subtree paths: /, /body, /body/p[N], /body/tbl[N], /theme, /settings, /numbering, /styles. "
                         + "Supported pptx subtree paths: /, /presentation, /slide[N], /theme, /notesMaster, /slideMaster[N], /slideLayout[N], /noteSlide[N]. "
-                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme; pptx: master/layout/theme); replay target must already define referenced styles/numIds/layouts.",
+                        + "Supported xlsx subtree paths: /, /SheetName, /sheet[N]. "
+                        + "Subtree dumps do NOT include resources at sibling paths (styles/numbering/theme; pptx: master/layout/theme; xlsx: workbook settings/named ranges); replay target must already define referenced styles/numIds/layouts.",
             DefaultValueFactory = _ => "/"
         };
         var formatOpt = new Option<string>("--format")
@@ -47,8 +48,8 @@ static partial class CommandBuilder
                     { Code = "invalid_format", ValidValues = ["batch"] };
 
             var ext = Path.GetExtension(file.FullName).ToLowerInvariant();
-            if (ext != ".docx" && ext != ".pptx")
-                throw new CliException($"dump currently supports .docx and .pptx (got {ext})")
+            if (ext != ".docx" && ext != ".pptx" && ext != ".xlsx")
+                throw new CliException($"dump currently supports .docx, .pptx and .xlsx (got {ext})")
                     { Code = "unsupported_format" };
 
             // CONSISTENCY(file-not-found): mirror the get/set/query format —
@@ -129,7 +130,7 @@ static partial class CommandBuilder
                     }
                 }
             }
-            else // .pptx
+            else if (ext == ".pptx")
             {
                 var ppt = (PowerPointHandler)handler;
                 var (pItems, pWarnings) = PptxBatchEmitter.EmitPptx(ppt, path);
@@ -149,6 +150,27 @@ static partial class CommandBuilder
                         // See docx branch above for the stdout-pipe rationale.
                         if (warnToStderr)
                             Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
+                    }
+                }
+            }
+            else // .xlsx
+            {
+                var xl = (ExcelHandler)handler;
+                var (xItems, xWarnings) = ExcelBatchEmitter.EmitExcel(xl, path);
+                items = xItems;
+                if (xWarnings.Count > 0)
+                {
+                    dumpWarnings = new List<CliWarning>(xWarnings.Count);
+                    foreach (var w in xWarnings)
+                    {
+                        dumpWarnings.Add(new CliWarning
+                        {
+                            Message = $"skipped {w.Element} at {w.Path}: {w.Reason}",
+                            Code = "unsupported_element"
+                        });
+                        // CONSISTENCY(dump-text-clean-output): see docx branch.
+                        if (warnToStderr)
+                            Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
                     }
                 }
             }

@@ -1762,9 +1762,20 @@ public class ResidentServer : IDisposable
                     Console.Error.WriteLine($"warning: skipped {w.Element} on {w.SlidePath}: {w.Reason}");
             }
         }
+        else if (_handler is OfficeCli.Handlers.ExcelHandler xl)
+        {
+            var (xItems, xWarnings) = OfficeCli.Handlers.ExcelBatchEmitter.EmitExcel(xl, path);
+            items = xItems;
+            // CONSISTENCY(dump-text-clean-output): see docx branch above.
+            if (warnToStderr)
+            {
+                foreach (var w in xWarnings)
+                    Console.Error.WriteLine($"warning: skipped {w.Element} at {w.Path}: {w.Reason}");
+            }
+        }
         else
         {
-            throw new CliException("dump currently supports .docx and .pptx only")
+            throw new CliException("dump currently supports .docx, .pptx and .xlsx only")
                 { Code = "unsupported_format" };
         }
         var output = System.Text.Json.JsonSerializer.Serialize(items, BatchJsonContext.Default.ListBatchItem);

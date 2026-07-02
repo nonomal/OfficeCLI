@@ -748,6 +748,42 @@ static partial class CommandBuilder
                     return addMsg;
                 }
             }
+            case "import":
+            {
+                // CSV/TSV bulk import — batch counterpart of the standalone
+                // `officecli import` command (CommandBuilder.Import.cs). The
+                // CSV content rides the item's `text` field; `parent` is the
+                // sheet path. This is the value-baseline carrier for
+                // `dump --format batch` on .xlsx (ExcelBatchEmitter).
+                if (handler is not OfficeCli.Handlers.ExcelHandler importXl)
+                    throw new CliException("'import' batch command is only supported for .xlsx files")
+                        { Code = "unsupported_type" };
+                var importParent = item.Parent ?? item.Path;
+                if (string.IsNullOrEmpty(importParent))
+                    throw new ArgumentException("'import' command requires 'parent' field (sheet path). Example: {\"command\": \"import\", \"parent\": \"/Sheet1\", \"text\": \"a,b\\n1,2\"}");
+                if (item.Text == null)
+                    throw new ArgumentException("'import' command requires 'text' field with the CSV/TSV content.");
+                // CONSISTENCY(import-vocabulary): props mirror the standalone
+                // command's options — format=csv|tsv, header, start-cell.
+                char importDelim = ',';
+                if (props.TryGetValue("format", out var importFmt) && !string.IsNullOrEmpty(importFmt))
+                {
+                    importDelim = importFmt.ToLowerInvariant() switch
+                    {
+                        "tsv" => '\t',
+                        "csv" => ',',
+                        _ => throw new CliException($"Unknown format: {importFmt}. Use 'csv' or 'tsv'")
+                            { Code = "invalid_value", ValidValues = ["csv", "tsv"] },
+                    };
+                }
+                var importHeader = props.TryGetValue("header", out var importHdr)
+                    && OfficeCli.Core.ParseHelpers.IsTruthy(importHdr);
+                var importStart = props.TryGetValue("start-cell", out var importSc) && !string.IsNullOrEmpty(importSc)
+                    ? importSc
+                    : props.TryGetValue("startcell", out var importSc2) && !string.IsNullOrEmpty(importSc2)
+                        ? importSc2 : "A1";
+                return importXl.Import(importParent, item.Text, importDelim, importHeader, importStart);
+            }
             case "remove":
             {
                 if (string.IsNullOrEmpty(item.Path))

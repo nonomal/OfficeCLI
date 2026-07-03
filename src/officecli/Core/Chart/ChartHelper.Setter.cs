@@ -145,6 +145,11 @@ internal static partial class ChartHelper
             // rebuild wipes the secondary axis (R26: combo + secondaryAxis +
             // combotypes left every series on the primary axis).
             if (lower is "combotypes" or "combo.types") return 0;
+            // secondaryaxis hides the secondary category axis (delete=1 +
+            // majorTickMark/tickLblPos=none). It must run BEFORE the chart-level
+            // majortickmark/ticklabelpos setters so those can skip the now-hidden
+            // axis; otherwise the hidden secondary catAx reappears after replay.
+            if (lower is "secondaryaxis" or "secondary") return 1;
             if (lower is "title" or "legend" or "datalabels" or "labels") return 1;
             // axis-title TEXT must build the <c:title> element before axistitle.pPr
             // (order 2) replaces its paragraph properties.
@@ -1720,9 +1725,13 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var tickVal = ParseTickMark(value);
-                    foreach (var ax in plotArea2.Elements<C.ValueAxis>())
+                    // Skip hidden axes (delete=1). A combo chart's secondary
+                    // category axis is intentionally hidden with majorTickMark/
+                    // tickLblPos=none; applying the chart-level primary-axis value
+                    // to it would make it reappear (out/nextTo) after replay.
+                    foreach (var ax in plotArea2.Elements<C.ValueAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.MajorTickMark>(); InsertAxisChildInOrder(ax, new C.MajorTickMark { Val = tickVal }); }
-                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
+                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.MajorTickMark>(); InsertAxisChildInOrder(ax, new C.MajorTickMark { Val = tickVal }); }
                     break;
                 }
@@ -1732,9 +1741,9 @@ internal static partial class ChartHelper
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }
                     var tickVal = ParseTickMark(value);
-                    foreach (var ax in plotArea2.Elements<C.ValueAxis>())
+                    foreach (var ax in plotArea2.Elements<C.ValueAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.MinorTickMark>(); InsertAxisChildInOrder(ax, new C.MinorTickMark { Val = tickVal }); }
-                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
+                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.MinorTickMark>(); InsertAxisChildInOrder(ax, new C.MinorTickMark { Val = tickVal }); }
                     break;
                 }
@@ -1751,9 +1760,9 @@ internal static partial class ChartHelper
                         "nextto" => C.TickLabelPositionValues.NextTo,
                         _ => throw new ArgumentException($"Invalid 'tickLabelPos' value: '{value}'. Valid: none, high, low, nextTo.")
                     };
-                    foreach (var ax in plotArea2.Elements<C.ValueAxis>())
+                    foreach (var ax in plotArea2.Elements<C.ValueAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.TickLabelPosition>(); InsertAxisChildInOrder(ax, new C.TickLabelPosition { Val = tlPos }); }
-                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>())
+                    foreach (var ax in plotArea2.Elements<C.CategoryAxis>().Where(a => !IsDeletedAxis(a)))
                     { ax.RemoveAllChildren<C.TickLabelPosition>(); InsertAxisChildInOrder(ax, new C.TickLabelPosition { Val = tlPos }); }
                     break;
                 }
@@ -4028,6 +4037,17 @@ internal static partial class ChartHelper
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// True when an axis is hidden via &lt;c:delete val="1"/&gt;. Chart-level tick
+    /// mark / tick-label-position setters skip these so a combo chart's
+    /// intentionally hidden secondary category axis doesn't reappear on replay.
+    /// </summary>
+    private static bool IsDeletedAxis(OpenXmlCompositeElement axis)
+    {
+        var del = axis.GetFirstChild<C.Delete>();
+        return del != null && (del.Val?.Value ?? false);
     }
 
     internal static void ApplySecondaryAxis(C.PlotArea plotArea, HashSet<int> secondarySeriesIndices)

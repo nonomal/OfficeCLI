@@ -1472,8 +1472,9 @@ public partial class WordHandler
                 // seeds with its actual position (Figure 1, Figure 2, …).
                 // Previously the cached run stayed empty and get/view showed
                 // blank where the number belongs.
-                "seq" => CountExistingSeqFields(seqIdentifier).ToString(
-                    System.Globalization.CultureInfo.InvariantCulture),
+                "seq" => FormatSeqCachedValue(
+                    CountExistingSeqFields(seqIdentifier),
+                    properties.GetValueOrDefault("switches", "")),
                 // DATE/TIME family: seed with DateTime.Now formatted via the
                 // user's `\@` format switch (if any), otherwise Word-like
                 // defaults. The "1" fallback for unrecognized fields is
@@ -2789,6 +2790,22 @@ public partial class WordHandler
             result = op switch { "=" => cmp == 0, "<>" => cmp != 0, "<" => cmp < 0, ">" => cmp > 0, "<=" => cmp <= 0, _ => cmp >= 0 };
         }
         return result ? trueText : falseText;
+    }
+
+    // R53-fuzz-1: honour the \r restart and \* numbering-format switches in
+    // the cached value — they were written into instrText but the cache
+    // always showed continuing arabic numerals.
+    private static string FormatSeqCachedValue(int number, string switches)
+    {
+        var rm = System.Text.RegularExpressions.Regex.Match(switches, @"\\r\s+(\d+)");
+        if (rm.Success && int.TryParse(rm.Groups[1].Value, out var restartAt))
+            number = restartAt;
+        var fm = System.Text.RegularExpressions.Regex.Match(switches, @"\\\*\s+(\S+)");
+        var fmt = fm.Success ? fm.Groups[1].Value : "";
+        // Delegate to SeqEval's formatter (the RecalcSeqFields engine) so the
+        // insert-time seed and the recalc pass agree on \* semantics.
+        return FormatSeqValue(number, fmt)
+            ?? number.ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     // Count SEQ fields already carrying this identifier so a newly appended

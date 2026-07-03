@@ -2800,6 +2800,8 @@ public partial class WordHandler
                 case "lastcol" or "lastcolumn":
                 case "bandrow" or "bandedrows" or "bandrows":
                 case "bandcol" or "bandedcols" or "bandcols":
+                case "nohband" or "nohorizontalband":
+                case "novband" or "noverticalband":
                 {
                     var tblLook = tblPr.GetFirstChild<TableLook>();
                     if (tblLook == null)
@@ -2811,14 +2813,37 @@ public partial class WordHandler
                         InsertTblPrChildInOrder(tblPr, tblLook);
                     }
                     var bv = IsTruthy(value);
-                    switch (key.ToLowerInvariant())
+                    // "no*Band" carries the inverted sense of band*.
+                    var (bit, bitOn) = key.ToLowerInvariant() switch
                     {
-                        case "firstrow": tblLook.FirstRow = bv; break;
-                        case "lastrow": tblLook.LastRow = bv; break;
-                        case "firstcol" or "firstcolumn": tblLook.FirstColumn = bv; break;
-                        case "lastcol" or "lastcolumn": tblLook.LastColumn = bv; break;
-                        case "bandrow" or "bandedrows" or "bandrows": tblLook.NoHorizontalBand = !bv; break;
-                        case "bandcol" or "bandedcols" or "bandcols": tblLook.NoVerticalBand = !bv; break;
+                        "firstrow" => (0x0020, bv),
+                        "lastrow" => (0x0040, bv),
+                        "firstcol" or "firstcolumn" => (0x0080, bv),
+                        "lastcol" or "lastcolumn" => (0x0100, bv),
+                        "bandrow" or "bandedrows" or "bandrows" => (0x0200, !bv),
+                        "bandcol" or "bandedcols" or "bandcols" => (0x0400, !bv),
+                        "nohband" or "nohorizontalband" => (0x0200, bv),
+                        _ => (0x0400, bv), // novband / noverticalband
+                    };
+                    switch (bit)
+                    {
+                        case 0x0020: tblLook.FirstRow = bitOn; break;
+                        case 0x0040: tblLook.LastRow = bitOn; break;
+                        case 0x0080: tblLook.FirstColumn = bitOn; break;
+                        case 0x0100: tblLook.LastColumn = bitOn; break;
+                        case 0x0200: tblLook.NoHorizontalBand = bitOn; break;
+                        case 0x0400: tblLook.NoVerticalBand = bitOn; break;
+                    }
+                    // R53-fuzz-3: w:val is the authoritative bitmask — Word
+                    // ignores the decomposed boolean attrs when both are
+                    // present, so leaving the old hex made the facet Set
+                    // silently ineffective in real Word. Recompute the bit.
+                    if (int.TryParse(tblLook.Val?.Value ?? "04A0",
+                            System.Globalization.NumberStyles.HexNumber,
+                            System.Globalization.CultureInfo.InvariantCulture, out var lookBits))
+                    {
+                        lookBits = bitOn ? lookBits | bit : lookBits & ~bit;
+                        tblLook.Val = lookBits.ToString("X4", System.Globalization.CultureInfo.InvariantCulture);
                     }
                     break;
                 }

@@ -319,7 +319,7 @@ officecli batch deck.pptx --input updates.json --stop-on-error --json
 > officecli save report.docx           # flush, keep the resident warm (or `close` to flush + release)
 > python my_reader.py report.docx      # now sees the edit
 > ```
-> A live resident also auto‑flushes ~10s after going idle. Full flush model (auto‑save / auto‑close / save / close, env tuning): [wiki → open / close](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open#when-the-file-on-disk-is-refreshed).
+> A live resident also auto‑flushes shortly after going idle (adaptive 2–10s, scaled to the document's measured save cost). For a pipeline where another program reads after every command, set `OFFICECLI_RESIDENT_FLUSH=each` — every mutation is on disk before the command returns, while the resident stays warm. Full flush model (`each`/`auto`/fixed/`off`, save / close, env tuning): [wiki → open / close](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open#when-the-file-on-disk-is-refreshed).
 
 ### Three-Layer Architecture
 

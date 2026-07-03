@@ -60,7 +60,7 @@ officecli close report.docx      # save and release
 
 Opt out of auto-start: `OFFICECLI_NO_AUTO_RESIDENT=1`.
 
-**Flush only at the non-officecli boundary.** officecli's own reads (`get`/`query`/`view`/`dump`) always see your latest edits, so you never need to save mid-workflow. Run `save` (keeps the resident) or `close` (flush + release) only **before a non-officecli program reads the file** — python-docx/openpyxl, Word, a renderer, delivery/upload.
+**Flush only at the non-officecli boundary.** officecli's own reads (`get`/`query`/`view`/`dump`) always see your latest edits, so you never need to save mid-workflow. Run `save` (keeps the resident) or `close` (flush + release) only **before a non-officecli program reads the file** — python-docx/openpyxl, Word, a renderer, delivery/upload. A live resident also auto-flushes shortly after going idle (adaptive 2–10s); for pipelines where another program reads after every command, set `OFFICECLI_RESIDENT_FLUSH=each` so each mutation is on disk before its command returns.
 
 ---
 

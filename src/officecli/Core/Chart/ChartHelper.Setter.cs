@@ -501,7 +501,8 @@ internal static partial class ChartHelper
                     break;
                 }
 
-                case "labelpos" or "labelposition":
+                case "labelpos" or "labelposition"
+                    or "datalabels.position" or "datalabels.pos" or "datalabels.labelpos":
                 {
                     var plotArea2 = chart.GetFirstChild<C.PlotArea>();
                     if (plotArea2 == null) { unsupported.Add(key); break; }

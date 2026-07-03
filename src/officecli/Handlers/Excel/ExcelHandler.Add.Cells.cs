@@ -923,6 +923,24 @@ public partial class ExcelHandler
         // semantics); mutating width/hidden in place is the job of
         // `set /Sheet/col[X]`.
         // CONSISTENCY(add-row-col-shift): mirror AddRow's positional-insert gate.
+        // Validate EVERY property BEFORE the structural shift: a parse failure
+        // after ShiftColumnsRight left the shift applied ("Error" + data moved
+        // one column right anyway) and an empty <cols/> shell on disk —
+        // schema-invalid (cols requires >= 1 col child), so a REJECTED add
+        // corrupted a previously-fine file (0x800A03EC in real Excel).
+        bool hasColWidth = properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr);
+        double parsedColWidth = hasColWidth ? ParseColWidthChars(widthStr!) : 0;
+        bool hasColHidden = properties.TryGetValue("hidden", out var addColHidden);
+        byte? parsedColOutline = null;
+        if (properties.TryGetValue("outline", out var addColOutline)
+            || properties.TryGetValue("outlinelevel", out addColOutline)
+            || properties.TryGetValue("group", out addColOutline))
+        {
+            if (!byte.TryParse(addColOutline, out var addColOutlineVal) || addColOutlineVal > 7)
+                throw new ArgumentException($"Invalid 'outline' value: '{addColOutline}'. Expected an integer 0-7 (outline/group level).");
+            parsedColOutline = addColOutlineVal;
+        }
+
         bool colNeedsShift = index.HasValue || !string.IsNullOrEmpty(colLetterProp);
         if (colNeedsShift)
         {
@@ -933,8 +951,6 @@ public partial class ExcelHandler
         // CONSISTENCY(add-set-symmetry): always materialize a <col> element so
         // Get/Query can find the column even when no width/hidden was supplied.
         // Width/Hidden are attached only when the caller provides them.
-        bool hasColWidth = properties.TryGetValue("width", out var widthStr) && !string.IsNullOrWhiteSpace(widthStr);
-        bool hasColHidden = properties.TryGetValue("hidden", out var addColHidden);
         {
             var ws = GetSheet(colWorksheet);
             var columns = ws.GetFirstChild<Columns>() ?? ws.PrependChild(new Columns());
@@ -949,7 +965,7 @@ public partial class ExcelHandler
             };
             if (hasColWidth)
             {
-                newCol.Width = ParseColWidthChars(widthStr!);
+                newCol.Width = parsedColWidth;
                 newCol.CustomWidth = true;
             }
             if (hasColHidden)
@@ -959,14 +975,8 @@ public partial class ExcelHandler
             }
             // CONSISTENCY(add-set-symmetry): accept outline/group + collapsed at
             // creation, mirroring SetColumn (ExcelHandler.Set.cs L2624-2632).
-            if (properties.TryGetValue("outline", out var addColOutline)
-                || properties.TryGetValue("outlinelevel", out addColOutline)
-                || properties.TryGetValue("group", out addColOutline))
-            {
-                if (!byte.TryParse(addColOutline, out var addColOutlineVal) || addColOutlineVal > 7)
-                    throw new ArgumentException($"Invalid 'outline' value: '{addColOutline}'. Expected an integer 0-7 (outline/group level).");
-                newCol.OutlineLevel = addColOutlineVal;
-            }
+            if (parsedColOutline is { } outlineVal)
+                newCol.OutlineLevel = outlineVal;
             if (properties.TryGetValue("collapsed", out var addColCollapsed))
             {
                 newCol.Collapsed = addColCollapsed.Equals("true", StringComparison.OrdinalIgnoreCase)

@@ -45,7 +45,21 @@ internal static partial class ChartHelper
         // matching what a freshly-built N-series chart would use for slot N —
         // not the cloned neighbor's color.
         newSer.GetFirstChild<C.ShapeProperties>()?.Remove();
-        ApplySeriesColor(newSer, DefaultSeriesColors[(int)(newIdx % (uint)DefaultSeriesColors.Length)]);
+        // Index-based palette pick collided after remove + re-add: a chart
+        // whose surviving series already hold accent1+accent3 got accent3
+        // again for the new slot-3 series (two gray bars). Prefer the first
+        // palette entry no surviving series explicitly uses; fall back to the
+        // index rule only when every entry is taken.
+        var usedFills = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var ser in existing)
+        {
+            var serSpPr = ser.ChildElements.FirstOrDefault(e => e.LocalName == "spPr");
+            var fill = serSpPr?.Descendants<Drawing.RgbColorModelHex>().FirstOrDefault()?.Val?.Value;
+            if (!string.IsNullOrEmpty(fill)) usedFills.Add(fill);
+        }
+        var newColor = DefaultSeriesColors.FirstOrDefault(c => !usedFills.Contains(c))
+            ?? DefaultSeriesColors[(int)(newIdx % (uint)DefaultSeriesColors.Length)];
+        ApplySeriesColor(newSer, newColor);
 
         // Renumber c:idx / c:order on the clone.
         if (newSer.GetFirstChild<C.Index>() is { } ix) ix.Val = newIdx;

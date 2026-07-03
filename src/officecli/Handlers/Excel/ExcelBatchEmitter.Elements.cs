@@ -127,6 +127,11 @@ public static partial class ExcelBatchEmitter
                     CopyString(cf, "direction", props, "direction");
                     CopyString(cf, "negativeColor", props, "negativeColor");
                     CopyString(cf, "axisColor", props, "axisColor");
+                    CopyString(cf, "axisPosition", props, "axisPosition");
+                    // Explicit numeric min/max bounds; omitting them lets the
+                    // Add path fall back to autoMin/autoMax.
+                    CopyString(cf, "min", props, "min");
+                    CopyString(cf, "max", props, "max");
                     break;
                 case "colorScale":
                     addType = "colorscale";

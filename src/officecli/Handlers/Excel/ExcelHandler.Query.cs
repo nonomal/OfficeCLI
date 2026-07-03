@@ -642,6 +642,34 @@ public partial class ExcelHandler
                             var axCol = x14Db.GetFirstChild<X14.BarAxisColor>();
                             if (axCol?.Rgb?.Value != null)
                                 cfNode.Format["axisColor"] = ParseHelpers.FormatHexColor(axCol.Rgb.Value);
+                            // minLength/maxLength live on the x14 dataBar (Add writes
+                            // them there, not on the 2007 DataBar). Surface both so
+                            // the round-trip preserves the bar-length bounds.
+                            if (x14Db.MinLength?.Value is uint x14MinLen)
+                                cfNode.Format["minLength"] = x14MinLen;
+                            if (x14Db.MaxLength?.Value is uint x14MaxLen)
+                                cfNode.Format["maxLength"] = x14MaxLen;
+                            // axisPosition (middle/none/automatic). automatic is the
+                            // OOXML default; only surface an explicit non-automatic value.
+                            if (x14Db.AxisPosition?.HasValue == true
+                                && x14Db.AxisPosition.Value != X14.DataBarAxisPositionValues.Automatic)
+                                cfNode.Format["axisPosition"] = x14Db.AxisPosition.InnerText;
+                            // Explicit num-typed min/max cfvo bounds. Surface the
+                            // literal value so autoMin/autoMax don't silently replace
+                            // user-set numeric bounds on replay.
+                            var x14Cfvos = x14Db.Elements<X14.ConditionalFormattingValueObject>().ToList();
+                            if (x14Cfvos.Count >= 1
+                                && x14Cfvos[0].Type?.Value == X14.ConditionalFormattingValueObjectTypeValues.Numeric)
+                            {
+                                var f = x14Cfvos[0].GetFirstChild<DocumentFormat.OpenXml.Office.Excel.Formula>();
+                                if (!string.IsNullOrEmpty(f?.Text)) cfNode.Format["min"] = f!.Text;
+                            }
+                            if (x14Cfvos.Count >= 2
+                                && x14Cfvos[1].Type?.Value == X14.ConditionalFormattingValueObjectTypeValues.Numeric)
+                            {
+                                var f = x14Cfvos[1].GetFirstChild<DocumentFormat.OpenXml.Office.Excel.Formula>();
+                                if (!string.IsNullOrEmpty(f?.Text)) cfNode.Format["max"] = f!.Text;
+                            }
                         }
                     }
                 }

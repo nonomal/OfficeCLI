@@ -1128,6 +1128,11 @@ public partial class ExcelHandler
 
         var rbRowIdx = uint.Parse(properties.GetValueOrDefault("row") ?? properties.GetValueOrDefault("index")
             ?? throw new ArgumentException("'row' property is required for rowbreak"));
+        // A break id of 0 or beyond the grid fails the schema's Min/Max
+        // constraints — reject up front instead of writing invalid OOXML.
+        if (rbRowIdx < 1 || rbRowIdx > 1048576)
+            throw new ArgumentException(
+                $"Invalid 'row' value: '{rbRowIdx}'. Row breaks must be between 1 and 1048576.");
 
         var rowBreaks = rbWs.GetFirstChild<RowBreaks>();
         if (rowBreaks == null)
@@ -1166,6 +1171,11 @@ public partial class ExcelHandler
         var cbColIdx = uint.TryParse(cbColStr, out var cbNumVal)
             ? cbNumVal
             : (uint)ColumnNameToIndex(cbColStr.ToUpperInvariant());
+        // Same schema Min/Max guard as rowbreak: 0 / beyond-XFD ids write
+        // invalid OOXML that only surfaces at validate/open time.
+        if (cbColIdx < 1 || cbColIdx > 16384)
+            throw new ArgumentException(
+                $"Invalid 'col' value: '{cbColStr}'. Column breaks must be between 1 and 16384 (A-XFD).");
 
         var colBreaks = cbWs.GetFirstChild<ColumnBreaks>();
         if (colBreaks == null)

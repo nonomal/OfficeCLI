@@ -229,6 +229,37 @@ public partial class ExcelHandler
             ?? properties.GetValueOrDefault("altText")
             ?? properties.GetValueOrDefault("alttext", "");
 
+        // Resolve the image bytes AND parse/validate the anchor BEFORE any
+        // part is created: a bad data URI or anchor used to fail after the
+        // DrawingsPart (and possibly the media blob) was already attached,
+        // leaving an empty <xdr:wsDr/> container plus orphaned xl/media
+        // bytes in the saved file even though the add reported an error.
+        var (xlImgStream, imgPartType) = OfficeCli.Core.ImageSource.Resolve(imgPath);
+        using var xlImgDispose = xlImgStream;
+
+        var picAnchorRaw = properties.GetValueOrDefault("anchor");
+        var picAnchorModeExplicit = properties.GetValueOrDefault("anchorMode");
+        bool picHasRange = false;
+        int picRangeFromCol = 0, picRangeFromRow = 0, picRangeToCol = -1, picRangeToRow = -1;
+        // `anchor=` is either a cell-range ("B2" / "B2:E6") or an
+        // anchorMode token ("oneCell"/"twoCell"/"absolute"). Prefer the
+        // cell-range interpretation; fall back to mode-token only when
+        // the value is a recognized token. Explicit `anchorMode=` wins
+        // the mode selection regardless.
+        if (!string.IsNullOrWhiteSpace(picAnchorRaw) && !IsAnchorModeToken(picAnchorRaw))
+        {
+            if (!TryParseCellRangeAnchor(picAnchorRaw, out picRangeFromCol, out picRangeFromRow, out picRangeToCol, out picRangeToRow))
+                throw new ArgumentException($"Invalid anchor: '{picAnchorRaw}'. Expected e.g. 'B2', 'B2:E6', or one of 'oneCell'/'twoCell'/'absolute'.");
+            picHasRange = true;
+            if (properties.ContainsKey("width") | properties.ContainsKey("height")
+                | properties.ContainsKey("x") | properties.ContainsKey("y"))
+                Console.Error.WriteLine(
+                    "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is a cell range (anchor defines the full rectangle).");
+        }
+        var picAnchorMode = (picAnchorModeExplicit
+            ?? (picHasRange ? "twoCell" : picAnchorRaw)
+            ?? "twoCell").Trim().ToLowerInvariant();
+
         var picDrawingsPart = picWorksheet.DrawingsPart
             ?? picWorksheet.AddNewPart<DrawingsPart>();
 
@@ -244,9 +275,6 @@ public partial class ExcelHandler
                 SaveWorksheet(picWorksheet);
             }
         }
-
-        var (xlImgStream, imgPartType) = OfficeCli.Core.ImageSource.Resolve(imgPath);
-        using var xlImgDispose = xlImgStream;
 
         // CONSISTENCY(svg-dual-rep): same dual-representation as Word
         // and PPT — main r:embed points to a PNG fallback, SVG is
@@ -306,29 +334,6 @@ public partial class ExcelHandler
         // `anchorMode=` always wins. When both `anchor=<range>` and
         // `x/y/width/height` are supplied, anchor wins with a warning
         // (same convention as the shape/OLE branches).
-        var picAnchorRaw = properties.GetValueOrDefault("anchor");
-        var picAnchorModeExplicit = properties.GetValueOrDefault("anchorMode");
-        bool picHasRange = false;
-        int picRangeFromCol = 0, picRangeFromRow = 0, picRangeToCol = -1, picRangeToRow = -1;
-        // `anchor=` is either a cell-range ("B2" / "B2:E6") or an
-        // anchorMode token ("oneCell"/"twoCell"/"absolute"). Prefer the
-        // cell-range interpretation; fall back to mode-token only when
-        // the value is a recognized token. Explicit `anchorMode=` wins
-        // the mode selection regardless.
-        if (!string.IsNullOrWhiteSpace(picAnchorRaw) && !IsAnchorModeToken(picAnchorRaw))
-        {
-            if (!TryParseCellRangeAnchor(picAnchorRaw, out picRangeFromCol, out picRangeFromRow, out picRangeToCol, out picRangeToRow))
-                throw new ArgumentException($"Invalid anchor: '{picAnchorRaw}'. Expected e.g. 'B2', 'B2:E6', or one of 'oneCell'/'twoCell'/'absolute'.");
-            picHasRange = true;
-            if (properties.ContainsKey("width") | properties.ContainsKey("height")
-                | properties.ContainsKey("x") | properties.ContainsKey("y"))
-                Console.Error.WriteLine(
-                    "Warning: 'x'/'y'/'width'/'height' are ignored when 'anchor' is a cell range (anchor defines the full rectangle).");
-        }
-        var picAnchorMode = (picAnchorModeExplicit
-            ?? (picHasRange ? "twoCell" : picAnchorRaw)
-            ?? "twoCell").Trim().ToLowerInvariant();
-
         var picShape = BuildPictureElementWithTransform(picId, alt ?? "", imgRelId, xlSvgRelId, properties);
 
         // For oneCell / absolute anchors the size is carried by an <xdr:ext>

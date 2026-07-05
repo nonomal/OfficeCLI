@@ -197,6 +197,24 @@ static partial class CommandBuilder
             OfficeCli.BlankDocCreator.Create(file, locale, minimal);
             var fullCreatedPath = Path.GetFullPath(file);
 
+            // If a --force overwrite replaced a file that currently has a live
+            // watch session, push a full SSE refresh so the preview reflects the
+            // new (blank) document instead of the stale pre-overwrite content
+            // (issue #169). create replaces the whole file, so a full re-render
+            // is the only correct shape — mirrors swap / refresh. Only reachable
+            // when no resident pins the file (otherwise create fails file_locked
+            // above); the watch server itself never opens the file. Best-effort:
+            // a preview-refresh failure must never fail the create itself.
+            if (WatchServer.IsWatching(fullCreatedPath))
+            {
+                try
+                {
+                    using var watchHandler = OfficeCli.Handlers.DocumentHandlerFactory.Open(fullCreatedPath, editable: false);
+                    NotifyWatch(watchHandler, fullCreatedPath, null);
+                }
+                catch { /* preview refresh is best-effort; the file is already written */ }
+            }
+
             // Best-effort: auto-start a short-lived resident process so
             // follow-up commands on this freshly-created file hit the
             // in-memory handler instead of re-opening from disk each time.

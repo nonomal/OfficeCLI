@@ -161,7 +161,21 @@ public partial class PowerPointHandler
 
         foreach (var token in targets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            // Accept "shape[N]" or just "N"
+            // Accept "shape[@id=N]" (the path form get/query emit — e.g.
+            // /slide[1]/shape[@id=100000]), "shape[N]" (1-based positional), or a
+            // bare "N" (positional). The @id form lets callers pass the exact
+            // paths they already hold from a selection without first mapping them
+            // to positional indices (the positional order also shifts as shapes
+            // are added/removed, so @id is the stable reference).
+            var idMatch = Regex.Match(token, @"@id=(\d+)");
+            if (idMatch.Success)
+            {
+                var id = idMatch.Groups[1].Value;
+                var byId = allShapes.FirstOrDefault(s =>
+                    s.NonVisualShapeProperties?.NonVisualDrawingProperties?.Id?.Value.ToString() == id);
+                if (byId != null) result.Add(byId);
+                continue;
+            }
             var m = Regex.Match(token, @"shape\[(\d+)\]|^(\d+)$");
             if (m.Success)
             {

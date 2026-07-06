@@ -105,13 +105,17 @@ public partial class PowerPointHandler
         path = Regex.Replace(path, @"cell\[(\d+),\s*(\d+)\]", m => $"tr[{m.Groups[1].Value}]/tc[{m.Groups[2].Value}]");
         // Alias only inside /table[K]/... — never globally, to avoid colliding
         // with hypothetical future top-level "row"/"cell" segments.
-        path = Regex.Replace(path, @"(/table\[\d+\](?:/[^/]+)*?)/row\[(\d+)\]", m => $"{m.Groups[1].Value}/tr[{m.Groups[2].Value}]");
+        // BUG-004: the table segment must also match selector forms
+        // (table[@name=Foo], table[@id=N]) — @name paths previously skipped
+        // row/cell aliasing entirely, so Set on /table[@name=X]/row/cell fell
+        // through to an element that rejects text (UNSUPPORTED props: text).
+        path = Regex.Replace(path, @"(/table\[[^\]]+\](?:/[^/]+)*?)/row\[(\d+)\]", m => $"{m.Groups[1].Value}/tr[{m.Groups[2].Value}]");
         path = Regex.Replace(path, @"(/tr\[\d+\])/cell\[(\d+)\]", m => $"{m.Groups[1].Value}/tc[{m.Groups[2].Value}]");
         // CONSISTENCY(table-path-long-form): same parity for the column axis.
         // schemas/help/pptx/table-column.json declares element=column with
         // alias col, and Add accepts --type column. Get/Set/Remove must also
         // accept the long form so all five ops share one path vocabulary.
-        path = Regex.Replace(path, @"(/table\[\d+\])/column\[(\d+)\]", m => $"{m.Groups[1].Value}/col[{m.Groups[2].Value}]");
+        path = Regex.Replace(path, @"(/table\[[^\]]+\])/column\[(\d+)\]", m => $"{m.Groups[1].Value}/col[{m.Groups[2].Value}]");
         return path;
     }
 

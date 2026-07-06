@@ -1136,12 +1136,17 @@ public partial class PowerPointHandler
         }
         else if (bNext == a)
         {
-            // B was directly before A: [... B A ...] → [... A B ...]
+            // B was directly before A: [... B A ...] → [... A B ...]. Put A back
+            // where the pair started, then B immediately AFTER it. Using
+            // InsertBeforeSelf here re-created the original [B A] order, so an
+            // adjacent swap whose first path has the HIGHER index (e.g.
+            // `swap /slide[2] /slide[1]`, which is what a "move slide up" issues)
+            // reported success but left the order unchanged.
             if (aNext != null)
                 aNext.InsertBeforeSelf(a);
             else
                 parent.AppendChild(a);
-            a.InsertBeforeSelf(b);
+            a.InsertAfterSelf(b);
         }
         else
         {

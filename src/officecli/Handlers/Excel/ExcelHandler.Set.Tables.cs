@@ -161,8 +161,11 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 // CONSISTENCY(canonical-key): schema canonical key is 'ref';
-                // 'sqref' retained as legacy alias.
+                // 'sqref' retained as legacy alias. Same shape+grid-bounds
+                // guard as Add — an unchecked A0 saved fine and real Excel
+                // refused the file (0x800A03EC).
                 case "sqref" or "ref":
+                    ValidateSqref(value, "validation ref");
                     dv.SequenceOfReferences = new ListValue<StringValue>(
                         value.Split(' ').Select(s => new StringValue(s)));
                     break;

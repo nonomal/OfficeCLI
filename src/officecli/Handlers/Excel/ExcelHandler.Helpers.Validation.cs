@@ -44,6 +44,32 @@ public partial class ExcelHandler
         if (!ok)
             throw new ArgumentException(
                 $"Invalid {field} '{value}': expected an A1 reference (e.g. 'A1', 'A1:D10', 'A:A', '1:3', 'A1 B2:C5').");
+        // Shape-valid tokens can still point outside Excel's grid: sqref="A0"
+        // passed here, saved fine, and real Excel refused the whole file
+        // (0x800A03EC) — the same out-of-grid family the drawing-anchor parser
+        // rejects. Bounds-check every cell/row/column component.
+        foreach (var tok in trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (System.Text.RegularExpressions.Match cm in
+                System.Text.RegularExpressions.Regex.Matches(tok, @"\$?([A-Z]+)?\$?([0-9]+)?",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                if (cm.Length == 0) continue;
+                if (cm.Groups[1].Success && cm.Groups[1].Value.Length > 0)
+                {
+                    var colIdx = ColumnNameToIndex(cm.Groups[1].Value.ToUpperInvariant());
+                    if (colIdx < 1 || colIdx > 16384)
+                        throw new ArgumentException(
+                            $"Invalid {field} '{value}': column '{cm.Groups[1].Value}' is outside Excel's grid (A..XFD).");
+                }
+                if (cm.Groups[2].Success && cm.Groups[2].Value.Length > 0)
+                {
+                    if (!long.TryParse(cm.Groups[2].Value, out var rowNum) || rowNum < 1 || rowNum > 1048576)
+                        throw new ArgumentException(
+                            $"Invalid {field} '{value}': row '{cm.Groups[2].Value}' is outside Excel's grid (1..1048576).");
+                }
+            }
+        }
         return value;
     }
 

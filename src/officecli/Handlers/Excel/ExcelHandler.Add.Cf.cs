@@ -409,7 +409,12 @@ public partial class ExcelHandler
         // R22-2: path-tail range is the fallback before the hardcoded default.
         var fcfPathRange = fcfSegments.Length > 1 && !string.IsNullOrEmpty(fcfSegments[1]) ? fcfSegments[1] : "A1:A10";
         var fcfSqref = ValidateSqref(properties.GetValueOrDefault("sqref") ?? properties.GetValueOrDefault("range") ?? properties.GetValueOrDefault("ref", fcfPathRange), "ref");
+        // CONSISTENCY(cf-value-alias): the help schema documents value/
+        // formula1 as aliases of formula, and the cellIs branch already
+        // accepts them — the formula branch alone rejected the alias.
         var fcfFormula = properties.GetValueOrDefault("formula")
+            ?? properties.GetValueOrDefault("formula1")
+            ?? properties.GetValueOrDefault("value")
             ?? throw new ArgumentException("Formula-based conditional formatting requires 'formula' property (e.g. formula=$A1>100)");
 
         // Build DifferentialFormat (dxf) for the formatting.

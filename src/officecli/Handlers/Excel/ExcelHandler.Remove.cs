@@ -7,6 +7,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using C = DocumentFormat.OpenXml.Drawing.Charts;
 using XDR = DocumentFormat.OpenXml.Drawing.Spreadsheet;
+using X14 = DocumentFormat.OpenXml.Office2010.Excel;
 using OfficeCli.Core;
 
 namespace OfficeCli.Handlers;
@@ -723,6 +724,74 @@ public partial class ExcelHandler
                 PrunePivotCacheIfOrphan(_doc.WorkbookPart!, cachePart);
 
             SaveWorksheet(worksheet);
+            return null;
+        }
+
+        // slicer[N] — remove pivot-backed slicer and all six cross-referenced
+        // parts/registrations created by AddSlicer (SlicersPart entry,
+        // SlicerCachePart, workbook + worksheet extLst registrations, the
+        // Slicer_ defined-name sentinel, and the drawing anchor). Mirrors the
+        // pivottable[N] multi-part cleanup discipline above.
+        var slicerRemoveMatch = Regex.Match(cellRef, @"^slicer\[(\d+)\]$", RegexOptions.IgnoreCase);
+        if (slicerRemoveMatch.Success)
+        {
+            var slIdx = int.Parse(slicerRemoveMatch.Groups[1].Value);
+            var slicersPart = worksheet.GetPartsOfType<SlicersPart>().FirstOrDefault();
+            var slicersContainer = slicersPart?.Slicers;
+            var slicerList = slicersContainer?.Elements<X14.Slicer>().ToList()
+                ?? new List<X14.Slicer>();
+            if (slIdx < 1 || slIdx > slicerList.Count)
+                throw new ArgumentException($"Slicer index {slIdx} out of range (1..{slicerList.Count})");
+            var slicerElement = slicerList[slIdx - 1];
+            var slicerDisplayName = slicerElement.Name?.Value;
+            var slicerCacheName = slicerElement.Cache?.Value;
+
+            var slicerWbPart = _doc.WorkbookPart!;
+
+            // 1. Remove the Slicer element; delete the SlicersPart and its
+            //    worksheet extLst registration if it was the last slicer.
+            slicerElement.Remove();
+            slicersContainer!.Save(slicersPart!);
+            if (!slicersContainer.Elements<X14.Slicer>().Any())
+            {
+                var slicersRelId = worksheet.GetIdOfPart(slicersPart!);
+                worksheet.DeletePart(slicersPart!);
+                RemoveSlicerListFromWorksheet(worksheet, slicersRelId);
+            }
+
+            // 2. Remove the backing SlicerCachePart + workbook extLst entry.
+            if (!string.IsNullOrEmpty(slicerCacheName))
+            {
+                foreach (var scp in slicerWbPart.GetPartsOfType<SlicerCachePart>().ToList())
+                {
+                    if (scp.SlicerCacheDefinition?.Name?.Value != slicerCacheName) continue;
+                    var cacheRelId = slicerWbPart.GetIdOfPart(scp);
+                    slicerWbPart.DeletePart(scp);
+                    RemoveSlicerCacheFromWorkbook(slicerWbPart, cacheRelId);
+                    break;
+                }
+            }
+
+            // 3. Remove the Slicer_ defined-name sentinel (reverse of
+            //    RegisterSlicerDefinedName).
+            if (!string.IsNullOrEmpty(slicerDisplayName))
+            {
+                var slicerDefinedNames = slicerWbPart.Workbook!.GetFirstChild<DefinedNames>();
+                if (slicerDefinedNames != null)
+                {
+                    slicerDefinedNames.Elements<DefinedName>()
+                        .FirstOrDefault(d => string.Equals(d.Name?.Value, slicerDisplayName, StringComparison.Ordinal))
+                        ?.Remove();
+                    if (!slicerDefinedNames.HasChildren) slicerDefinedNames.Remove();
+                }
+            }
+
+            // 4. Remove the drawing anchor bound to this slicer cache name.
+            if (!string.IsNullOrEmpty(slicerCacheName))
+                RemoveSlicerDrawingAnchor(worksheet, slicerCacheName);
+
+            SaveWorksheet(worksheet);
+            slicerWbPart.Workbook!.Save();
             return null;
         }
 

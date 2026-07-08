@@ -342,6 +342,10 @@ public partial class ExcelHandler
         // the rendered size stay in sync.
         if (picAnchorMode is "onecell" or "absolute")
         {
+            // <xdr:ext>/<xdr:pos> are Int32-bounded EMU; oversized values
+            // save fine but real Excel rejects the file (0x800A03EC).
+            ValidateDrawingCoordEmu(pwEmu, "width");
+            ValidateDrawingCoordEmu(phEmu, "height");
             var picXfrm = picShape.Descendants<Drawing.Transform2D>().FirstOrDefault();
             if (picXfrm != null)
             {
@@ -379,9 +383,9 @@ public partial class ExcelHandler
                 // syntax as width/height (bare EMU, or "1in", "2cm").
                 long absX = 0, absY = 0;
                 if (properties.TryGetValue("x", out var absXs))
-                    absX = OfficeCli.Core.EmuConverter.ParseEmu(absXs);
+                    absX = ValidateDrawingCoordEmu(OfficeCli.Core.EmuConverter.ParseEmu(absXs), "x");
                 if (properties.TryGetValue("y", out var absYs))
-                    absY = OfficeCli.Core.EmuConverter.ParseEmu(absYs);
+                    absY = ValidateDrawingCoordEmu(OfficeCli.Core.EmuConverter.ParseEmu(absYs), "y");
                 var absAnchor = new XDR.AbsoluteAnchor(
                     new XDR.Position { X = absX, Y = absY },
                     new XDR.Extent { Cx = pwEmu, Cy = phEmu },

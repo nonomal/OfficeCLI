@@ -658,6 +658,21 @@ public partial class ExcelHandler
     /// Set position/size properties (x, y, width, height) on a TwoCellAnchor.
     /// Returns true if the key was handled, false otherwise.
     /// </summary>
+    // OOXML spreadsheet-drawing extents/positions (<xdr:ext>, <xdr:pos>) are
+    // Int32-bounded EMU (ST_PositiveCoordinate32). Values beyond that pass
+    // SDK save silently but fail schema validation (MaxInclusive) and make
+    // real Excel refuse the workbook (0x800A03EC) — reject at input instead
+    // of persisting an unopenable file. Only oneCell/absolute anchors hit
+    // this: twoCell anchors split spans into whole-column/row markers.
+    internal static long ValidateDrawingCoordEmu(long emu, string key)
+    {
+        if (emu > int.MaxValue)
+            throw new ArgumentException(
+                $"Picture/shape {key} is out of range for a oneCell/absolute drawing anchor: " +
+                $"{emu} EMU exceeds the OOXML limit 2147483647 EMU (~23.5in per axis).");
+        return emu;
+    }
+
     // Anchor-kind dispatch mirroring ReadAnchorPosition: oneCell keeps x/y as
     // cell indices but sizes via <xdr:ext> EMU; absolute positions and sizes
     // are all EMU (ParseEmu accepts "2cm"/"1in"/"NNNemu"/bare EMU).
@@ -681,13 +696,13 @@ public partial class ExcelHandler
                     case "width":
                     {
                         var ext = one.GetFirstChild<XDR.Extent>();
-                        if (ext != null) ext.Cx = EmuConverter.ParseEmu(value);
+                        if (ext != null) ext.Cx = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     case "height":
                     {
                         var ext = one.GetFirstChild<XDR.Extent>();
-                        if (ext != null) ext.Cy = EmuConverter.ParseEmu(value);
+                        if (ext != null) ext.Cy = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     default:
@@ -699,25 +714,25 @@ public partial class ExcelHandler
                     case "x":
                     {
                         var pos = abs.GetFirstChild<XDR.Position>();
-                        if (pos != null) pos.X = EmuConverter.ParseEmu(value);
+                        if (pos != null) pos.X = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     case "y":
                     {
                         var pos = abs.GetFirstChild<XDR.Position>();
-                        if (pos != null) pos.Y = EmuConverter.ParseEmu(value);
+                        if (pos != null) pos.Y = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     case "width":
                     {
                         var ext = abs.GetFirstChild<XDR.Extent>();
-                        if (ext != null) ext.Cx = EmuConverter.ParseEmu(value);
+                        if (ext != null) ext.Cx = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     case "height":
                     {
                         var ext = abs.GetFirstChild<XDR.Extent>();
-                        if (ext != null) ext.Cy = EmuConverter.ParseEmu(value);
+                        if (ext != null) ext.Cy = ValidateDrawingCoordEmu(EmuConverter.ParseEmu(value), key);
                         return true;
                     }
                     default:

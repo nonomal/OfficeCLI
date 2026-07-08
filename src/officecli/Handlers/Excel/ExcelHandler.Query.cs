@@ -1055,7 +1055,13 @@ public partial class ExcelHandler
             if (picMatch.Success)
             {
                 var picIndex = int.Parse(picMatch.Groups[1].Value);
-                return GetPictureNode(sheetNameFromPath, worksheet, picIndex, path)!;
+                // GetPictureNode returns null for out-of-range indices (incl.
+                // picture[0]); the bare `!` leaked a NullReferenceException as
+                // an opaque internal_error instead of the not-found message
+                // every sibling element type produces.
+                return GetPictureNode(sheetNameFromPath, worksheet, picIndex, path)
+                    ?? throw new ArgumentException(
+                        $"Picture[{picIndex}] not found in sheet '{sheetNameFromPath}' (indices are 1-based).");
             }
 
             // Handle shape[N] path segment
@@ -1063,7 +1069,10 @@ public partial class ExcelHandler
             if (shpMatch.Success)
             {
                 var shpIndex = int.Parse(shpMatch.Groups[1].Value);
-                return GetShapeNode(sheetNameFromPath, worksheet, shpIndex, path)!;
+                // Same null-leak as picture[N] above.
+                return GetShapeNode(sheetNameFromPath, worksheet, shpIndex, path)
+                    ?? throw new ArgumentException(
+                        $"Shape[{shpIndex}] not found in sheet '{sheetNameFromPath}' (indices are 1-based).");
             }
 
 

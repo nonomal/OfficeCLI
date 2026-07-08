@@ -387,8 +387,12 @@ public partial class ExcelHandler
                     // End of row
                     currentRow.Add(field.ToString());
                     field.Clear();
-                    if (currentRow.Count > 0 && !(currentRow.Count == 1 && currentRow[0] == ""))
-                        rows.Add(currentRow);
+                    // Keep blank lines as single-empty-field rows: dropping
+                    // them shifted every subsequent line up (r4 landed on row
+                    // 2). The import loop skips materializing all-empty rows,
+                    // so no phantom <row> elements are written — only the row
+                    // cursor advances, preserving source line positions.
+                    rows.Add(currentRow);
                     currentRow = new List<string>();
                     i++;
                     if (i < content.Length && content[i] == '\n')
@@ -399,8 +403,8 @@ public partial class ExcelHandler
                     // End of row
                     currentRow.Add(field.ToString());
                     field.Clear();
-                    if (currentRow.Count > 0 && !(currentRow.Count == 1 && currentRow[0] == ""))
-                        rows.Add(currentRow);
+                    // Blank lines preserved — see the \r branch above.
+                    rows.Add(currentRow);
                     currentRow = new List<string>();
                     i++;
                 }

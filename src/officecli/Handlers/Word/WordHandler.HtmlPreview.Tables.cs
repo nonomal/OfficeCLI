@@ -1095,8 +1095,26 @@ public partial class WordHandler
             paraStyle = string.IsNullOrEmpty(paraStyle) ? hangCss : paraStyle + ";" + hangCss;
         }
 
+        // Deeper levels: the <ol>/<ul> element carries only the FIRST item's
+        // indent (set when the list was opened), so a level-1+ item rendered
+        // flat at the same x as its parent — the cell/textbox/header/footnote
+        // "multi-level collapses to one level" gap. Indent each item by its
+        // level's indent delta over the same list's level-0 indent (stateless:
+        // no per-container base tracking needed; level 0 gets delta 0).
+        double levelDeltaPt = 0;
+        if (ilvl > 0)
+        {
+            var (baseLeft, _) = GetListLevelIndentFull(numId, 0);
+            var basePt = baseLeft / 20.0;
+            if (basePt < 18) basePt = 18;
+            if (indentPt > basePt) levelDeltaPt = indentPt - basePt;
+        }
         sb.Append("<li");
         sb.Append($" class=\"marker-{numId}-{ilvl}\"");
+        if (levelDeltaPt > 0)
+            paraStyle = string.IsNullOrEmpty(paraStyle)
+                ? $"margin-left:{levelDeltaPt:0.#}pt"
+                : paraStyle + $";margin-left:{levelDeltaPt:0.#}pt";
         if (!string.IsNullOrEmpty(paraStyle))
             sb.Append($" style=\"{paraStyle}\"");
         sb.Append(">");

@@ -265,6 +265,13 @@ public partial class ExcelHandler
         if (cell.CellFormula != null) return true;
         if (!string.IsNullOrEmpty(cell.CellValue?.Text)) return true;
         if (cell.GetFirstChild<DocumentFormat.OpenXml.Spreadsheet.InlineString>() != null) return true;
+        // Explicit empty-string cell (<c t="str"><v/></c>): a stored value
+        // node with a string DataType is real content — COUNTA counts it,
+        // ISBLANK is FALSE — even when the text is empty. Excluding it hid
+        // the cell from bulk enumeration AND from dump, which silently
+        // dropped it on replay. A typeless <c s="1"/> (style only, no value
+        // node) remains non-content.
+        if (cell.DataType?.HasValue == true && cell.CellValue != null) return true;
         return false;
     }
 

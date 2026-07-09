@@ -1652,6 +1652,20 @@ public partial class ExcelHandler
                             $"Use '{full}' to filter by a column named '{lc.Key}', or 'row[{lc.Key}]' (no operator) for that row.")
                             { Code = "invalid_selector" };
                     }
+                    if (!forcedCol && atForced.Contains(lc.Key) && !RowAttributeKeys.Contains(lc.Key)
+                        && !IsRowSetAttributeKey(lc.Key))
+                        // '@' names a row PROPERTY; an unknown one must not fall
+                        // through to the generic post-filter, where the absent
+                        // key evaluates false and a not(@typo=…) flips to
+                        // matching EVERY row (deletion-scale hazard on remove).
+                        throw new Core.CliException(
+                            $"row[@{lc.Key} …]: '{lc.Key}' is not a row property. " +
+                            $"Row properties: {string.Join(", ", RowAttributeKeys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase))}. " +
+                            $"For the table column, drop the '@' (row[{lc.Key} …]) or force it with row[col.{lc.Key} …].")
+                        {
+                            Code = "invalid_selector",
+                            ValidValues = RowAttributeKeys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToArray(),
+                        };
                     if (!forcedCol && (atForced.Contains(lc.Key) || RowAttributeKeys.Contains(lc.Key)))
                     {
                         attrCount++;

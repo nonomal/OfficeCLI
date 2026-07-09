@@ -878,6 +878,34 @@ internal static class AttributeFilter
         string selector, Func<string, List<DocumentNode>> query, Func<string, string>? keyResolver = null,
         bool applyAll = true)
     {
+        // CSS comma-list union (CONSISTENCY(comma-union)). Split top-level commas
+        // and evaluate each part independently, then union by node identity.
+        // Doing it HERE — the shared query/set/remove chokepoint — is the only
+        // correct place: ParseExpr below AND-merges every bracket block across a
+        // comma, so `row[Dept=Sales],row[Dept=Marketing]` would otherwise collapse
+        // to Dept=Sales AND Dept=Marketing and match nothing. Positional unions
+        // (`shape[1], shape[3]`) already survived because numeric brackets are
+        // skipped by ParseExpr; predicate unions did not, across every handler.
+        if (SelectorCommaSplit.ContainsTopLevelComma(selector))
+        {
+            var union = new List<DocumentNode>();
+            var unionWarnings = new List<FilterDiagnostic>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var part in SelectorCommaSplit.SplitTopLevelCommas(selector))
+            {
+                var trimmed = part.Trim();
+                if (trimmed.Length == 0) continue;
+                var (partResults, partWarnings) = FilterSelector(trimmed, query, keyResolver, applyAll);
+                foreach (var n in partResults)
+                {
+                    var key = (n.Path ?? "") + "\x00" + (n.Type ?? "");
+                    if (seen.Add(key)) union.Add(n);
+                }
+                unionWarnings.AddRange(partWarnings);
+            }
+            return (union, unionWarnings);
+        }
+
         var expr = ParseExpr(selector);
         if (expr != null && keyResolver != null)
             expr = NormalizeKeysExpr(expr, keyResolver);

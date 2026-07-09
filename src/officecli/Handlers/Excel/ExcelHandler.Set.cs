@@ -1639,6 +1639,25 @@ public partial class ExcelHandler
                         // strings) but makes real Excel fail to render.
                         foreach (var paCell in paRange.Replace("$", "").Split(':'))
                             ParseCellReference(paCell.Trim());
+                        // Canonicalize an inverted range (D10:A1) — stored
+                        // verbatim it passes validation and round-trips, but
+                        // real Excel fails to render the sheet. Same per-axis
+                        // swap as anchor/table/sqref.
+                        var paParts = paRange.Replace("$", "").Split(':');
+                        if (paParts.Length == 2)
+                        {
+                            var (paC1, paR1) = ParseCellReference(paParts[0].Trim());
+                            var (paC2, paR2) = ParseCellReference(paParts[1].Trim());
+                            int paI1 = ColumnNameToIndex(paC1), paI2 = ColumnNameToIndex(paC2);
+                            if (paI2 < paI1 || paR2 < paR1)
+                            {
+                                // Only rewrite when actually inverted, so a
+                                // well-formed input keeps its $ anchors.
+                                if (paI2 < paI1) (paC1, paC2) = (paC2, paC1);
+                                if (paR2 < paR1) (paR1, paR2) = (paR2, paR1);
+                                paRange = $"{paC1}{paR1}:{paC2}{paR2}";
+                            }
+                        }
                         var dn = new DefinedName($"{Core.ModernFunctionQualifier.QuoteSheetNameForRef(sheetName)}!{paRange}") { Name = "_xlnm.Print_Area" };
                         if (sheetIdx >= 0) dn.LocalSheetId = (uint)sheetIdx;
                         definedNames.AppendChild(dn);

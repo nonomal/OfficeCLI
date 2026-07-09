@@ -943,7 +943,13 @@ internal static class AttributeFilter
         // stripped) so a missing key is always reported and a near-miss value is
         // suggested regardless of operator. Error path only — successful queries keep
         // their existing warning set untouched.
-        if (results.Count == 0 && leafConds.Count > 0)
+        // Skip this for elements that resolve their OWN virtual attributes
+        // (Excel row/col table-column predicates): those keys exist only on the
+        // handler's predicate-resolved result, never on a bracket-stripped bare
+        // `row`, so DiagnoseEmptyResult would falsely report the real column as
+        // an "unknown key" on a legitimately empty result (`row[Dept=法务]` with
+        // no matching row). A genuine 0-match must stay a clean empty result.
+        if (results.Count == 0 && leafConds.Count > 0 && !ElementResolvesOwnBoolean(selector))
         {
             try
             {

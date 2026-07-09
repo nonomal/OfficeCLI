@@ -2100,7 +2100,7 @@ public class ResidentServer : IDisposable
         // cell-key hint for a 0-based r0c0 reaches resident-mode users too.
         var parts = unsupported.Select(u =>
         {
-            if (u.Contains("(valid ", StringComparison.Ordinal)) return u; // handler already hinted
+            if (u.Contains('(')) return u; // handler already embedded a hint (valid props / no such column / …)
             var s = CommandBuilder.SuggestPropertyScoped(u, scope);
             return s != null ? $"{u} (did you mean: {s}?)" : u;
         });

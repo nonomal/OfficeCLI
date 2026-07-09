@@ -333,6 +333,52 @@ public partial class ExcelHandler
         return true;
     }
 
+    // Human hint for a `set /Sheet/row[N] --prop <key>=…` whose key named
+    // neither a row attribute nor a resolvable table column. Lists the columns
+    // of the table(s) covering row N so the caller sees the real header (`薪水`
+    // → `薪资`), mirroring the query-side guidance. The returned string embeds a
+    // "(...)" hint, which suppresses the generic did-you-mean suggester
+    // downstream (CommandBuilder.FormatUnsupported). Returns null when no table
+    // covers the row — then the caller reports the bare key.
+    private string? DescribeRowColumnsHint(WorksheetPart worksheet, uint rowIdx, string key)
+    {
+        var cols = new List<string>();
+        var realRanges = new List<(int c1, int r1, int c2, int r2)>();
+        foreach (var tdp in worksheet.TableDefinitionParts)
+        {
+            var tbl = tdp.Table;
+            if (tbl?.Reference?.Value == null) continue;
+            if (!TryParseRange(tbl.Reference.Value, out var rng)) continue;
+            realRanges.Add(rng);
+            bool headerRow = (tbl.HeaderRowCount?.Value ?? 1) != 0;
+            bool totalRow = (tbl.TotalsRowCount?.Value ?? 0) > 0 || (tbl.TotalsRowShown?.Value ?? false);
+            if (rowIdx < rng.r1 + (headerRow ? 1 : 0) || rowIdx > rng.r2 - (totalRow ? 1 : 0)) continue;
+            cols.AddRange(tbl.GetFirstChild<TableColumns>()?.Elements<TableColumn>()
+                .Select(c => c.Name?.Value ?? "") ?? Enumerable.Empty<string>());
+        }
+        if (cols.Count == 0)
+        {
+            var sheetName = GetWorksheets().FirstOrDefault(t => t.Part == worksheet).Name ?? "";
+            foreach (var det in DetectTables(sheetName, worksheet, realRanges))
+            {
+                var refStr = det.Format.TryGetValue("ref", out var rv) ? rv?.ToString() : null;
+                if (!TryParseRange(refStr, out var frng)) continue;
+                if (rowIdx < frng.r1 + 1 || rowIdx > frng.r2) continue;
+                cols.AddRange((det.Format.TryGetValue("columns", out var cv) ? cv?.ToString() ?? "" : "")
+                    .Split(',').Select(s => s.Trim()));
+            }
+        }
+        cols = cols.Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (cols.Count == 0) return null;
+
+        var bare = StripColPrefix(key);
+        string shown = cols.Count <= ColumnListFullThreshold
+            ? string.Join(", ", cols)
+            : $"{string.Join(", ", NearestColumns(cols, new List<string> { bare }))} (of {cols.Count})";
+        return $"{key} (no such column; available: {shown})";
+    }
+
     // True when an in-scope table (ListObject or detected) has a column whose
     // name equals `key`. Used to flag a bare `row[key op val]` whose key also
     // names a row PROPERTY (height/hidden/...): rather than silently choosing the

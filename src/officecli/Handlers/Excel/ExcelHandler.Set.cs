@@ -3073,7 +3073,9 @@ public partial class ExcelHandler
                     }
                     else
                     {
-                        unsupported.Add(key);
+                        // Point at the real headers (薪水 → 薪资) when a table
+                        // covers this row; fall back to the bare key otherwise.
+                        unsupported.Add(DescribeRowColumnsHint(worksheet, rowIdx, key) ?? key);
                     }
                     break;
             }

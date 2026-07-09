@@ -1002,7 +1002,7 @@ public partial class ExcelHandler
 
         // Strip the sheet prefix (Sheet1! — but not a != operator) and any
         // leading /Sheet/ so we see the bare `elem[token]`.
-        var s = Regex.Replace(selector, @"^.+?!(?!=)", "");
+        var s = StripTopLevelSheetPrefix(selector);
         if (s.StartsWith('/'))
         {
             var t = s.TrimStart('/');
@@ -1067,6 +1067,19 @@ public partial class ExcelHandler
                 return true;
         }
         return false;
+    }
+
+    // Strip a `Sheet!` prefix, recognizing only a TOP-LEVEL '!' (outside
+    // brackets and quotes) as the sheet separator. The old regex ^.+?!(?!=)
+    // was quote-blind: a predicate value containing '!' — row[F="x!"],
+    // row[Msg~=hello!] — was truncated at the value's bang and the selector
+    // silently dispatched as an unknown element (0 matches, no warning). A
+    // top-level '!' followed by '=' (a bare != filter) is not a separator.
+    private static string StripTopLevelSheetPrefix(string selector)
+    {
+        var i = Core.SelectorCommaSplit.TopLevelIndexOf(selector, '!');
+        if (i < 0 || (i + 1 < selector.Length && selector[i + 1] == '=')) return selector;
+        return selector[(i + 1)..];
     }
 
     // True when a '/' sits outside every bracket and quote — the sheet/path
@@ -1155,7 +1168,7 @@ public partial class ExcelHandler
         // "/namedrange", and "/Sheet1/table[1]". Mirrors GET's bare-path
         // listers (see ecb36111) — without this normalization, the bare
         // path falls through to ParseCellSelector and returns cells.
-        var selectorForType = Regex.Replace(selector, @"^.+?!(?!=)", "");
+        var selectorForType = StripTopLevelSheetPrefix(selector);
         if (selectorForType.StartsWith('/'))
         {
             var trimmed = selectorForType.TrimStart('/');

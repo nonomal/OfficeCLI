@@ -45,12 +45,15 @@ public partial class ExcelHandler
         }
 
         // Check for sheet prefix: Sheet1!cell[...]
-        // Only treat '!' as sheet separator if NOT part of '!=' operator
-        var exclMatch = Regex.Match(selector, @"^(.+?)!(?!=)");
-        if (exclMatch.Success)
+        // Only a TOP-LEVEL '!' (outside brackets/quotes, not part of '!=')
+        // separates the sheet — a '!' inside a predicate value
+        // (row[F="x!"], row[Msg~=hello!]) is literal text, and the old
+        // ^(.+?)!(?!=) regex swallowed everything up to it as a "sheet".
+        var bangIdx = Core.SelectorCommaSplit.TopLevelIndexOf(selector, '!');
+        if (bangIdx > 0 && (bangIdx + 1 >= selector.Length || selector[bangIdx + 1] != '='))
         {
-            sheet = exclMatch.Groups[1].Value;
-            selector = selector[(exclMatch.Length)..];
+            sheet = selector[..bangIdx];
+            selector = selector[(bangIdx + 1)..];
         }
 
         // Parse element and attributes: cell[attr=value]

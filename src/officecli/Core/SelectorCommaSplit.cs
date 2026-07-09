@@ -22,6 +22,13 @@ internal static class SelectorCommaSplit
     /// slash path that lost its leading slash) — same scan, one impl.
     /// </summary>
     public static bool ContainsTopLevelChar(string selector, char target)
+        => TopLevelIndexOf(selector, target) >= 0;
+
+    /// <summary>
+    /// Index of the first top-level occurrence of <paramref name="target"/>,
+    /// or -1. Same scan as <see cref="ContainsTopLevelChar"/>.
+    /// </summary>
+    public static int TopLevelIndexOf(string selector, char target)
     {
         int depthBracket = 0, depthParen = 0;
         char? quote = null;
@@ -39,9 +46,9 @@ internal static class SelectorCommaSplit
             else if (c == ']') depthBracket = System.Math.Max(0, depthBracket - 1);
             else if (c == '(') depthParen++;
             else if (c == ')') depthParen = System.Math.Max(0, depthParen - 1);
-            else if (c == target && depthBracket == 0 && depthParen == 0) return true;
+            else if (c == target && depthBracket == 0 && depthParen == 0) return i;
         }
-        return false;
+        return -1;
     }
 
     public static List<string> SplitTopLevelCommas(string selector)

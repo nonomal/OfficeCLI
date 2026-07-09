@@ -353,12 +353,16 @@ public partial class ExcelHandler
     {
         var worksheet = FindWorksheet(sheetName)
             ?? throw new ArgumentException($"Sheet not found: {sheetName}");
-        var extLst = GetSheet(worksheet).GetFirstChild<WorksheetExtensionList>();
-        if (extLst == null) return 0;
-        // Each <x14:slicer r:id> under the slicerList ext references one
-        // SlicerPart; the slicer[N] Get index space walks the same list.
-        return extLst.Descendants()
-            .Count(e => e.LocalName == "slicer" && e.NamespaceUri.Contains("2009/9/main"));
+        // Count slicer DEFINITIONS, not the worksheet extLst <x14:slicer r:id>
+        // references. Excel groups every slicer bound to a sheet into one
+        // shared SlicersPart with N <x14:slicer> children but only ONE extLst
+        // reference to that part — counting references returned 1 for N
+        // slicers and the dump silently dropped slicer[2..N]. Mirror the
+        // slicer[N] Get index space (Helpers.Node.cs / TryFindSlicerByIndex),
+        // which enumerates the first SlicersPart's Slicers collection.
+        var slicersPart = worksheet.GetPartsOfType<SlicersPart>().FirstOrDefault();
+        return slicersPart?.Slicers?
+            .Elements<DocumentFormat.OpenXml.Office2010.Excel.Slicer>().Count() ?? 0;
     }
 
     /// <summary>

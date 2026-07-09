@@ -528,12 +528,14 @@ internal static class AttributeFilter
             case FilterOp.Equal:
                 if (!hasKey) return false;
                 return StringEquals(actualStr, cond.Value)
-                    || DimensionEquals(actualStr, cond.Value);
+                    || DimensionEquals(actualStr, cond.Value)
+                    || NumericEquals(actualStr, cond.Value);
 
             case FilterOp.NotEqual:
                 if (!hasKey) return true; // key absent → not equal
                 return !StringEquals(actualStr, cond.Value)
-                    && !DimensionEquals(actualStr, cond.Value);
+                    && !DimensionEquals(actualStr, cond.Value)
+                    && !NumericEquals(actualStr, cond.Value);
 
             case FilterOp.Contains:
                 if (!hasKey) return false;
@@ -620,6 +622,14 @@ internal static class AttributeFilter
             return string.Equals(aNorm, bNorm, StringComparison.OrdinalIgnoreCase);
         return false;
     }
+
+    // Numeric equality so `=` / `!=` agree with the ordered operators on
+    // numbers: `[N=25.0]` matches a stored 25, and `[Price!=25]` correctly
+    // EXCLUDES a stored 25.0 instead of keeping it on a literal-string mismatch.
+    // Exact value equality (CompareNumeric == 0); returns false for any operand
+    // that is not numerically comparable, so text equality is unaffected.
+    private static bool NumericEquals(string actual, string expected)
+        => CompareNumeric(actual, expected) == 0;
 
     private static bool DimensionEquals(string actual, string expected)
     {

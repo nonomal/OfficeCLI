@@ -27,21 +27,22 @@ internal static class HtmlScreenshot
     /// the run fails. Callers extract whatever they need from the DOM (title,
     /// a rendered &lt;svg&gt;, …).
     /// </summary>
-    public static string? DumpDom(string htmlPath, int timeoutMs = 60000)
+    public static string? DumpDom(string htmlPath, int timeoutMs = 60000, string[]? extraArgs = null)
     {
         var url = new Uri(Path.GetFullPath(htmlPath)).AbsoluteUri + "#screenshot";
         var bin = FindChrome();
         if (bin == null) return null;
-        var args = new[]
+        var args = new List<string>
         {
             "--headless=new",
             "--disable-gpu",
             "--no-sandbox",
             "--virtual-time-budget=15000",
             "--timeout=20000",  // wall-clock backstop: a stalled resource is not rescued by virtual time (issue #181)
-            "--dump-dom",
-            url,
         };
+        if (extraArgs != null) args.AddRange(extraArgs);
+        args.Add("--dump-dom");
+        args.Add(url);
         try
         {
             var psi = new ProcessStartInfo
@@ -214,7 +215,15 @@ internal static class HtmlScreenshot
             "var x=r.left+window.scrollX,y=r.top+window.scrollY;" +
             "if(x<x1)x1=x;if(y<y1)y1=y;if(x+r.width>x2)x2=x+r.width;if(y+r.height>y2)y2=y+r.height;});" +
             "document.title='CLIP:'+Math.floor(x1)+','+Math.floor(y1)+','+Math.ceil(x2-x1)+','+Math.ceil(y2-y1);}" +
-            "if(document.readyState==='complete')_clipRun();else window.addEventListener('load',_clipRun);</script>";
+            // Measure AFTER the page's own layout JS settles, not at load: the
+            // pptx preview positions shapes and the docx preview adjusts the
+            // page a tick later, so a load-time rect is 0x0 (pptx — the picker
+            // then falls back to the hidden sidebar thumbnail) or a few px
+            // off (docx — a sliver of the next paragraph leaks in). setTimeout
+            // is fast-forwarded by --virtual-time-budget, so the wall-clock
+            // cost is nil; rAF is NOT reliable under virtual time.
+            "function _clipArm(){setTimeout(_clipRun,800);}" +
+            "if(document.readyState==='complete')_clipArm();else window.addEventListener('load',_clipArm);</script>";
 
         string Inject(string doc, string script) =>
             doc.Contains("</body>", StringComparison.OrdinalIgnoreCase)
@@ -225,36 +234,54 @@ internal static class HtmlScreenshot
         try
         {
             File.WriteAllText(measurePath, Inject(html, measureScript));
-            var dom = DumpDom(measurePath);
-            if (dom == null) return new Result(false, "chrome", "dump-dom failed while measuring the clip target");
-            // Match the TITLE only — the serialized DOM also contains the
-            // injected script's source, so a bare Contains() would match the
-            // literals inside it.
-            if (System.Text.RegularExpressions.Regex.IsMatch(dom, @"<title>CLIP:NOTFOUND</title>"))
-                return new Result(false, "chrome", "clip_target_not_found");
-            var m = System.Text.RegularExpressions.Regex.Match(dom, @"<title>CLIP:(-?\d+),(-?\d+),(\d+),(\d+)</title>");
-            if (!m.Success) return new Result(false, "chrome", "clip rect not reported (page may have replaced the title)");
-            var x = Math.Max(0, int.Parse(m.Groups[1].Value) - padPx);
-            var y = Math.Max(0, int.Parse(m.Groups[2].Value) - padPx);
-            var w = int.Parse(m.Groups[3].Value) + 2 * padPx;
-            var h = int.Parse(m.Groups[4].Value) + 2 * padPx;
-            if (w <= 0 || h <= 0) return new Result(false, "chrome", "clip target has an empty bounding box");
+            // The measure browser MUST match the capture browser exactly —
+            // same window size, hidden scrollbars, same DPR. A default
+            // dump-dom window keeps a scrollbar the capture hides, and those
+            // ~15px reflow the page just enough to shift every coordinate a
+            // few pixels (the strip of next-paragraph text under a clipped
+            // docx table). When the target extends past the current viewport,
+            // re-measure AT the enlarged viewport until the rect is interior,
+            // so the pass-2 layout equals the final measure layout verbatim.
+            const int maxViewport = 4000;
+            int vw = 800, vh = 600, x = 0, y = 0, w = 0, h = 0;
+            for (var attempt = 0; ; attempt++)
+            {
+                var dom = DumpDom(measurePath, extraArgs:
+                [
+                    "--hide-scrollbars",
+                    $"--force-device-scale-factor={scale}",
+                    $"--window-size={vw},{vh}",
+                ]);
+                if (dom == null) return new Result(false, "chrome", "dump-dom failed while measuring the clip target");
+                // Match the TITLE only — the serialized DOM also contains the
+                // injected script's source, so a bare Contains() would match
+                // the literals inside it.
+                if (System.Text.RegularExpressions.Regex.IsMatch(dom, @"<title>CLIP:NOTFOUND</title>"))
+                    return new Result(false, "chrome", "clip_target_not_found");
+                var m = System.Text.RegularExpressions.Regex.Match(dom, @"<title>CLIP:(-?\d+),(-?\d+),(\d+),(\d+)</title>");
+                if (!m.Success) return new Result(false, "chrome", "clip rect not reported (page may have replaced the title)");
+                x = Math.Max(0, int.Parse(m.Groups[1].Value) - padPx);
+                y = Math.Max(0, int.Parse(m.Groups[2].Value) - padPx);
+                w = int.Parse(m.Groups[3].Value) + 2 * padPx;
+                h = int.Parse(m.Groups[4].Value) + 2 * padPx;
+                if (w <= 0 || h <= 0) return new Result(false, "chrome", "clip target has an empty bounding box");
+                var needW = Math.Max(vw, x + w);
+                var needH = Math.Max(vh, y + h);
+                if (needW > maxViewport || needH > maxViewport)
+                    return new Result(false, "chrome",
+                        $"clip target extends to ({needW},{needH}) CSS px — beyond the {maxViewport}px capture ceiling");
+                if ((needW == vw && needH == vh) || attempt >= 2) { vw = needW; vh = needH; break; }
+                vw = needW; vh = needH;
+            }
             // The viewport must stay the rect's CSS size (shrinking would
             // truncate, not scale), so large targets drop the HiDPI factor
             // instead to keep the PNG within the multi-image LLM ceiling.
+            // (scale is part of the measured environment; changing it does not
+            // alter CSS layout, so the loop above stays valid.)
             if (Math.Max(w, h) * scale > 1920) scale = 1;
 
-            // Pass 2: whole-page capture at a viewport that CONTAINS the target
-            // (same layout as the measure pass, so the measured coordinates
-            // hold). The capture viewport must never shrink below the measure
-            // viewport's defaults: layout at a smaller window would reflow
-            // responsive previews and invalidate the rect.
-            const int maxViewport = 4000;
-            var fullW = Math.Max(800, x + w);
-            var fullH = Math.Max(600, y + h);
-            if (fullW > maxViewport || fullH > maxViewport)
-                return new Result(false, "chrome",
-                    $"clip target extends to ({fullW},{fullH}) CSS px — beyond the {maxViewport}px capture ceiling");
+            var fullW = vw;
+            var fullH = vh;
             var fullPath = htmlPath + ".clipfull.png";
             var wrapPath = htmlPath + ".clipwrap.html";
             try

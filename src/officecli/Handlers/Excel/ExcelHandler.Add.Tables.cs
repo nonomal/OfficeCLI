@@ -106,6 +106,29 @@ public partial class ExcelHandler
         // Sheet-qualified refs must name an existing sheet with a plausible
         // range — garbage like "乱码!!!" written verbatim made real Excel
         // refuse the file while schema validation stayed green.
+        // A bare A1-style range with no sheet qualifier is also INVALID in a
+        // defined-name body — Excel refuses the whole file (0x800A03EC).
+        // When the parent path names a sheet (add /Sheet1 --type namedrange),
+        // qualify with it; otherwise the ref is ambiguous and rejected.
+        if (!refVal.Contains('!')
+            && System.Text.RegularExpressions.Regex.IsMatch(refVal.Replace("$", ""),
+                @"^[A-Za-z]{1,3}\d+(:[A-Za-z]{1,3}\d+)?$"))
+        {
+            var nrParentSheet = parentPath.TrimStart('/').Split('/', 2)[0];
+            if (!string.IsNullOrEmpty(nrParentSheet)
+                && !nrParentSheet.StartsWith("namedrange", StringComparison.OrdinalIgnoreCase)
+                && !nrParentSheet.Equals("workbook", StringComparison.OrdinalIgnoreCase)
+                && FindWorksheet(nrParentSheet) != null)
+            {
+                refVal = $"{Core.ModernFunctionQualifier.QuoteSheetNameForRef(nrParentSheet)}!{refVal}";
+            }
+            else
+            {
+                throw new ArgumentException(
+                    $"Defined-name ref '{refVal}' has no sheet qualifier — Excel refuses unqualified cell ranges " +
+                    "in defined names. Use ref=SheetName!A1:B1, or add via the sheet path (add <file> /Sheet1 --type namedrange ...).");
+            }
+        }
         ValidateDefinedNameRef(refVal);
 
         var workbook = GetWorkbook();
@@ -715,6 +738,8 @@ public partial class ExcelHandler
                 RegexOptions.IgnoreCase))
             throw new ArgumentException(
                 $"Invalid 'range' value: '{afRange}'. Expected a cell range like 'A1:F100' or 'A1'.");
+        // Canonicalize inverted input (D5:A1) like the rest of the range family.
+        afRange = NormalizeA1Range(afRange);
 
         // CONSISTENCY(autofilter-table-dup): a Table already owns its own
         // <autoFilter> internally; layering a sheet-level <autoFilter> over

@@ -44,11 +44,30 @@ public partial class ExcelHandler
             switch (key.ToLowerInvariant())
             {
                 case "ref":
-                    // Same guard as AddNamedRange: sheet-qualified refs must
-                    // name an existing sheet with a plausible range.
-                    ValidateDefinedNameRef(value);
-                    dn.Text = value;
+                {
+                    // Same guards as AddNamedRange: sheet-qualified refs must
+                    // name an existing sheet, and a bare A1 range without a
+                    // sheet qualifier is invalid in a defined-name body (real
+                    // Excel refuses the file, 0x800A03EC). Qualify with the
+                    // scope sheet when the name is sheet-scoped.
+                    var nrRefVal = value;
+                    if (!nrRefVal.Contains('!')
+                        && Regex.IsMatch(nrRefVal.Replace("$", ""), @"^[A-Za-z]{1,3}\d+(:[A-Za-z]{1,3}\d+)?$"))
+                    {
+                        var scopeSheetName = dn.LocalSheetId?.HasValue == true
+                            ? workbook.GetFirstChild<Sheets>()?.Elements<Sheet>()
+                                .ElementAtOrDefault((int)dn.LocalSheetId!.Value)?.Name?.Value
+                            : null;
+                        if (scopeSheetName == null)
+                            throw new ArgumentException(
+                                $"Defined-name ref '{nrRefVal}' has no sheet qualifier — Excel refuses unqualified " +
+                                "cell ranges in defined names. Use ref=SheetName!A1:B1.");
+                        nrRefVal = $"{Core.ModernFunctionQualifier.QuoteSheetNameForRef(scopeSheetName)}!{nrRefVal}";
+                    }
+                    ValidateDefinedNameRef(nrRefVal);
+                    dn.Text = nrRefVal;
                     break;
+                }
                 case "name":
                     // CONSISTENCY(remove-refs): renaming a defined name breaks
                     // every formula/DV/CF/chart still referencing the old name

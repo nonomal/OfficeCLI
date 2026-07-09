@@ -148,6 +148,27 @@ public partial class ExcelHandler
         return aSci <= bEci && bSci <= aEci && aSr <= bEr && bSr <= aEr;
     }
 
+    /// <summary>
+    /// Canonicalize an inverted CELL:CELL range (D5:A1 → A1:D5, per axis).
+    /// Well-formed input passes through untouched (keeps $ anchors);
+    /// inverted input is rebuilt without $ (matching the printArea rule).
+    /// </summary>
+    internal static string NormalizeA1Range(string range)
+    {
+        var nm = System.Text.RegularExpressions.Regex.Match(range.Trim(),
+            @"^\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!nm.Success) return range;
+        var nc1 = ColumnNameToIndex(nm.Groups[1].Value.ToUpperInvariant());
+        var nc2 = ColumnNameToIndex(nm.Groups[3].Value.ToUpperInvariant());
+        var nr1 = long.Parse(nm.Groups[2].Value);
+        var nr2 = long.Parse(nm.Groups[4].Value);
+        if (nc1 <= nc2 && nr1 <= nr2) return range;
+        var colA = nc1 <= nc2 ? nm.Groups[1].Value : nm.Groups[3].Value;
+        var colB = nc1 <= nc2 ? nm.Groups[3].Value : nm.Groups[1].Value;
+        return $"{colA}{Math.Min(nr1, nr2)}:{colB}{Math.Max(nr1, nr2)}";
+    }
+
     // A:A → A1:A1048576, 1:3 → A1:XFD3. Non-whole ranges pass through.
     private static string ExpandWholeRowColRange(string range)
     {

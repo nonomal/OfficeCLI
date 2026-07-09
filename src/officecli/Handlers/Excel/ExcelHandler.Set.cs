@@ -1302,6 +1302,9 @@ public partial class ExcelHandler
                         // as printarea/freeze.
                         foreach (var afCell in trimmed.Replace("$", "").Split(':'))
                             ParseCellReference(afCell.Trim());
+                        // Canonicalize inverted input (D5:A1) like the rest of
+                        // the range family.
+                        trimmed = NormalizeA1Range(trimmed);
                         // CONSISTENCY(autofilter-table-dup): a Table already owns
                         // its own <autoFilter>; layering a sheet-level filter over
                         // the same range validates green but real Excel refuses to

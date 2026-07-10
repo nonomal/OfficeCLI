@@ -19,9 +19,21 @@ internal static partial class PivotTableHelper
         if (result.Count == 0 && props.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
         {
             var available = string.Join(", ", headers.Where(h => !string.IsNullOrEmpty(h)));
-            Console.Error.WriteLine($"WARNING: No matching fields for {key}={value}. Available: {available}");
+            WarnNoMatchingFields(key, value, available);
         }
         return result;
+    }
+
+    // CONSISTENCY(numfmt-warning): JSON mode queues the advisory for the
+    // envelope's warnings[]; plain mode keeps the stderr line (which the
+    // resident server lifts via BuildWarnings).
+    private static void WarnNoMatchingFields(string key, string value, string available)
+    {
+        var message = $"No matching fields for {key}={value}. Available: {available}";
+        if (WarningContext.IsActive)
+            WarningContext.Add(message, "no_matching_fields", $"Available: {available}");
+        else
+            Console.Error.WriteLine($"WARNING: {message}");
     }
 
     private static List<(int idx, string func, string showAs, string name)> ParseValueFieldsWithWarning(
@@ -31,7 +43,7 @@ internal static partial class PivotTableHelper
         if (result.Count == 0 && props.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
         {
             var available = string.Join(", ", headers.Where(h => !string.IsNullOrEmpty(h)));
-            Console.Error.WriteLine($"WARNING: No matching fields for {key}={value}. Available: {available}");
+            WarnNoMatchingFields(key, value, available);
         }
         return result;
     }

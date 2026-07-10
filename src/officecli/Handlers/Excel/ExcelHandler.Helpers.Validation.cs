@@ -310,6 +310,16 @@ public partial class ExcelHandler
                 return value;
             if (value.Contains(','))
                 return $"\"{value}\"";
+            // A bare unquoted value is valid as a list source if it's a legal
+            // defined-name reference (name token) OR a formula (contains '(',
+            // e.g. INDIRECT(B2)/OFFSET(...)). Anything else — e.g. "hello
+            // world" — is neither a name, a ref, nor a quoted literal, so Excel
+            // refuses the file (0x800A03EC); treat it as a literal single-item
+            // list and quote it. Formulas must NOT be quoted (that would turn
+            // them into a literal string and also block ref shifting).
+            if (!value.Contains('(')
+                && !System.Text.RegularExpressions.Regex.IsMatch(value, @"^[A-Za-z_\\][A-Za-z0-9_.]*$"))
+                return $"\"{value}\"";
             return value;
         }
         if (type == DataValidationValues.Time)
@@ -341,6 +351,18 @@ public partial class ExcelHandler
             if (value.StartsWith("="))
                 return value.Substring(1);
         }
+        // For non-list numeric/date/text types, formula1/formula2 must be a
+        // number, date/time (handled above), cell/range ref, or a formula — a
+        // bare value containing whitespace (e.g. "hello world") is invalid
+        // OOXML formula syntax and makes real Excel refuse the file
+        // (0x800A03EC). Reject it up front. (Quoted literals and refs pass.)
+        if (type != DataValidationValues.Custom
+            && value.Any(char.IsWhiteSpace)
+            && !value.StartsWith("\"") && !value.StartsWith("=")
+            && !value.Contains('!') && !value.Contains('('))
+            throw new ArgumentException(
+                $"validation formula '{value}' is not valid for this validation type: " +
+                "expected a number, date, cell reference, or formula (a bare value with spaces is not valid formula syntax).");
         return value;
     }
 

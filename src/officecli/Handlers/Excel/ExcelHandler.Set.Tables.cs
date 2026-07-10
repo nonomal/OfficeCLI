@@ -492,7 +492,7 @@ public partial class ExcelHandler
                     });
                     break;
                 }
-                case "ref":
+                case "ref" or "range":
                 {
                     var newRef = value.ToUpperInvariant();
                     // Grow/shrink <x:tableColumns> to match the new column count.
@@ -537,6 +537,14 @@ public partial class ExcelHandler
                     table.Reference = newRef;
                     var af = table.GetFirstChild<AutoFilter>();
                     if (af != null) af.Reference = newRef;
+                    // Growing the ref column-wise adds tableColumns above, but a
+                    // header table also needs a header CELL under each new
+                    // column whose text matches the column name — without it
+                    // real Excel refuses the file (0x800A03EC). Stamp the header
+                    // row (no-op for cells already matching). Header-less tables
+                    // have no header row, so skip.
+                    if ((table.HeaderRowCount?.Value ?? 1) != 0)
+                        StampTableHeaderCells(worksheet, table);
                     break;
                 }
                 case "showrowstripes" or "bandedrows" or "bandrows":

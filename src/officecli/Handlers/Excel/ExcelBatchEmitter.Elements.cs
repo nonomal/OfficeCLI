@@ -577,6 +577,7 @@ public static partial class ExcelBatchEmitter
             CopyValue(pic, "rotation", props, "rotation");
             CopyString(pic, "flip", props, "flip");
             CopyString(pic, "crop", props, "crop");
+            CopyString(pic, "hyperlink", props, "hyperlink");
             items.Add(new BatchItem { Command = "add", Parent = sheetPath, Type = "picture", Props = props });
         }
     }

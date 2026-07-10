@@ -370,6 +370,26 @@ public partial class ExcelHandler
             // this the key was write-only and dump silently dropped it.
             if (!string.IsNullOrEmpty(nvProps.Title?.Value))
                 node.Format["title"] = nvProps.Title.Value;
+            // P8 readback — Add writes a picture hyperlink as <a:hlinkClick>
+            // under cNvPr (external via a DrawingsPart relationship, or
+            // internal via @location). Without this the hyperlink was
+            // write-only and dropped on Get/dump.
+            var picHlink = nvProps.GetFirstChild<Drawing.HyperlinkOnClick>();
+            if (picHlink != null)
+            {
+                if (!string.IsNullOrEmpty(picHlink.Id?.Value))
+                {
+                    var rel = worksheetPart.DrawingsPart?.HyperlinkRelationships
+                        .FirstOrDefault(r => r.Id == picHlink.Id.Value);
+                    if (rel != null) node.Format["hyperlink"] = rel.Uri.ToString();
+                }
+                else
+                {
+                    var loc = picHlink.GetAttributes()
+                        .FirstOrDefault(a => a.LocalName == "location").Value;
+                    if (!string.IsNullOrEmpty(loc)) node.Format["hyperlink"] = "#" + loc;
+                }
+            }
         }
 
         ReadAnchorPosition(anchor, node);

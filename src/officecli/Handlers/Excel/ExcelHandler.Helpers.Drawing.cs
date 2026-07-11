@@ -428,6 +428,29 @@ public partial class ExcelHandler
                 node.Format["crop"] = $"{cl / 1000.0:0.##},{ct / 1000.0:0.##},{cr / 1000.0:0.##},{cb / 1000.0:0.##}";
         }
 
+        // P6 readback: opacity from <a:blip><a:alphaModFix amt="N"/> (0..100000
+        // scale; Add takes percent). Mirrors BuildPictureBlipFill. Omitted when
+        // fully opaque (no alphaModFix node).
+        var picBlip = picture.BlipFill?.GetFirstChild<Drawing.Blip>();
+        var picAlpha = picBlip?.GetFirstChild<Drawing.AlphaModulationFixed>();
+        if (picAlpha?.Amount?.Value is { } alphaAmt && alphaAmt < 100000)
+            node.Format["opacity"] = (int)Math.Round(alphaAmt / 1000.0);
+
+        // P10 readback: decorative flag from <xdr:cNvPr><a:extLst><a:ext
+        // uri="{FF2B5EF4-...}"><a16:decorative val="1"/>. Mirrors the Add
+        // emit; the a16:decorative node is an unknown element.
+        var picCNvPrRead = picture.NonVisualPictureProperties?.NonVisualDrawingProperties;
+        if (picCNvPrRead != null)
+        {
+            // Search the whole cNvPr subtree — the a:extLst under cNvPr is a
+            // distinct strongly-typed child, so a GetFirstChild<ExtensionList>
+            // misses it; Descendants() reaches the unknown a16:decorative node.
+            bool decorative = picCNvPrRead.Descendants()
+                .Any(e => e.LocalName == "decorative"
+                    && e.GetAttributes().Any(a => a.LocalName == "val" && a.Value == "1"));
+            if (decorative) node.Format["decorative"] = true;
+        }
+
         return node;
     }
 

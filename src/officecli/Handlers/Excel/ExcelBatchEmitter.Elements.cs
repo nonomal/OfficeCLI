@@ -578,6 +578,11 @@ public static partial class ExcelBatchEmitter
             CopyString(pic, "flip", props, "flip");
             CopyString(pic, "crop", props, "crop");
             CopyString(pic, "hyperlink", props, "hyperlink");
+            // Add-only accessibility/visual props now surfaced by Get; without
+            // these the dump silently dropped alt-text-exclusion (decorative)
+            // and transparency (opacity), which real Excel does not regenerate.
+            CopyValue(pic, "opacity", props, "opacity");
+            CopyValue(pic, "decorative", props, "decorative");
             items.Add(new BatchItem { Command = "add", Parent = sheetPath, Type = "picture", Props = props });
         }
     }

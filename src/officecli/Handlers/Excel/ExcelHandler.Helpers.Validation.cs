@@ -256,12 +256,36 @@ public partial class ExcelHandler
         }
     }
 
+    // Excel's hard ceiling on the character length of a formula / defined-name
+    // refersTo / conditional-format expression. Content beyond this is silently
+    // accepted, persisted, and makes real Excel refuse the file (0x800A03EC).
+    internal const int MaxFormulaLength = 8192;
+
+    /// <summary>
+    /// Reject a formula whose length exceeds Excel's 8192-character ceiling.
+    /// Shared by cell formulas, defined-name refs, and conditional-format
+    /// expressions so the limit is enforced identically everywhere.
+    /// </summary>
+    internal static void ValidateFormulaLength(string? formula, string context = "formula")
+    {
+        if (formula == null) return;
+        var content = formula.TrimStart('=');
+        if (content.Length > MaxFormulaLength)
+            throw new ArgumentException(
+                $"{context} is {content.Length} characters; Excel's limit is {MaxFormulaLength} per formula. " +
+                "A longer expression makes Excel refuse to open the file.");
+    }
+
     internal static void ValidateFormulaCellRefs(string formula)
     {
         if (string.IsNullOrEmpty(formula)) return;
         var trimmed = formula.TrimStart('=');
         var stripped = StripFormulaStringLiterals(trimmed);
 
+        // Formula-length ceiling (8192) — checked before the ref scan so an
+        // oversized expression fails with a clear message instead of Excel's
+        // 0x800A03EC after the fact.
+        ValidateFormulaLength(formula);
         // R1C1-style references make real Excel refuse the file.
         ValidateNoR1C1Reference(formula);
         // Excel caps a function call at 255 arguments; a 256-arg call passes
@@ -603,6 +627,8 @@ public partial class ExcelHandler
         // patterns that pass schema validation but make real Excel refuse
         // the file: doubled/trailing '!' ("乱码!!!") and stray '#' outside
         // the known error literals ("乱码###").
+        // Formula-length ceiling (8192) applies to defined-name bodies too.
+        ValidateFormulaLength(refText, "defined-name ref");
         var body = (refText ?? "").TrimStart('=').Trim();
         if (body.Length == 0) return;
         if (body.Contains('"')) return; // string literals — leave to Excel

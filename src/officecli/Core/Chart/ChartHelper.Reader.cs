@@ -326,6 +326,18 @@ internal static partial class ChartHelper
                 "tr" => "topRight",
                 _ => posRaw
             };
+            // Per-entry legend deletion (<c:legendEntry><c:idx/><c:delete val="1"/>).
+            // The Setter writes these (legendEntry{N}.delete) but the Reader had
+            // no read site, so the Get-driven dump silently reverted a hidden
+            // legend entry on round-trip. Key uses 1-based ordinal = source idx+1,
+            // matching the Setter's legendEntry{N} parse (N → idx N-1).
+            foreach (var le in legend.Elements<C.LegendEntry>())
+            {
+                var leIdx = le.GetFirstChild<C.Index>()?.Val;
+                var leDel = le.GetFirstChild<C.Delete>()?.Val;
+                if (leDel?.HasValue == true && leDel.Value && leIdx?.HasValue == true)
+                    node.Format[$"legendEntry{leIdx.Value + 1}.delete"] = "true";
+            }
         }
         else
         {

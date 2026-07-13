@@ -522,7 +522,12 @@ internal partial class FormulaEvaluator
                   { tokens.Add(new Token(TT.Range, $"{stripped}:{rhs}")); continue; }
                   throw new NotSupportedException($"Unknown: {stripped}:{rhs}"); }
 
-                if (i < formula.Length && formula[i] == '(' && !IsCellRef(stripped))
+                // A name immediately followed by '(' is always a function call — a cell
+                // reference is never followed by '('. Without this, a function whose name
+                // is shaped like a cell ref (e.g. LOG10 = column LOG + row 10, matching
+                // IsCellRef ^[A-Z]{1,3}\d+$) was misclassified as a ref and never evaluated.
+                // Mirrors the (?![\w(]) guard in FormulaRefShifter.CellRefPattern.
+                if (i < formula.Length && formula[i] == '(')
                 { tokens.Add(new Token(TT.Func, word.Replace(".", "_").ToUpperInvariant())); continue; }
 
                 if (IsCellRef(stripped)) { tokens.Add(new Token(TT.CellRef, stripped.ToUpperInvariant())); continue; }

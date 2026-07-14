@@ -1,5 +1,8 @@
 name: repro-207
-on: workflow_dispatch
+on:
+  push:
+    branches: [repro-207]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

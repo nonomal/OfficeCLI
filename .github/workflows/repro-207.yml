@@ -1,0 +1,44 @@
+name: repro-207
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  repro:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Publish win-x64
+        shell: bash
+        run: dotnet publish src/officecli/officecli.csproj -c Release -r win-x64 -o publish --nologo
+      - name: Repro
+        shell: pwsh
+        run: |
+          $bin  = "$PWD\publish\officecli.exe"
+          $file = "$env:TEMP\minimal.pptx"
+          & $bin create $file | Out-Null
+          function Test-Case($name, $noRes) {
+            $inner = ""
+            if ($noRes) { $inner += "`$env:OFFICECLI_NO_AUTO_RESIDENT='1'; " }
+            $inner += "& '$bin' view '$file' outline"
+            $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($inner))
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "powershell.exe"
+            $psi.Arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand $enc"
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError  = $true
+            $psi.UseShellExecute = $false
+            $psi.CreateNoWindow  = $true
+            $p  = [System.Diagnostics.Process]::Start($psi)
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $ok = $p.WaitForExit(90*1000); $sw.Stop()
+            if (-not $ok) { try { $p.Kill() } catch {} }
+            Write-Host "$name : exited=$ok elapsed=$($sw.Elapsed.TotalSeconds.ToString('F1'))s"
+            return $sw.Elapsed.TotalSeconds
+          }
+          $d = Test-Case "default(auto-resident)" $false
+          $n = Test-Case "NO_AUTO_RESIDENT=1"     $true
+          if ($d -ge 30) { Write-Host "REPRODUCED: default hangs ~$([math]::Round($d))s" }
+          else           { Write-Host "NOT reproduced: default ~$([math]::Round($d,1))s" }

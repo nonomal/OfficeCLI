@@ -428,11 +428,32 @@ static partial class CommandBuilder
             var workPath = targetPath;
             if (atomic)
             {
+                var tmpDir = System.IO.Path.GetDirectoryName(targetPath) ?? ".";
+                var tmpStem = System.IO.Path.GetFileNameWithoutExtension(targetPath);
+                var tmpExt = System.IO.Path.GetExtension(targetPath);
+                // Sweep orphaned temp copies from earlier crashed batches
+                // (kill -9 mid-run can't self-clean). Only THIS document's
+                // pattern is considered, and a candidate is deleted only when
+                // it can be opened exclusively — a concurrently running batch
+                // holds its temp open, so live temps are never touched.
+                try
+                {
+                    foreach (var orphan in System.IO.Directory.GetFiles(tmpDir, $".{tmpStem}.batch-*{tmpExt}"))
+                    {
+                        try
+                        {
+                            using (new System.IO.FileStream(orphan, System.IO.FileMode.Open,
+                                System.IO.FileAccess.ReadWrite, System.IO.FileShare.None)) { }
+                            System.IO.File.Delete(orphan);
+                        }
+                        catch { /* in use or unreadable — leave it */ }
+                    }
+                }
+                catch { /* directory unreadable — sweep is best-effort */ }
                 // Keep the original extension LAST — DocumentHandlerFactory
                 // dispatches by extension, so `.tmp` would be rejected.
-                tmpPath = System.IO.Path.Combine(
-                    System.IO.Path.GetDirectoryName(targetPath) ?? ".",
-                    $".{System.IO.Path.GetFileNameWithoutExtension(targetPath)}.batch-{Guid.NewGuid():N}{System.IO.Path.GetExtension(targetPath)}");
+                tmpPath = System.IO.Path.Combine(tmpDir,
+                    $".{tmpStem}.batch-{Guid.NewGuid():N}{tmpExt}");
                 System.IO.File.Copy(targetPath, tmpPath);
                 workPath = tmpPath;
             }

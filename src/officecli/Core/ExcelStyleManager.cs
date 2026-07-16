@@ -204,8 +204,16 @@ internal class ExcelStyleManager
                 && existingPattern.Value != PatternValues.None
                 && existingPattern.Value != PatternValues.Solid)
             {
+                // Carry the existing foreground through in whatever form it is
+                // stored — a theme fg would be silently dropped by an Rgb-only
+                // read (a lone fillBg edit must never eat the foreground).
+                var existingFg = existingFill!.PatternFill!.ForegroundColor;
+                var fgCarry = existingFg?.Rgb?.Value
+                    ?? (existingFg?.Theme?.Value is { } fgThemeIdx
+                        ? ParseHelpers.ExcelThemeIndexToName(fgThemeIdx)
+                        : null);
                 fillId = GetOrCreatePatternFill(stylesheet, existingPattern.InnerText!,
-                    existingFill!.PatternFill!.ForegroundColor?.Rgb?.Value, loneBg);
+                    fgCarry, loneBg);
                 applyFill = true;
             }
             else

@@ -463,6 +463,11 @@ static partial class CommandBuilder
                 tmpPath = System.IO.Path.Combine(tmpDir,
                     $".{tmpStem}.batch-{Guid.NewGuid():N}{tmpExt}");
                 System.IO.File.Copy(targetPath, tmpPath);
+                // File.Copy preserves the SOURCE's mtime — a temp copied from
+                // a document untouched for >15min would be born "old" and the
+                // age floor above would not protect it from a concurrent
+                // batch's sweep. Stamp creation time explicitly.
+                try { System.IO.File.SetLastWriteTimeUtc(tmpPath, DateTime.UtcNow); } catch { /* best-effort */ }
                 workPath = tmpPath;
             }
             List<BatchResult> batchResults;

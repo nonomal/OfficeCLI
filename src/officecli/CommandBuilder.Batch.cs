@@ -445,29 +445,45 @@ static partial class CommandBuilder
                 try
                 {
                     var ageFloor = DateTime.UtcNow - TimeSpan.FromMinutes(15);
-                    foreach (var orphan in System.IO.Directory.GetFiles(tmpDir, $".{tmpStem}.batch-*{tmpExt}"))
-                    {
-                        try
+                    // Two patterns: promoted temps (batch-) and staging names
+                    // (batchprep-, see below) a crash may leave behind.
+                    foreach (var pattern in new[] { $".{tmpStem}.batch-*{tmpExt}", $".{tmpStem}.batchprep-*{tmpExt}" })
+                        foreach (var orphan in System.IO.Directory.GetFiles(tmpDir, pattern))
                         {
-                            if (System.IO.File.GetLastWriteTimeUtc(orphan) > ageFloor) continue;
-                            using (new System.IO.FileStream(orphan, System.IO.FileMode.Open,
-                                System.IO.FileAccess.ReadWrite, System.IO.FileShare.None)) { }
-                            System.IO.File.Delete(orphan);
+                            try
+                            {
+                                if (System.IO.File.GetLastWriteTimeUtc(orphan) > ageFloor) continue;
+                                using (new System.IO.FileStream(orphan, System.IO.FileMode.Open,
+                                    System.IO.FileAccess.ReadWrite, System.IO.FileShare.None)) { }
+                                System.IO.File.Delete(orphan);
+                            }
+                            catch (Exception delEx)
+                            {
+                                // In use (concurrent batch) is normal; an
+                                // UNDELETABLE aged orphan (e.g. macOS uchg
+                                // flag cloned from a locked document) would
+                                // otherwise accumulate one hidden file per
+                                // retry with no signal — say so once.
+                                if (delEx is not System.IO.IOException)
+                                    Console.Error.WriteLine($"warning: could not remove stale batch temp '{orphan}': {delEx.Message}");
+                            }
                         }
-                        catch { /* in use or unreadable — leave it */ }
-                    }
                 }
                 catch { /* directory unreadable — sweep is best-effort */ }
                 // Keep the original extension LAST — DocumentHandlerFactory
                 // dispatches by extension, so `.tmp` would be rejected.
-                tmpPath = System.IO.Path.Combine(tmpDir,
-                    $".{tmpStem}.batch-{Guid.NewGuid():N}{tmpExt}");
-                System.IO.File.Copy(targetPath, tmpPath);
-                // File.Copy preserves the SOURCE's mtime — a temp copied from
-                // a document untouched for >15min would be born "old" and the
-                // age floor above would not protect it from a concurrent
-                // batch's sweep. Stamp creation time explicitly.
-                try { System.IO.File.SetLastWriteTimeUtc(tmpPath, DateTime.UtcNow); } catch { /* best-effort */ }
+                //
+                // Copy under a STAGING name the sweep pattern does not match,
+                // stamp the mtime (File.Copy preserves the source's, which may
+                // be old enough to fall past a concurrent sweep's age floor),
+                // and only then rename into the swept namespace — the temp is
+                // born fresh-stamped, closing the copy→stamp TOCTOU window.
+                var guid = Guid.NewGuid().ToString("N");
+                var prepPath = System.IO.Path.Combine(tmpDir, $".{tmpStem}.batchprep-{guid}{tmpExt}");
+                tmpPath = System.IO.Path.Combine(tmpDir, $".{tmpStem}.batch-{guid}{tmpExt}");
+                System.IO.File.Copy(targetPath, prepPath);
+                try { System.IO.File.SetLastWriteTimeUtc(prepPath, DateTime.UtcNow); } catch { /* best-effort */ }
+                System.IO.File.Move(prepPath, tmpPath);
                 workPath = tmpPath;
             }
             List<BatchResult> batchResults;

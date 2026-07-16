@@ -183,12 +183,29 @@ internal class ExcelStyleManager
                     ? fillColor.TrimStart("gradient;".ToCharArray()).Replace(';', '-')
                     : fillColor;
                 fillId = GetOrCreateGradientFill(stylesheet, dashFormat);
+                applyFill = true;
             }
             else
             {
-                fillId = GetOrCreateFill(stylesheet, fillColor);
+                // A lone `fill=` on a cell that already carries a NON-solid
+                // pattern fill is an incremental foreground edit — mirroring
+                // the lone-fillBg branch below. Collapsing it to a solid fill
+                // silently discarded the pattern and background (and the
+                // receipt claimed only the color was applied).
+                var currentFill = stylesheet.Fills?.Elements<Fill>().ElementAtOrDefault((int)fillId);
+                var currentPattern = currentFill?.PatternFill?.PatternType;
+                if (currentPattern != null
+                    && currentPattern.Value != PatternValues.None
+                    && currentPattern.Value != PatternValues.Solid)
+                {
+                    fillId = GetOrCreatePatternFillPreserveBg(stylesheet, currentFill!.PatternFill!, fillColor);
+                }
+                else
+                {
+                    fillId = GetOrCreateFill(stylesheet, fillColor);
+                }
+                applyFill = true;
             }
-            applyFill = true;
         }
         else if (styleProps.TryGetValue("fillBg", out var loneBg) && !string.IsNullOrEmpty(loneBg))
         {
@@ -1173,6 +1190,32 @@ internal class ExcelStyleManager
     /// indexed, auto) and only the background replaced. Dedup by serialized
     /// form so repeated increments don't bloat the fills table.
     /// </summary>
+    /// <summary>Incremental fill (foreground) edit on a non-solid pattern:
+    /// clone the pattern with its background verbatim, replace only the
+    /// foreground. Mirror image of <see cref="GetOrCreatePatternFillPreserveFg"/>.</summary>
+    private static uint GetOrCreatePatternFillPreserveBg(
+        Stylesheet stylesheet, PatternFill existing, string fgValue)
+    {
+        var fills = stylesheet.Fills!;
+        var newPf = (PatternFill)existing.CloneNode(true);
+        newPf.ForegroundColor?.Remove();
+        var (fgRgb, fgTheme) = ResolveFillColor(fgValue);
+        var fg = new ForegroundColor();
+        if (fgRgb != null) fg.Rgb = fgRgb; else fg.Theme = fgTheme;
+        // Schema order: fgColor FIRST, before any cloned bgColor.
+        newPf.InsertAt(fg, 0);
+
+        int idx = 0;
+        foreach (var fill in fills.Elements<Fill>())
+        {
+            if (fill.PatternFill?.OuterXml == newPf.OuterXml) return (uint)idx;
+            idx++;
+        }
+        fills.Append(new Fill(newPf));
+        fills.Count = (uint)fills.Elements<Fill>().Count();
+        return (uint)(fills.Elements<Fill>().Count() - 1);
+    }
+
     private static uint GetOrCreatePatternFillPreserveFg(
         Stylesheet stylesheet, PatternFill existing, string bgValue)
     {

@@ -1216,6 +1216,17 @@ public class ResidentServer : IDisposable
         // barrier.
         if (atomic && _editable && _dirty)
         {
+            // FLUSH=off promises "disk writes only on explicit save/close/
+            // shutdown" — the barrier's implicit Save would break that
+            // contract, and skipping it would make a rollback reload lose
+            // the unflushed pre-batch edits. Fail closed with the two ways
+            // out instead of silently picking either.
+            if (FlushMode == ResidentFlushMode.Off)
+                throw new CliException(
+                    "atomic batch needs the pre-batch state on disk as its rollback point, " +
+                    "but OFFICECLI_RESIDENT_FLUSH=off is holding unflushed changes in memory. " +
+                    "Run 'save' first, or use 'batch --best-effort'.")
+                { Code = "flush_policy_conflict", Suggestion = "officecli save <file> before the batch, or batch --best-effort" };
             var swBarrier = System.Diagnostics.Stopwatch.StartNew();
             _handler.Save();
             swBarrier.Stop();

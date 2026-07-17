@@ -116,19 +116,24 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalSortBy(List<object> args)
     {
         if (ToGrid(args.Count > 0 ? args[0] : null) is not { } g) return FormulaResult.Error("#VALUE!");
-        int rows = g.GetLength(0);
+        int rows = g.GetLength(0), cols = g.GetLength(1);
+        // A horizontal array (its by-key vector length matches the column count,
+        // not the row count) is sorted along its columns; otherwise sort rows.
+        int keyLen = args.Count > 1 && ToGrid(args[1]) is { } k0 ? Flatten(k0).Length : rows;
+        bool byCol = keyLen != rows && keyLen == cols;
+        int n = byCol ? cols : rows;
         var keyCols = new List<(FormulaResult?[] key, int order)>();
         for (int i = 1; i < args.Count; i += 2)
         {
             if (ToGrid(args[i]) is not { } kg) break;
             var flat = Flatten(kg);
-            if (flat.Length != rows) return FormulaResult.Error("#VALUE!");
+            if (flat.Length != n) return FormulaResult.Error("#VALUE!");
             int ord = (int)Scalar(args, i + 1, 1);
             keyCols.Add((flat, ord));
         }
         if (keyCols.Count == 0) return MakeArea(g);
-        var rowIdx = Enumerable.Range(0, rows).ToList();
-        rowIdx.Sort((a, b) =>
+        var idx = Enumerable.Range(0, n).ToList();
+        idx.Sort((a, b) =>
         {
             foreach (var (key, ord) in keyCols)
             {
@@ -137,7 +142,7 @@ internal partial class FormulaEvaluator
             }
             return 0;
         });
-        return MakeArea(PickRows(g, rowIdx));
+        return MakeArea(byCol ? PickCols(g, idx) : PickRows(g, idx));
     }
 
     // Sort rows (or columns when byCol) by the idx-th key line.

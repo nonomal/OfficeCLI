@@ -41,19 +41,32 @@ internal partial class FormulaEvaluator
             "SIGN" => FR(Math.Sign(num(0))),
             "INT" => FR(Math.Floor(num(0))),
             "TRUNC" => args.Count >= 2 ? FR(Math.Truncate(num(0) * Math.Pow(10, num(1))) / Math.Pow(10, num(1))) : FR(Math.Truncate(num(0))),
-            "ROUND" => FR(Math.Round(num(0), (int)num(1), MidpointRounding.AwayFromZero)),
+            "ROUND" => FR(ExcelRound(num(0), (int)num(1))),
             "ROUNDUP" => FR(RoundUp(num(0), (int)num(1))),
             "ROUNDDOWN" => FR(RoundDown(num(0), (int)num(1))),
             "CEILING_MATH" => FR(CeilingMath(num(0), args.Count >= 2 ? num(1) : 1, args.Count >= 3 ? num(2) : 0)),
             "FLOOR_MATH" => FR(FloorMath(num(0), args.Count >= 2 ? num(1) : 1, args.Count >= 3 ? num(2) : 0)),
-            "CEILING" => FR(CeilingF(num(0), args.Count >= 2 ? num(1) : 1)),
-            "FLOOR" => FR(FloorF(num(0), args.Count >= 2 ? num(1) : 1)),
+            // Legacy CEILING/FLOOR: a positive number with negative significance
+            // is #NUM! (other sign combinations round as usual).
+            "CEILING" => num(0) > 0 && args.Count >= 2 && num(1) < 0 ? FormulaResult.Error("#NUM!") : FR(CeilingF(num(0), args.Count >= 2 ? num(1) : 1)),
+            "FLOOR" => num(0) > 0 && args.Count >= 2 && num(1) < 0 ? FormulaResult.Error("#NUM!") : FR(FloorF(num(0), args.Count >= 2 ? num(1) : 1)),
             "MOD" => num(1) != 0 ? FR(num(0) - num(1) * Math.Floor(num(0) / num(1))) : FormulaResult.Error("#DIV/0!"),
-            "POWER" => FR(Math.Pow(num(0), num(1))),
+            "POWER" => num(0) == 0 && num(1) == 0 ? FormulaResult.Error("#NUM!") : FR(Math.Pow(num(0), num(1))),
             "SQRT" => num(0) >= 0 ? FR(Math.Sqrt(num(0))) : FormulaResult.Error("#NUM!"),
             "FACT" => FR(Factorial(num(0))),
             "COMBIN" => FR(Combin((int)num(0), (int)num(1))),
+            "COMBINA" => FR(Combin((int)num(0) + (int)num(1) - 1, (int)num(1))),
             "PERMUT" => FR(Permut((int)num(0), (int)num(1))),
+            "SUMSQ" => CheckRangeErrors(args) ?? FR(nums().Sum(x => x * x)),
+            "SUMX2MY2" => EvalSumXY(args, 0),
+            "SUMX2PY2" => EvalSumXY(args, 1),
+            "SUMXMY2" => EvalSumXY(args, 2),
+            "CEILING_PRECISE" or "ISO_CEILING" => FR(CeilingPrecise(num(0), args.Count >= 2 ? num(1) : 1)),
+            "FLOOR_PRECISE" => FR(FloorPrecise(num(0), args.Count >= 2 ? num(1) : 1)),
+            "SQRTPI" => num(0) >= 0 ? FR(Math.Sqrt(num(0) * Math.PI)) : FormulaResult.Error("#NUM!"),
+            "FACTDOUBLE" => FactDouble(num(0)),
+            "MULTINOMIAL" => CheckRangeErrors(args) ?? FR(Multinomial(nums())),
+            "SERIESSUM" => EvalSeriesSum(args),
             "GCD" => CheckRangeErrors(args) ?? FR(nums().Aggregate(0.0, (a, b) => Gcd((long)a, (long)b))),
             "LCM" => CheckRangeErrors(args) ?? FR(nums().Aggregate(1.0, (a, b) => Lcm((long)a, (long)b))),
             "RAND" => FR(new Random().NextDouble()),
@@ -62,7 +75,7 @@ internal partial class FormulaEvaluator
             "ODD" => FR(OddF(num(0))),
             "PRODUCT" => CheckRangeErrors(args) ?? FR(nums().Aggregate(1.0, (a, b) => a * b)),
             "QUOTIENT" => num(1) != 0 ? FR(Math.Truncate(num(0) / num(1))) : FormulaResult.Error("#DIV/0!"),
-            "MROUND" => num(1) != 0 ? FR(Math.Round(num(0) / num(1)) * num(1)) : FormulaResult.Error("#NUM!"),
+            "MROUND" => num(1) != 0 ? FR(Math.Round(num(0) / num(1), MidpointRounding.AwayFromZero) * num(1)) : FormulaResult.Error("#NUM!"),
             "ROMAN" => FR_S(ToRoman((int)num(0))),
             "ARABIC" => FR(FromRoman(str(0))),
             "BASE" => FR_S(Convert.ToString((long)num(0), (int)num(1)).ToUpperInvariant()),
@@ -83,18 +96,31 @@ internal partial class FormulaEvaluator
             "ASINH" => FR(Math.Asinh(num(0))), "ACOSH" => FR(Math.Acosh(num(0))), "ATANH" => FR(Math.Atanh(num(0))),
             "DEGREES" => FR(num(0) * 180.0 / Math.PI),
             "RADIANS" => FR(num(0) * Math.PI / 180.0),
+            "SEC" => FR(1.0 / Math.Cos(num(0))), "CSC" => FR(1.0 / Math.Sin(num(0))),
+            "COT" => FR(1.0 / Math.Tan(num(0))), "SECH" => FR(1.0 / Math.Cosh(num(0))),
+            "CSCH" => FR(1.0 / Math.Sinh(num(0))), "COTH" => FR(1.0 / Math.Tanh(num(0))),
+            "ACOT" => FR(Math.PI / 2 - Math.Atan(num(0))),
+            "ACOTH" => FR(0.5 * Math.Log((num(0) + 1) / (num(0) - 1))),
 
             // ===== Statistical =====
             "MEDIAN" => CheckRangeErrors(args) ?? EvalMedian(nums()),
             "MODE" or "MODE_SNGL" => CheckRangeErrors(args) ?? EvalMode(nums()),
             "LARGE" => CheckRangeErrors(args) ?? EvalLarge(args), "SMALL" => CheckRangeErrors(args) ?? EvalSmall(args),
             "RANK" or "RANK_EQ" => CheckRangeErrors(args) ?? EvalRank(args),
+            "RANK_AVG" => CheckRangeErrors(args) ?? EvalRankAvg(args),
+            "PROB" => EvalProb(args),
+            "MDETERM" => EvalMdeterm(arg(0)),
+            "MMULT" => EvalMmult(arg(0), arg(1)),
+            "MINVERSE" => EvalMinverse(arg(0)),
             "PERCENTILE" or "PERCENTILE_INC" => CheckRangeErrors(args) ?? EvalPercentile(args),
             "PERCENTRANK" or "PERCENTRANK_INC" => CheckRangeErrors(args) ?? EvalPercentRank(args),
             "STDEV" or "STDEV_S" => CheckRangeErrors(args) ?? EvalStdev(nums(), true),
             "STDEVP" or "STDEV_P" => CheckRangeErrors(args) ?? EvalStdev(nums(), false),
             "VAR" or "VAR_S" => CheckRangeErrors(args) ?? EvalVar(nums(), true),
             "VARP" or "VAR_P" => CheckRangeErrors(args) ?? EvalVar(nums(), false),
+            "AVERAGEA" => NumsA(args) is { Length: > 0 } aa ? FR(aa.Average()) : FormulaResult.Error("#DIV/0!"),
+            "MAXA" => NumsA(args) is { Length: > 0 } mxa ? FR(mxa.Max()) : FR(0),
+            "MINA" => NumsA(args) is { Length: > 0 } mna ? FR(mna.Min()) : FR(0),
             "GEOMEAN" => CheckRangeErrors(args) ?? (nums() is { Length: > 0 } gm ? FR(Math.Pow(gm.Aggregate(1.0, (a, b) => a * b), 1.0 / gm.Length)) : null),
             "HARMEAN" => CheckRangeErrors(args) ?? (nums() is { Length: > 0 } hm ? FR(hm.Length / hm.Sum(x => 1.0 / x)) : null),
 
@@ -197,8 +223,15 @@ internal partial class FormulaEvaluator
             "LOWER" => FR_S(str(0).ToLowerInvariant()),
             "PROPER" => FR_S(CultureInfo.InvariantCulture.TextInfo.ToTitleCase(str(0).ToLowerInvariant())),
             "REPT" => FR_S(string.Concat(Enumerable.Repeat(str(0), (int)num(1)))),
-            "CHAR" => FR_S(((char)(int)num(0)).ToString()),
+            // CHAR is defined only for codes 1..255; out-of-range is #VALUE!.
+            "CHAR" => (int)num(0) is >= 1 and <= 255 ? FR_S(((char)(int)num(0)).ToString()) : FormulaResult.Error("#VALUE!"),
             "CODE" => FR(str(0).Length > 0 ? (int)str(0)[0] : 0),
+            "LENB" => FR(str(0).Sum(c => IsWideChar(c) ? 2 : 1)),
+            "ASC" => FR_S(ToHalfWidth(str(0))),
+            // UNICHAR/UNICODE work on full Unicode code points (surrogate pairs),
+            // unlike CHAR/CODE which are limited to a single UTF-16 unit.
+            "UNICHAR" => EvalUnichar((int)num(0)),
+            "UNICODE" => str(0).Length > 0 ? FR(char.ConvertToUtf32(str(0), 0)) : FormulaResult.Error("#VALUE!"),
             "FIND" => EvalFind(args, true), "SEARCH" => EvalFind(args, false),
             "REPLACE" => EvalReplace(args), "SUBSTITUTE" => EvalSubstitute(args),
             "EXACT" => FR_B(str(0) == str(1)),
@@ -220,6 +253,7 @@ internal partial class FormulaEvaluator
             "INDEX" => EvalIndex(args), "MATCH" => EvalMatch(args),
             "ROW" => EvalRowCol(args, true), "COLUMN" => EvalRowCol(args, false),
             "ROWS" => EvalRowsCols(args, true), "COLUMNS" => EvalRowsCols(args, false),
+            "AREAS" => args.Count >= 1 ? FR(1) : FormulaResult.Error("#VALUE!"),
             "ADDRESS" => EvalAddress(args),
             "SHEET" => EvalSheet(args), "SHEETS" => EvalSheets(args),
             "CELL" => EvalCell(args),
@@ -227,6 +261,7 @@ internal partial class FormulaEvaluator
             "HLOOKUP" => EvalHlookup(args),
             "LOOKUP" => EvalLookup(args),
             "XLOOKUP" => EvalXlookup(args),
+            "XMATCH" => EvalXmatch(args),
             "HYPERLINK" => FR_S(args.Count >= 2 && args[1] is FormulaResult fn ? fn.AsString() : str(0)),
             "OFFSET" => EvalOffset(args),
             "INDIRECT" => EvalIndirect(args),
@@ -272,15 +307,23 @@ internal partial class FormulaEvaluator
             "NETWORKDAYS" or "NETWORKDAYS_INTL" => EvalNetworkDays(args),
             "WORKDAY" or "WORKDAY_INTL" => EvalWorkDay(args),
             "ISOWEEKNUM" => FR(CultureInfo.InvariantCulture.Calendar.GetWeekOfYear(DateTime.FromOADate(num(0)), CalendarWeekRule.FirstFourDayWeek, DayOfWeek.Monday)),
+            "TIME" => FR((((long)num(0) * 3600 + (long)num(1) * 60 + (long)num(2)) % 86400 + 86400) % 86400 / 86400.0),
+            "WEEKNUM" => EvalWeekNum(num(0), args.Count >= 2 ? (int)num(1) : 1),
+            "DAYS360" => EvalDays360(num(0), num(1), args.Count >= 3 && arg(2)?.AsNumber() != 0),
             "YEARFRAC" => EvalYearFrac(args),
 
             // ===== Info =====
             "ISNUMBER" => FR_B(arg(0)?.IsNumeric == true),
             "ISTEXT" => FR_B(arg(0)?.IsString == true),
             "ISBLANK" => FR_B(arg(0) == null || (arg(0)?.AsString() == "" && !arg(0)!.IsNumeric)),
-            "ISERROR" or "ISERR" => args.Count > 0 && AsRangeData(args[0]) is { } rd_err
+            "ISERROR" => args.Count > 0 && AsRangeData(args[0]) is { } rd_err
                 ? FormulaResult.Array(rd_err.ToFlatResults().Select(r => r?.IsError == true ? 1.0 : 0.0).ToArray())
                 : FR_B(arg(0)?.IsError == true),
+            // ISERR is ISERROR minus #N/A: a not-available result is reported as
+            // "not an error" so callers can tell a lookup miss from a real fault.
+            "ISERR" => args.Count > 0 && AsRangeData(args[0]) is { } rd_iserr
+                ? FormulaResult.Array(rd_iserr.ToFlatResults().Select(r => r?.IsError == true && r.ErrorValue != "#N/A" ? 1.0 : 0.0).ToArray())
+                : FR_B(arg(0)?.IsError == true && arg(0)?.ErrorValue != "#N/A"),
             "ISNA" => FR_B(arg(0)?.ErrorValue == "#N/A"),
             "ISLOGICAL" => FR_B(arg(0)?.IsBool == true),
             "ISEVEN" => FR_B((int)num(0) % 2 == 0), "ISODD" => FR_B((int)num(0) % 2 != 0),
@@ -301,7 +344,7 @@ internal partial class FormulaEvaluator
             "PMT" => EvalPmt(args), "FV" => EvalFv(args), "PV" => EvalPv(args), "NPER" => EvalNper(args),
             "NPV" => EvalNpv(args), "IPMT" => EvalIpmt(args), "PPMT" => EvalPpmt(args),
             "SLN" => args.Count >= 3 ? FR((num(0) - num(1)) / num(2)) : null,
-            "SYD" => EvalSyd(args), "DB" => EvalDb(args), "DDB" => EvalDdb(args),
+            "SYD" => EvalSyd(args), "DB" => EvalDb(args), "DDB" => EvalDdb(args), "VDB" => EvalVdb(args),
             "RATE" => EvalRate(args), "IRR" => EvalIrr(args), // via shared root solver
             "XNPV" => EvalXnpv(args), "XIRR" => EvalXirr(args), "MIRR" => EvalMirr(args),
             "CUMIPMT" => EvalCumulative(args, principal: false), "CUMPRINC" => EvalCumulative(args, principal: true),
@@ -332,12 +375,13 @@ internal partial class FormulaEvaluator
             "DVAR" => EvalDatabase(args, DbAgg.VarS), "DVARP" => EvalDatabase(args, DbAgg.VarP),
 
             // ===== Conversion =====
+            "CONVERT" => EvalConvert(num(0), str(1), str(2)),
             "BIN2DEC" => FR(Convert.ToInt64(str(0), 2)),
-            "DEC2BIN" => FR_S(Convert.ToString((long)num(0), 2)),
+            "DEC2BIN" => Dec2Base(num(0), 2, arg(1)),
             "HEX2DEC" => FR(Convert.ToInt64(str(0), 16)),
-            "DEC2HEX" => FR_S(Convert.ToString((long)num(0), 16).ToUpperInvariant()),
+            "DEC2HEX" => Dec2Base(num(0), 16, arg(1)),
             "OCT2DEC" => FR(Convert.ToInt64(str(0), 8)),
-            "DEC2OCT" => FR_S(Convert.ToString((long)num(0), 8)),
+            "DEC2OCT" => Dec2Base(num(0), 8, arg(1)),
             "BIN2HEX" => FR_S(Convert.ToString(Convert.ToInt64(str(0), 2), 16).ToUpperInvariant()),
             "BIN2OCT" => FR_S(Convert.ToString(Convert.ToInt64(str(0), 2), 8)),
             "HEX2BIN" => FR_S(Convert.ToString(Convert.ToInt64(str(0), 16), 2)),
@@ -492,7 +536,20 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalIf(List<object> args)
     {
         var c = args.Count > 0 && args[0] is FormulaResult r ? r : null; if (c == null) return null;
-        var isTrue = c.IsNumeric ? c.NumericValue != 0 : c.BoolValue == true;
+        if (c.IsError) return c;
+        bool isTrue;
+        if (c.IsNumeric) isTrue = c.NumericValue != 0;
+        else if (c.IsBool) isTrue = c.BoolValue == true;
+        else if (c.IsBlank) isTrue = false;
+        else
+        {
+            // A text condition coerces only for the literal words TRUE/FALSE;
+            // any other text (including numeric-looking "1" or "") is #VALUE!.
+            var sv = c.AsString();
+            if (sv.Equals("TRUE", StringComparison.OrdinalIgnoreCase)) isTrue = true;
+            else if (sv.Equals("FALSE", StringComparison.OrdinalIgnoreCase)) isTrue = false;
+            else return FormulaResult.Error("#VALUE!");
+        }
         if (isTrue) return args.Count > 1 && args[1] is FormulaResult t ? t : FR(0);
         return args.Count > 2 && args[2] is FormulaResult f ? f : FR_B(false);
     }
@@ -525,9 +582,12 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalMid(List<object> args)
     {
         var s = args.Count > 0 && args[0] is FormulaResult r ? r.AsString() : "";
-        var start = args.Count > 1 && args[1] is FormulaResult r2 ? (int)r2.AsNumber() - 1 : 0;
+        var startNum = args.Count > 1 && args[1] is FormulaResult r2 ? (int)r2.AsNumber() : 0;
         var len = args.Count > 2 && args[2] is FormulaResult r3 ? (int)r3.AsNumber() : 0;
-        if (start < 0 || start >= s.Length) return FR_S("");
+        // Excel requires start_num >= 1 and num_chars >= 0; otherwise #VALUE!.
+        if (startNum < 1 || len < 0) return FormulaResult.Error("#VALUE!");
+        var start = startNum - 1;
+        if (start >= s.Length) return FR_S("");
         return FR_S(s.Substring(start, Math.Min(len, s.Length - start)));
     }
 
@@ -536,6 +596,13 @@ internal partial class FormulaEvaluator
         var find = args.Count > 0 && args[0] is FormulaResult r ? r.AsString() : "";
         var within = args.Count > 1 && args[1] is FormulaResult r2 ? r2.AsString() : "";
         var startPos = args.Count > 2 && args[2] is FormulaResult r3 ? (int)r3.AsNumber() - 1 : 0;
+        if (startPos < 0 || startPos > within.Length) return FormulaResult.Error("#VALUE!");
+        // SEARCH (case-insensitive) honours the ? and * wildcards; FIND does not.
+        if (!caseSensitive && (find.Contains('*') || find.Contains('?')))
+        {
+            var m = Regex.Match(within[startPos..], WildcardToRegex(find), RegexOptions.IgnoreCase);
+            return m.Success ? FR(startPos + m.Index + 1) : FormulaResult.Error("#VALUE!");
+        }
         var idx = within.IndexOf(find, startPos, caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
         return idx >= 0 ? FR(idx + 1) : FormulaResult.Error("#VALUE!");
     }
@@ -706,7 +773,13 @@ internal partial class FormulaEvaluator
     {
         var v = args.Count > 0 && args[0] is FormulaResult r ? r.AsNumber() : 0;
         var d = args.Count > 1 && args[1] is FormulaResult r2 ? (int)r2.AsNumber() : 2;
-        return FR_S(v.ToString($"N{d}", CultureInfo.InvariantCulture));
+        // Third arg suppresses the thousands separator when TRUE.
+        bool noCommas = args.Count > 2 && args[2] is FormulaResult r3 && r3.AsNumber() != 0;
+        // Negative decimals round to the left of the decimal point.
+        double factor = Math.Pow(10, d);
+        double rounded = Math.Round(v * factor, MidpointRounding.AwayFromZero) / factor;
+        string fmt = (noCommas ? "F" : "N") + Math.Max(0, d);
+        return FR_S(rounded.ToString(fmt, CultureInfo.InvariantCulture));
     }
 
     // DOLLAR(number, [decimals=2]) / YEN(number, [decimals=0]): round to the
@@ -788,14 +861,37 @@ internal partial class FormulaEvaluator
     {
         if (args.Count < 2) return null;
         var lookup = args[0] is FormulaResult r ? r : null; if (lookup == null) return null;
+        int matchType = args.Count > 2 && args[2] is FormulaResult mt ? (int)mt.AsNumber() : 1;
+
+        // Materialize the 1-D lookup vector (either range orientation, or array).
+        var cells = new List<FormulaResult?>();
         if (AsRangeData(args[1]) is { } rd)
         {
-            if (rd.Cols == 1) { for (int i = 0; i < rd.Rows; i++) { var cell = rd.Cells[i, 0]; if (cell != null && CompareValues(cell, lookup) == 0) return FR(i + 1); } }
-            else if (rd.Rows == 1) { for (int i = 0; i < rd.Cols; i++) { var cell = rd.Cells[0, i]; if (cell != null && CompareValues(cell, lookup) == 0) return FR(i + 1); } }
+            if (rd.Cols == 1) for (int i = 0; i < rd.Rows; i++) cells.Add(rd.Cells[i, 0]);
+            else for (int i = 0; i < rd.Cols; i++) cells.Add(rd.Cells[0, i]);
         }
         else if (AsDoubles(args[1]) is { } arr)
-        { for (int i = 0; i < arr.Length; i++) if (Math.Abs(arr[i] - lookup.AsNumber()) < 1e-10) return FR(i + 1); }
-        return FormulaResult.Error("#N/A");
+            foreach (var v in arr) cells.Add(FormulaResult.Number(v));
+        else return FormulaResult.Error("#N/A");
+
+        if (matchType == 0)
+        {
+            for (int i = 0; i < cells.Count; i++)
+                if (cells[i] != null && CompareValues(cells[i]!, lookup) == 0) return FR(i + 1);
+            return FormulaResult.Error("#N/A");
+        }
+        // Approximate: matchType 1 = largest value <= lookup (ascending data);
+        // matchType -1 = smallest value >= lookup (descending data).
+        int found = -1;
+        for (int i = 0; i < cells.Count; i++)
+        {
+            if (cells[i] == null) continue;
+            int cmp = CompareValues(cells[i]!, lookup);
+            if (cmp == 0) return FR(i + 1);
+            if (matchType == 1) { if (cmp < 0) found = i; else break; }
+            else { if (cmp > 0) found = i; else break; }
+        }
+        return found >= 0 ? FR(found + 1) : FormulaResult.Error("#N/A");
     }
 
     private FormulaResult? EvalRowCol(List<object> args, bool isRow)
@@ -1469,40 +1565,49 @@ internal partial class FormulaEvaluator
 
     // ==================== Financial ====================
 
+    // Shared reader for the time-value-of-money annuity functions. `type` (0 =
+    // payment at period end, 1 = at start) scales the payment leg by (1+rate).
+    private static double TvmNum(List<object> args, int i, double def)
+        => i < args.Count && args[i] is FormulaResult r ? r.AsNumber() : def;
+
     private static FormulaResult? EvalPmt(List<object> args)
     {
         if (args.Count < 3) return null;
-        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, nper = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, pv = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
-        var fv = args.Count > 3 && args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
+        double rate = TvmNum(args, 0, 0), nper = TvmNum(args, 1, 0), pv = TvmNum(args, 2, 0),
+               fv = TvmNum(args, 3, 0), type = TvmNum(args, 4, 0);
         if (rate == 0) return FR(-(pv + fv) / nper);
-        return FR(-(rate * (pv * Math.Pow(1 + rate, nper) + fv) / (Math.Pow(1 + rate, nper) - 1)));
+        double pow = Math.Pow(1 + rate, nper);
+        return FR(-(pv * pow + fv) * rate / ((1 + rate * type) * (pow - 1)));
     }
 
     private static FormulaResult? EvalFv(List<object> args)
     {
         if (args.Count < 3) return null;
-        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, nper = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, pmt = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
-        var pv = args.Count > 3 && args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
+        double rate = TvmNum(args, 0, 0), nper = TvmNum(args, 1, 0), pmt = TvmNum(args, 2, 0),
+               pv = TvmNum(args, 3, 0), type = TvmNum(args, 4, 0);
         if (rate == 0) return FR(-(pv + pmt * nper));
-        return FR(-(pv * Math.Pow(1 + rate, nper) + pmt * (Math.Pow(1 + rate, nper) - 1) / rate));
+        double pow = Math.Pow(1 + rate, nper);
+        return FR(-(pv * pow + pmt * (1 + rate * type) * (pow - 1) / rate));
     }
 
     private static FormulaResult? EvalPv(List<object> args)
     {
         if (args.Count < 3) return null;
-        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, nper = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, pmt = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
-        var fv = args.Count > 3 && args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
+        double rate = TvmNum(args, 0, 0), nper = TvmNum(args, 1, 0), pmt = TvmNum(args, 2, 0),
+               fv = TvmNum(args, 3, 0), type = TvmNum(args, 4, 0);
         if (rate == 0) return FR(-(fv + pmt * nper));
-        return FR(-(fv / Math.Pow(1 + rate, nper) + pmt * (1 - Math.Pow(1 + rate, -nper)) / rate));
+        double pow = Math.Pow(1 + rate, nper);
+        return FR(-(fv + pmt * (1 + rate * type) * (pow - 1) / rate) / pow);
     }
 
     private static FormulaResult? EvalNper(List<object> args)
     {
         if (args.Count < 3) return null;
-        double rate = args[0] is FormulaResult r ? r.AsNumber() : 0, pmt = args[1] is FormulaResult r2 ? r2.AsNumber() : 0, pv = args[2] is FormulaResult r3 ? r3.AsNumber() : 0;
-        var fv = args.Count > 3 && args[3] is FormulaResult r4 ? r4.AsNumber() : 0;
+        double rate = TvmNum(args, 0, 0), pmt = TvmNum(args, 1, 0), pv = TvmNum(args, 2, 0),
+               fv = TvmNum(args, 3, 0), type = TvmNum(args, 4, 0);
         if (rate == 0) return pmt != 0 ? FR(-(pv + fv) / pmt) : null;
-        return FR(Math.Log((-fv * rate + pmt) / (pv * rate + pmt)) / Math.Log(1 + rate));
+        double k = pmt * (1 + rate * type) / rate;
+        return FR(Math.Log((k - fv) / (k + pv)) / Math.Log(1 + rate));
     }
 
     private static FormulaResult? EvalNpv(List<object> args)
@@ -1555,12 +1660,23 @@ internal partial class FormulaEvaluator
     private static FormulaResult? EvalDb(List<object> args)
     {
         if (args.Count < 4) return null;
-        double cost = args[0] is FormulaResult r ? r.AsNumber() : 0, salvage = args[1] is FormulaResult r2 ? r2.AsNumber() : 0;
-        double life = args[2] is FormulaResult r3 ? r3.AsNumber() : 0; int period = args[3] is FormulaResult r4 ? (int)r4.AsNumber() : 1;
+        double Num(int i, double def) => i < args.Count && args[i] is FormulaResult r ? r.AsNumber() : def;
+        double cost = Num(0, 0), salvage = Num(1, 0), life = Num(2, 0);
+        int period = (int)Num(3, 1);
+        // month: number of months in the first year (default full 12). The first
+        // and final (life+1) periods are prorated by month / (12 - month).
+        double month = Num(4, 12);
+        if (cost == 0) return FR(0);
         var rate = Math.Round(1 - Math.Pow(salvage / cost, 1.0 / life), 3);
-        double total = 0;
-        for (int p = 1; p <= period; p++) { var dep = (cost - total) * rate; total += dep; if (p == period) return FR(dep); }
-        return FR(0);
+        double accumulated = 0, dep = 0;
+        for (int p = 1; p <= period; p++)
+        {
+            if (p == 1) dep = cost * rate * month / 12.0;
+            else if (p == (int)life + 1) dep = (cost - accumulated) * rate * (12 - month) / 12.0;
+            else dep = (cost - accumulated) * rate;
+            accumulated += dep;
+        }
+        return FR(dep);
     }
 
     private static FormulaResult? EvalDdb(List<object> args)

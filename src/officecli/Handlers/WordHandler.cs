@@ -1006,7 +1006,7 @@ public partial class WordHandler : IDocumentHandler, Rendering.IRenderModelHost
         try { element = NavigateToElement(ParsePath(runPath)); }
         catch { return null; }
         if (element is not Run run) return null;
-        // LibreOffice/Word export VML textboxes wrapped in mc:AlternateContent
+        // Word and other editors export VML textboxes wrapped in mc:AlternateContent
         // (Choice = modern wps drawing, Fallback = w:pict) — probe the whole
         // run subtree, and collect rel refs from the whole run so the Choice
         // branch's references resolve on replay too.

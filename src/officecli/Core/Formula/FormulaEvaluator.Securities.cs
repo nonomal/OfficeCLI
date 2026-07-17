@@ -9,7 +9,7 @@ namespace OfficeCli.Core;
 // fixed-income family). Every one rests on two shared pieces: the day-count
 // basis engine (DayCountDiff / YearFracBasis, bases 0–4) and the coupon-date
 // schedule (CouponPcd / CouponNcd stepped back from maturity). PRICE/YIELD-style
-// roots reuse the shared SolveRoot. Values are verified against real Microsoft
+// roots reuse the shared SolveRoot. Values are verified against real
 // Excel — the day-count edge rules (30/360 end-of-month, actual/actual) are
 // where engines diverge, so each function is checked rather than trusted.
 internal partial class FormulaEvaluator

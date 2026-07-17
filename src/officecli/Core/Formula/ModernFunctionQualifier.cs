@@ -76,7 +76,7 @@ public static class ModernFunctionQualifier
     // commonly used for scalars too — include them when the spill metadata
     // is harmless to non-spilling outputs (Excel honors t="array" with ref=
     // pointing at the single anchor cell even when the formula resolves to
-    // a single value). Source: Microsoft 365 dynamic-array catalogue.
+    // a single value). Source: the modern dynamic-array function catalogue.
     private static readonly HashSet<string> DynamicArrayFunctions = new(StringComparer.OrdinalIgnoreCase)
     {
         "FILTER", "SORT", "SORTBY", "UNIQUE", "SEQUENCE", "RANDARRAY",

@@ -150,8 +150,8 @@ public partial class ExcelHandler
             // formatting — so `get /` and `get /Sheet` stay bounded on sheets
             // that declare millions of empty cells (issue #149). The load-time
             // WorksheetBloatFilter already strips BARE empties (no style); a
-            // STYLED empty cell (<c s="1"/>) must stay in the DOM (Excel and
-            // LibreOffice keep it — its xf may hold real formatting), so the
+            // STYLED empty cell (<c s="1"/>) must stay in the DOM (common
+            // spreadsheet apps keep it — its xf may hold real formatting), so the
             // only consistent place to suppress it is here, at output. This
             // makes bare vs styled empties behave identically in bulk listings.
             // Targeted reads (`get /Sheet/A1`, Query.cs empty-cell path) still

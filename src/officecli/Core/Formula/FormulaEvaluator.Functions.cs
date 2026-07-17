@@ -259,7 +259,7 @@ internal partial class FormulaEvaluator
             "YEAR" => FR(DateTime.FromOADate(num(0)).Year), "MONTH" => FR(DateTime.FromOADate(num(0)).Month),
             "DAY" => FR(DateTime.FromOADate(num(0)).Day), "HOUR" => FR(DateTime.FromOADate(num(0)).Hour),
             "MINUTE" => FR(DateTime.FromOADate(num(0)).Minute), "SECOND" => FR(DateTime.FromOADate(num(0)).Second),
-            "WEEKDAY" => FR((int)DateTime.FromOADate(num(0)).DayOfWeek + 1),
+            "WEEKDAY" => EvalWeekday(num(0), args.Count >= 2 ? (int)num(1) : 1),
             "DATEVALUE" => DateTime.TryParse(str(0), out var dv) ? FR(dv.ToOADate()) : FormulaResult.Error("#VALUE!"),
             "TIMEVALUE" => DateTime.TryParse(str(0), out var tv) ? FR(tv.TimeOfDay.TotalDays) : FormulaResult.Error("#VALUE!"),
             "EDATE" => FR(DateTime.FromOADate(num(0)).AddMonths((int)num(1)).ToOADate()),
@@ -464,6 +464,24 @@ internal partial class FormulaEvaluator
             _ => null
         };
         return name == null ? null : EvalFunction(name, args.Skip(2).ToList());
+    }
+
+    // WEEKDAY(serial, [return_type]). The return_type selects which day starts
+    // the week and the numbering base; the old code ignored it and always used
+    // type 1. Mirrors Excel's set: 1/17 Sun=1..Sat=7; 2/11 Mon=1..Sun=7; 3
+    // Mon=0..Sun=6; 12..16 week starts Tue..Sat. Invalid types are #NUM!.
+    private static FormulaResult EvalWeekday(double serial, int returnType)
+    {
+        int dow = (int)DateTime.FromOADate(serial).DayOfWeek; // Sun=0..Sat=6
+        int iso = (dow + 6) % 7;                              // Mon=0..Sun=6
+        return returnType switch
+        {
+            1 or 17 => FR(dow + 1),
+            2 or 11 => FR(iso + 1),
+            3 => FR(iso),
+            >= 12 and <= 16 => FR(((iso - (returnType - 11) + 7) % 7) + 1),
+            _ => FormulaResult.Error("#NUM!"),
+        };
     }
 
     // ==================== Logical ====================

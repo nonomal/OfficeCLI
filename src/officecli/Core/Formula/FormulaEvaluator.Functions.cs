@@ -785,6 +785,9 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalRowCol(List<object> args, bool isRow)
     {
         if (args.Count == 0) return null;
+        // A single-cell reference reaches here as a RefArg (see ParseFunction's
+        // ref-preserving list) — read its row/column directly, 1-based.
+        if (args[0] is RefArg ra) return FR(isRow ? ra.Row : ra.Col);
         // OFFSET / INDIRECT / ranges produce a FormulaResult.Area whose underlying
         // RangeData carries the resolved reference's top-left origin. Use that
         // when present so ROW(OFFSET(A1,2,0)) reports 3 (not the cell value's row).

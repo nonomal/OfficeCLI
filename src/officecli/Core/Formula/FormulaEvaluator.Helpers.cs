@@ -33,6 +33,17 @@ internal partial class FormulaEvaluator
         Enumerable.Range(0, rd.Rows).SelectMany(r =>
             Enumerable.Range(0, rd.Cols).Select(c => rd.Cells[r, c] ?? FormulaResult.Number(0)));
 
+    // Functions exempt from automatic scalar-error propagation: they classify
+    // errors, trap them, take lazy branches, or count/ignore them.
+    private static readonly HashSet<string> ErrorTransparentFns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "IF", "IFS", "IFERROR", "IFNA", "CHOOSE", "SWITCH",
+        "ISERROR", "ISERR", "ISNA", "ISBLANK", "ISNUMBER", "ISTEXT",
+        "ISLOGICAL", "ISNONTEXT", "ISREF", "ISFORMULA",
+        "ERROR_TYPE", "TYPE", "ISOMITTED", "NA",
+        "COUNT", "COUNTA", "COUNTBLANK", "AGGREGATE", "SUBTOTAL",
+    };
+
     private static List<FormulaResult> AllArgs(List<object> args) =>
         args.SelectMany(a => a is RangeData rd ? ExpandRange(rd)
             : a is FormulaResult { IsRange: true } fr ? ExpandRange(fr.RangeValue!)

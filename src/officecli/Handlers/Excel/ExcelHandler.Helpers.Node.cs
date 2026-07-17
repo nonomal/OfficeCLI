@@ -385,7 +385,7 @@ public partial class ExcelHandler
                 node.Format["cachedValue"] = rawCached;
             if (evaluator != null && !FormulaReferencesMissingSheet(formula))
             {
-                var report = evaluator.EvaluateForReport(formula);
+                var report = evaluator.EvaluateForReport(formula, cellRef);
                 if (report.Status == Core.EvalReportStatus.Evaluated)
                     computedValue = report.Result!.ToCellValueText();
                 else if (report.Status == Core.EvalReportStatus.Error)

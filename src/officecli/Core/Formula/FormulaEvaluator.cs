@@ -219,6 +219,9 @@ internal partial class FormulaEvaluator
 {
     private readonly SheetData _sheetData;
     private readonly WorkbookPart? _workbookPart;
+    // 1-based position of the cell currently being evaluated, for argument-less
+    // ROW()/COLUMN(). 0 means the caller did not supply it.
+    private int _ctxRow, _ctxCol;
     private readonly FormulaEvalSession _session;
     private HashSet<string> _visiting => _session.Visiting;
     private readonly HashSet<string> _expandingNames = new(StringComparer.OrdinalIgnoreCase);
@@ -325,12 +328,27 @@ internal partial class FormulaEvaluator
     /// three signals through one decision so they cannot drift apart as the
     /// evaluator's coverage grows.
     /// </summary>
-    internal EvalReport EvaluateForReport(string formula)
+    internal EvalReport EvaluateForReport(string formula, string? cellRef = null)
     {
+        SetCellContext(cellRef);
         var r = TryEvaluateFull(formula);
         if (r == null) return new EvalReport(EvalReportStatus.NotEvaluated, null);
         if (r.IsError) return new EvalReport(EvalReportStatus.Error, r);
         return new EvalReport(EvalReportStatus.Evaluated, r);
+    }
+
+    // Record the evaluating cell's 1-based row/column (from an A1 ref) so
+    // argument-less ROW()/COLUMN() can answer. A null/unparsable ref clears it.
+    private void SetCellContext(string? cellRef)
+    {
+        _ctxRow = 0; _ctxCol = 0;
+        if (string.IsNullOrEmpty(cellRef)) return;
+        var m = System.Text.RegularExpressions.Regex.Match(cellRef, @"^\$?([A-Za-z]{1,3})\$?(\d+)$");
+        if (!m.Success) return;
+        int col = 0;
+        foreach (var ch in m.Groups[1].Value.ToUpperInvariant()) col = col * 26 + (ch - 'A' + 1);
+        _ctxCol = col;
+        _ctxRow = int.Parse(m.Groups[2].Value);
     }
 
     private FormulaResult? EvaluateFormula(string formula)

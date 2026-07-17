@@ -17,6 +17,14 @@ internal partial class FormulaEvaluator
         double num(int i) => arg(i)?.AsNumber() ?? 0;
         string str(int i) => arg(i)?.AsString() ?? "";
 
+        // Error propagation: most functions return the first error-valued scalar
+        // argument. Functions that classify/handle errors, that take lazy
+        // branches (args are eagerly evaluated here), or that count/ignore
+        // errors are exempt and inspect the error themselves.
+        if (!ErrorTransparentFns.Contains(name))
+            foreach (var a in args)
+                if (a is FormulaResult { IsError: true } errArg) return errArg;
+
         return name switch
         {
             // ===== Math & Aggregation =====
@@ -26,8 +34,10 @@ internal partial class FormulaEvaluator
             "SUMPRODUCT" => EvalSumProduct(args),
             "AVERAGE" => CheckRangeErrors(args) ?? (nums() is { Length: > 0 } a ? FR(a.Average()) : null),
             "COUNT" => FR(nums().Length),
-            "COUNTA" => FR(args.Sum(a => AsRangeData(a) is { } rd ? rd.ToFlatResults().Count(c => c != null && !c.IsError && c.AsString() != "")
-                : a is FormulaResult r && !r.IsError && !r.IsRange && r.AsString() != "" ? 1 : a is double[] arr ? arr.Length : 0)),
+            // COUNTA counts every non-empty value, including error values; only a
+            // genuinely blank cell is skipped.
+            "COUNTA" => FR(args.Sum(a => AsRangeData(a) is { } rd ? rd.ToFlatResults().Count(c => c != null && !c.IsBlank)
+                : a is FormulaResult r && !r.IsRange ? (r.IsBlank ? 0 : 1) : a is double[] arr ? arr.Length : 0)),
             // Count cells that are empty OR whose formula result is "" (Excel treats ="" as
             // blank in COUNTBLANK, unlike ISBLANK). A number 0 and non-empty text are not
             // blank. Range is fully materialized with null placeholders for truly-empty
@@ -207,7 +217,8 @@ internal partial class FormulaEvaluator
             "NOT" => FR_B(num(0) == 0),
             "XOR" => FR_B(AllArgs(args).Count(r => r.AsNumber() != 0) % 2 == 1),
             "TRUE" => FR_B(true), "FALSE" => FR_B(false),
-            "IFERROR" or "IFNA" => arg(0) is { IsError: true } ? arg(1) : arg(0),
+            "IFERROR" => arg(0) is { IsError: true } ? arg(1) : arg(0),
+            "IFNA" => arg(0)?.ErrorValue == "#N/A" ? arg(1) : arg(0),
             "SWITCH" => EvalSwitch(args), "CHOOSE" => EvalChoose(args),
             "REDUCE" => EvalReduce(args),
             "ISOMITTED" => FR_B(args.Count > 0 && IsOmittedArg(args[0])),
@@ -980,7 +991,9 @@ internal partial class FormulaEvaluator
 
     private FormulaResult? EvalRowCol(List<object> args, bool isRow)
     {
-        if (args.Count == 0) return null;
+        // No argument: the row/column of the cell holding the formula, when the
+        // evaluating cell context is known.
+        if (args.Count == 0) return _ctxRow > 0 ? FR(isRow ? _ctxRow : _ctxCol) : null;
         // A single-cell reference reaches here as a RefArg (see ParseFunction's
         // ref-preserving list) — read its row/column directly, 1-based.
         if (args[0] is RefArg ra) return FR(isRow ? ra.Row : ra.Col);

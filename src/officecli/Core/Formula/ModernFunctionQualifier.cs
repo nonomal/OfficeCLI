@@ -290,11 +290,11 @@ public static class ModernFunctionQualifier
     {
         if (string.IsNullOrEmpty(formula)) return formula;
 
-        // Excel/Calc inline array constants {…} may hold only literal values.
+        // Excel inline array constants {…} may hold only literal values.
         // A function call, cell reference, name, or nested array inside {…} makes
         // Excel report the whole workbook as corrupt (it prompts to repair on
-        // open). Reject at write time — mirrors LibreOffice's BadArrayContent
-        // compile error — so officecli never emits a file Excel refuses to open.
+        // open). Reject such a formula at write time so officecli never emits a
+        // file Excel refuses to open.
         var badElem = FindNonLiteralArrayConstant(formula);
         if (badElem != null)
             throw new ArgumentException(

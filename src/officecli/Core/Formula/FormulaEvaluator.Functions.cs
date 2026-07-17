@@ -29,9 +29,9 @@ internal partial class FormulaEvaluator
             "COUNTA" => FR(args.Sum(a => AsRangeData(a) is { } rd ? rd.ToFlatResults().Count(c => c != null && !c.IsError && c.AsString() != "")
                 : a is FormulaResult r && !r.IsError && !r.IsRange && r.AsString() != "" ? 1 : a is double[] arr ? arr.Length : 0)),
             // Count cells that are empty OR whose formula result is "" (Excel treats ="" as
-            // blank in COUNTBLANK, unlike ISBLANK). Mirrors LibreOffice isCellContentEmpty:
-            // number 0 and non-empty text are not blank. Range is fully materialized with
-            // null placeholders for truly-empty cells, so a direct count is exact.
+            // blank in COUNTBLANK, unlike ISBLANK). A number 0 and non-empty text are not
+            // blank. Range is fully materialized with null placeholders for truly-empty
+            // cells, so a direct count is exact.
             "COUNTBLANK" => FR(args.Sum(a => AsResults(a) is { } rd
                 ? rd.Count(c => c == null || c.IsBlank || (c.IsString && c.AsString() == ""))
                 : 0)),

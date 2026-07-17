@@ -204,6 +204,12 @@ public static partial class ExcelBatchEmitter
         try { list = xl.Get("/namedrange"); }
         catch { return; }
         if (list.Children == null) return;
+        // Some generators write the SAME defined name twice into workbook.xml
+        // (identical name+ref+scope; schema validation tolerates it). Replay
+        // would add the first and collide on the second ("already exists"),
+        // failing the whole atomic batch over source rot — emit each
+        // (name, ref, scope) triple once.
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var nr in list.Children)
         {
             var name = nr.Format.TryGetValue("name", out var n) ? n as string : null;
@@ -225,6 +231,21 @@ public static partial class ExcelBatchEmitter
             // AddNamedRange defaults a sheet-parent to sheet scope; pin the
             // scope explicitly so parent "/" + scope=<sheet> round-trips.
             props["scope"] = string.IsNullOrEmpty(scope) ? "workbook" : scope!;
+            // Replay's duplicate check keys on name+scope, so a repeated
+            // (name, scope) can only be emitted once regardless of ref. Warn
+            // when a dropped duplicate carried a DIFFERENT ref — that one is
+            // genuinely lost, not just redundant.
+            var dedupKey = props["name"] + " " + props["scope"];
+            if (!seenNames.Add(dedupKey))
+            {
+                var firstRef = items.LastOrDefault(it => it.Type == "namedrange"
+                    && it.Props != null && it.Props["name"].Equals(name, StringComparison.OrdinalIgnoreCase)
+                    && it.Props["scope"] == props["scope"])?.Props?["ref"];
+                if (!string.Equals(firstRef, refVal, StringComparison.Ordinal))
+                    warnings.Add(new UnsupportedWarning("namedrange", nr.Path ?? "/namedrange",
+                        $"duplicate defined name '{name}' (same scope, different ref '{refVal}') dropped on dump — the first occurrence wins on replay"));
+                continue;
+            }
             if (nr.Format.TryGetValue("comment", out var cm) && cm is string cs && cs.Length > 0)
                 props["comment"] = cs;
             // volatile (DefinedName.Function) — AddNamedRange consumes it.

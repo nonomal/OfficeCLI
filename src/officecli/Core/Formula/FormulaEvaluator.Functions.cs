@@ -981,6 +981,7 @@ internal partial class FormulaEvaluator
 
     private static FormulaResult? EvalRowsCols(List<object> args, bool isRows)
     {
+        if (args.Count > 0 && args[0] is FormulaResult { IsError: true } e) return e;   // ROWS/COLUMNS(#N/A) → #N/A
         if (args.Count > 0 && AsRangeData(args[0]) is { } rd) return FR(isRows ? rd.Rows : rd.Cols);
         if (args.Count > 0 && AsDoubles(args[0]) is { } arr) return FR(arr.Length);
         return FR(1);

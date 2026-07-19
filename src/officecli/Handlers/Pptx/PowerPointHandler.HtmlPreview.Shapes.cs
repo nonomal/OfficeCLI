@@ -2551,7 +2551,37 @@ public partial class PowerPointHandler
     {
         var isModel3D = acElement.Descendants().Any(d => d.LocalName == "model3d");
         var isZoom = acElement.Descendants().Any(d => d.LocalName == "sldZm");
-        if (!isModel3D && !isZoom) return;
+        if (!isModel3D && !isZoom)
+        {
+            // General mc:AlternateContent — e.g. a text box whose body carries
+            // Office 2010 math (mc:Choice Requires="a14" around a p:sp). Returning
+            // early here silently dropped the whole shape, equations and text alike
+            // (#228). Route the shapes inside mc:Choice (preferred: it carries the
+            // full-fidelity content our renderer understands, e.g. a14:m equations)
+            // or mc:Fallback through the normal shape/picture pipeline instead.
+            var altChild = acElement.ChildElements.FirstOrDefault(e => e.LocalName == "Choice")
+                        ?? acElement.ChildElements.FirstOrDefault(e => e.LocalName == "Fallback");
+            if (altChild == null) return;
+            foreach (var acInner in altChild.ChildElements)
+            {
+                switch (acInner)
+                {
+                    case Shape acSp:
+                        RenderShape(sb, acSp, slidePart, themeColors, dataPath: dataPath);
+                        break;
+                    case Picture acPic:
+                        RenderPicture(sb, acPic, slidePart, themeColors, dataPath: dataPath);
+                        break;
+                    case ConnectionShape acCxn:
+                        RenderConnector(sb, acCxn, themeColors, dataPath: dataPath, part: slidePart);
+                        break;
+                    case GraphicFrame acGf when acGf.Descendants<Drawing.Table>().Any():
+                        RenderTable(sb, acGf, themeColors, dataPath: dataPath, part: slidePart);
+                        break;
+                }
+            }
+            return;
+        }
 
         // Extract position from mc:Choice > graphicFrame/sp > xfrm
         var choice = acElement.ChildElements.FirstOrDefault(e => e.LocalName == "Choice");

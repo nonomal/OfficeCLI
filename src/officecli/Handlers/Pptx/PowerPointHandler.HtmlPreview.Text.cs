@@ -495,13 +495,14 @@ public partial class PowerPointHandler
             var paraXml = para.OuterXml;
             if (paraXml.Contains("oMath"))
             {
-                // AlternateContent is opaque to Descendants() — parse from XML
-                var mathMatch = System.Text.RegularExpressions.Regex.Match(paraXml,
+                // AlternateContent is opaque to Descendants() — parse from XML.
+                // A paragraph can interleave several a14:m equations with its text
+                // runs; emit every match, not just the first (#228 dropped the
+                // second equation of a two-equation paragraph).
+                foreach (System.Text.RegularExpressions.Match mathMatch in System.Text.RegularExpressions.Regex.Matches(paraXml,
                     @"<m:oMathPara[^>]*>.*?</m:oMathPara>|<m:oMath[^>]*>.*?</m:oMath>",
-                    System.Text.RegularExpressions.RegexOptions.Singleline);
-                if (mathMatch.Success)
+                    System.Text.RegularExpressions.RegexOptions.Singleline))
                 {
-                    var mathXml = $"<wrapper xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\">{mathMatch.Value}</wrapper>";
                     try
                     {
                         var wrapper = new OpenXmlUnknownElement("wrapper");

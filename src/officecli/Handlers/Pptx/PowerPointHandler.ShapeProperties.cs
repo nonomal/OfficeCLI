@@ -4021,8 +4021,22 @@ public partial class PowerPointHandler
         }
         if (fontSizePt <= 0) fontSizePt = 18.0; // PPT default for new textboxes
 
-        // Line height: fixed spacing overrides multiplier
-        double lineHeight = fixedLineSpacingPt ?? fontSizePt * lineSpacingMultiplier;
+        // Line height: fixed spacing overrides multiplier. Percent/default
+        // spacing is relative to the font's line pitch (~1.2× the font size for
+        // Latin faces, ~1.32× for CJK faces per hhea/OS2 metrics), NOT 1.0× —
+        // estimating at 1.0× made the check miss real overflows that PowerPoint
+        // visibly clips (issue #236). Resolve the ratio from the first run
+        // typeface; unlocatable fonts fall back to the 1.2 Latin norm.
+        double singleRatio = 1.2;
+        var overflowRp = paragraphs.SelectMany(p => p.Elements<Drawing.Run>()).FirstOrDefault()?.RunProperties;
+        var overflowTypeface = overflowRp?.GetFirstChild<Drawing.LatinFont>()?.Typeface?.Value
+            ?? overflowRp?.GetFirstChild<Drawing.EastAsianFont>()?.Typeface?.Value;
+        if (overflowTypeface != null && !overflowTypeface.StartsWith("+", StringComparison.Ordinal))
+        {
+            var metricRatio = Core.FontMetricsReader.GetPitchRatio(overflowTypeface);
+            if (metricRatio > 1.0) singleRatio = metricRatio;
+        }
+        double lineHeight = fixedLineSpacingPt ?? fontSizePt * lineSpacingMultiplier * singleRatio;
         if (lineHeight <= 0) return null;
 
         // Estimate text width per line using per-character measurement

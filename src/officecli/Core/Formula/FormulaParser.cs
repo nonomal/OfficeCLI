@@ -1580,13 +1580,16 @@ internal static class FormulaParser
                         "lvert" => "|",
                         "lVert" => "\u2016",
                         "|" => "\u2016",
+                        "Vert" => "\u2016",   // tokenizer emits \| as Command("Vert")
                         _ => null
                     };
                     if (mapped != null) { openChar = mapped; pos++; }
                 }
                 else if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
                 {
-                    openChar = tokens[pos].Value[..1];
+                    // \left. is LaTeX's invisible delimiter \u2014 OOXML wants an
+                    // empty begChr, not a literal dot
+                    openChar = tokens[pos].Value[..1] == "." ? "" : tokens[pos].Value[..1];
                     if (tokens[pos].Value.Length > 1)
                         tokens[pos] = new Token(TokenType.Text, tokens[pos].Value[1..]);
                     else
@@ -1619,13 +1622,15 @@ internal static class FormulaParser
                                 "rvert" => "|",
                                 "rVert" => "\u2016",
                                 "|" => "\u2016",
+                                "Vert" => "\u2016",   // tokenizer emits \| as Command("Vert")
                                 _ => null
                             };
                             if (rMapped != null) { closeChar = rMapped; pos++; }
                         }
                         else if (pos < tokens.Count && tokens[pos].Type == TokenType.Text)
                         {
-                            closeChar = tokens[pos].Value[..1];
+                            // \right. \u2014 invisible delimiter, empty endChr
+                            closeChar = tokens[pos].Value[..1] == "." ? "" : tokens[pos].Value[..1];
                             if (tokens[pos].Value.Length > 1)
                                 tokens[pos] = new Token(TokenType.Text, tokens[pos].Value[1..]);
                             else

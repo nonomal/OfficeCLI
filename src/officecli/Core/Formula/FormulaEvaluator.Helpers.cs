@@ -167,8 +167,17 @@ internal partial class FormulaEvaluator
     private static double EvenF(double v) { var c = (int)Math.Ceiling(Math.Abs(v)); return (c % 2 == 0 ? c : c + 1) * Math.Sign(v); }
     private static double OddF(double v) { if (v == 0) return 1; var c = (int)Math.Ceiling(Math.Abs(v)); return (c % 2 == 1 ? c : c + 1) * Math.Sign(v); }
     private static double Factorial(double n) { double r = 1; for (int i = 2; i <= (int)n; i++) r *= i; return r; }
-    private static double Combin(int n, int k) => k < 0 || k > n ? 0 : Factorial(n) / (Factorial(k) * Factorial(n - k));
-    private static double Permut(int n, int k) => k < 0 || k > n ? 0 : Factorial(n) / Factorial(n - k);
+    // n! overflows double past 170, so large arguments go through log-gamma:
+    // C(n,k) = exp(lnΓ(n+1) − lnΓ(k+1) − lnΓ(n−k+1)); small ones keep the exact
+    // factorial ratio (integer-precise, matches Excel digit-for-digit).
+    private static double Combin(int n, int k) =>
+        k < 0 || k > n ? 0 :
+        n <= 170 ? Factorial(n) / (Factorial(k) * Factorial(n - k)) :
+        Math.Exp(GammaLn(n + 1.0) - GammaLn(k + 1.0) - GammaLn(n - k + 1.0));
+    private static double Permut(int n, int k) =>
+        k < 0 || k > n ? 0 :
+        n <= 170 ? Factorial(n) / Factorial(n - k) :
+        Math.Exp(GammaLn(n + 1.0) - GammaLn(n - k + 1.0));
     private static long Gcd(long a, long b) { a = Math.Abs(a); b = Math.Abs(b); while (b != 0) { var t = b; b = a % b; a = t; } return a; }
     private static long Lcm(long a, long b) => a == 0 || b == 0 ? 0 : Math.Abs(a / Gcd(a, b) * b);
 

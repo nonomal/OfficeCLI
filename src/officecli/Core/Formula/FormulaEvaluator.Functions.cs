@@ -958,7 +958,7 @@ internal partial class FormulaEvaluator
         // logical / info
         "NOT", "ISNUMBER", "ISBLANK", "ISTEXT", "ISNONTEXT", "ISLOGICAL", "ISERR",
         "ISERROR", "ISNA", "ISEVEN", "ISODD", "ISREF", "ISFORMULA", "N", "TYPE",
-        "ERROR_TYPE", "CHOOSE", "IFERROR", "IFNA",
+        "ERROR_TYPE", "CHOOSE", "IFERROR", "IFNA", "IF",
         // date / time
         "DAY", "MONTH", "YEAR", "HOUR", "MINUTE", "SECOND", "WEEKDAY", "WEEKNUM",
         "ISOWEEKNUM", "EDATE", "EOMONTH", "DATEVALUE", "TIMEVALUE", "DATE", "TIME",
@@ -1068,8 +1068,12 @@ internal partial class FormulaEvaluator
 
         if (matchType == 0)
         {
+            // Exact match supports wildcards (* and ?) when the lookup is text.
+            bool wild = lookup.IsString && (lookup.StringValue!.Contains('*') || lookup.StringValue.Contains('?'));
+            var rx = wild ? "^" + WildcardToRegex(lookup.AsString()) + "$" : null;
             for (int i = 0; i < cells.Count; i++)
-                if (cells[i] != null && CompareValues(cells[i]!, lookup) == 0) return FR(i + 1);
+                if (cells[i] != null && (wild ? Regex.IsMatch(cells[i]!.AsString(), rx!, RegexOptions.IgnoreCase)
+                                              : CompareValues(cells[i]!, lookup) == 0)) return FR(i + 1);
             return FormulaResult.Error("#N/A");
         }
         // Approximate: matchType 1 = largest value <= lookup (ascending data);

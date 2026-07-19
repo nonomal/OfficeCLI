@@ -135,6 +135,11 @@ internal partial class FormulaEvaluator
     // which cancels to exactly 0 once Erf rounds to 1 at x ≳ 6.
     internal static double Erfc(double x) => x < 0 ? 2.0 - RegGammaQ(0.5, x * x) : RegGammaQ(0.5, x * x);
 
+    // e^x − 1 without cancellation near 0 (BCL has no Math.Expm1); the cubic
+    // series term keeps full double precision over the small-|x| branch.
+    internal static double Expm1(double x) =>
+        Math.Abs(x) < 1e-4 ? x * (1 + x * (0.5 + x / 6)) : Math.Exp(x) - 1;
+
     internal static double NormPdf(double z) => Math.Exp(-0.5 * z * z) / Sqrt2Pi;
     internal static double NormCdf(double z) => 0.5 * Erfc(-z / Sqrt2);
 

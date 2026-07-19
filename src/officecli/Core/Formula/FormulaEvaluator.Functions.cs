@@ -179,7 +179,7 @@ internal partial class FormulaEvaluator
             "T_INV" => args.Count >= 2 ? FR(TInv(num(0), num(1))) : null,
             "T_INV_2T" or "TINV" => args.Count >= 2 ? FR(TInv2T(num(0), num(1))) : null,
             "F_DIST" => EvalFDist(args),
-            "F_DIST_RT" or "FDIST" => args.Count >= 3 ? FR(1 - FDistCdf(num(0), num(1), num(2))) : null,
+            "F_DIST_RT" or "FDIST" => args.Count >= 3 ? FR(FDistRightTail(num(0), num(1), num(2))) : null,
             "F_INV" => args.Count >= 3 ? FR(FInv(num(0), num(1), num(2))) : null,
             "F_INV_RT" or "FINV" => args.Count >= 3 ? FR(FInv(1 - num(0), num(1), num(2))) : null,
             "BINOM_DIST" or "BINOMDIST" => EvalBinomDist(args),

@@ -102,7 +102,7 @@ internal partial class FormulaEvaluator
         if (args.Count < 3) return null;
         double x = N(args, 0), lambda = N(args, 1);
         if (x < 0 || lambda <= 0) return FormulaResult.Error("#NUM!");
-        return FR(Cumulative(args, 2) ? 1 - Math.Exp(-lambda * x) : lambda * Math.Exp(-lambda * x));
+        return FR(Cumulative(args, 2) ? -Expm1(-lambda * x) : lambda * Math.Exp(-lambda * x));
     }
 
     // ==================== Incomplete-beta family ====================
@@ -139,7 +139,13 @@ internal partial class FormulaEvaluator
         double tail = 0.5 * RegIncBeta(x, df / 2, 0.5);
         return t >= 0 ? 1 - tail : tail;
     }
-    private static double TDistRightTail(double t, double df) => 1 - TDistCdf(t, df);
+    // Right tail computed directly from the incomplete beta — 1 - TDistCdf
+    // cancels to 0 once the tail drops below 1e-16.
+    private static double TDistRightTail(double t, double df)
+    {
+        double tail = 0.5 * RegIncBeta(df / (df + t * t), df / 2, 0.5);
+        return t >= 0 ? tail : 1 - tail;
+    }
 
     // T.DIST(x, df, cumulative).
     private static FormulaResult? EvalTDist(List<object> args)
@@ -191,6 +197,14 @@ internal partial class FormulaEvaluator
     {
         if (x <= 0) return 0;
         return RegIncBeta(d1 * x / (d1 * x + d2), d1 / 2, d2 / 2);
+    }
+
+    // Right tail via the beta symmetry I_x(a,b) = 1 - I_{1-x}(b,a) — evaluating
+    // the complement directly keeps the far tail instead of cancelling to 0.
+    private static double FDistRightTail(double x, double d1, double d2)
+    {
+        if (x <= 0) return 1;
+        return RegIncBeta(d2 / (d1 * x + d2), d2 / 2, d1 / 2);
     }
 
     // F.DIST(x, df1, df2, cumulative).
@@ -277,7 +291,7 @@ internal partial class FormulaEvaluator
         double x = N(args, 0), a = N(args, 1), b = N(args, 2);
         if (x < 0 || a <= 0 || b <= 0) return FormulaResult.Error("#NUM!");
         double z = Math.Pow(x / b, a);
-        return FR(Cumulative(args, 3) ? 1 - Math.Exp(-z) : a / Math.Pow(b, a) * Math.Pow(x, a - 1) * Math.Exp(-z));
+        return FR(Cumulative(args, 3) ? -Expm1(-z) : a / Math.Pow(b, a) * Math.Pow(x, a - 1) * Math.Exp(-z));
     }
 
     // LOGNORM.DIST(x, mean, sd, cumulative) / LOGNORMDIST (always CDF).

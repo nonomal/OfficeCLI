@@ -1747,12 +1747,14 @@ internal partial class FormulaEvaluator
             days += DateTime.DaysInMonth(prev.Year, prev.Month);
         }
         if (months < 0) { months += 12; years--; }
-        // YD: days ignoring whole years. Place d1's month/day in d2's year (or
-        // the prior year when d1's month/day falls after d2's), so a leap day
-        // lying between the two dates is counted (per OOXML/ODF day-count).
-        int ydYear = d2.Month > d1.Month || (d2.Month == d1.Month && d2.Day >= d1.Day) ? d2.Year : d2.Year - 1;
-        int ydDay = Math.Min(d1.Day, DateTime.DaysInMonth(ydYear, d1.Month));
-        var anchor = new DateTime(ydYear, d1.Month, ydDay);
+        // YD: days ignoring whole years. Excel anchors in d1's year — d2's
+        // month/day is placed into d1's year (or the following year when it
+        // falls before d1's), so the leap day is counted exactly when the
+        // start year is leap: DATEDIF(2020-01-15, 2022-03-20, "YD") = 65,
+        // while a 2021 start gives 64.
+        int ydYear = d2.Month > d1.Month || (d2.Month == d1.Month && d2.Day >= d1.Day) ? d1.Year : d1.Year + 1;
+        int ydDay = Math.Min(d2.Day, DateTime.DaysInMonth(ydYear, d2.Month));
+        var ydTarget = new DateTime(ydYear, d2.Month, ydDay);
         return unit switch
         {
             "Y" => FR(years),
@@ -1760,7 +1762,7 @@ internal partial class FormulaEvaluator
             "D" => FR((d2 - d1).Days),
             "MD" => FR(days),
             "YM" => FR(months),
-            "YD" => FR((d2 - anchor).Days),
+            "YD" => FR((ydTarget - d1).Days),
             _ => FormulaResult.Error("#NUM!"),
         };
     }

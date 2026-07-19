@@ -226,10 +226,10 @@ internal partial class FormulaEvaluator
         if (Cumulative(args, 3))
         {
             double sum = 0;
-            for (int i = 0; i <= k; i++) sum += Binom(n, i) * Math.Pow(p, i) * Math.Pow(1 - p, n - i);
+            for (int i = 0; i <= k; i++) sum += BinomPmf(n, i, p);
             return FR(sum);
         }
-        return FR(Binom(n, k) * Math.Pow(p, k) * Math.Pow(1 - p, n - k));
+        return FR(BinomPmf(n, k, p));
     }
 
     // BINOM.INV(n, p, alpha) / CRITBINOM — smallest k with CDF ≥ alpha.
@@ -241,7 +241,7 @@ internal partial class FormulaEvaluator
         double cdf = 0;
         for (int k = 0; k <= n; k++)
         {
-            cdf += Binom(n, k) * Math.Pow(p, k) * Math.Pow(1 - p, n - k);
+            cdf += BinomPmf(n, k, p);
             if (cdf >= alpha) return FR(k);
         }
         return FR(n);
@@ -253,14 +253,21 @@ internal partial class FormulaEvaluator
         if (args.Count < 3) return null;
         double f = Math.Floor(N(args, 0)), s = Math.Floor(N(args, 1)), p = N(args, 2);
         if (f < 0 || s < 1 || p < 0 || p > 1) return FormulaResult.Error("#NUM!");
+        // p^s · (1−p)^i with a C(i+s−1,i) that can overflow alone — log space
+        // for large counts, direct product below (digit-exact) otherwise.
+        double Pmf(double i) =>
+            p >= 1 ? (i == 0 ? 1 : 0) :
+            p <= 0 ? 0 :
+            i + s - 1 <= 170 ? Binom(i + s - 1, i) * Math.Pow(p, s) * Math.Pow(1 - p, i)
+                             : Math.Exp(BinomLn(i + s - 1, i) + s * Math.Log(p) + i * Math.Log(1 - p));
         bool cum = args.Count >= 4 && Cumulative(args, 3);
         if (cum)
         {
             double sum = 0;
-            for (int i = 0; i <= f; i++) sum += Binom(i + s - 1, i) * Math.Pow(p, s) * Math.Pow(1 - p, i);
+            for (int i = 0; i <= f; i++) sum += Pmf(i);
             return FR(sum);
         }
-        return FR(Binom(f + s - 1, f) * Math.Pow(p, s) * Math.Pow(1 - p, f));
+        return FR(Pmf(f));
     }
 
     // WEIBULL.DIST(x, alpha, beta, cumulative) / WEIBULL.
@@ -290,7 +297,11 @@ internal partial class FormulaEvaluator
         if (args.Count < 4) return null;
         double k = Math.Floor(N(args, 0)), n = Math.Floor(N(args, 1)), K = Math.Floor(N(args, 2)), Npop = Math.Floor(N(args, 3));
         if (k < 0 || k > n || n > Npop || K > Npop || k > K || n - k > Npop - K) return FormulaResult.Error("#NUM!");
-        double Pmf(double i) => Binom(K, i) * Binom(Npop - K, n - i) / Binom(Npop, n);
+        // Ratio of three coefficients — any of which can overflow alone; keep
+        // the small-population direct ratio (digit-exact), log space beyond.
+        double Pmf(double i) =>
+            Npop <= 170 ? Binom(K, i) * Binom(Npop - K, n - i) / Binom(Npop, n)
+                        : Math.Exp(BinomLn(K, i) + BinomLn(Npop - K, n - i) - BinomLn(Npop, n));
         bool cum = args.Count >= 5 && Cumulative(args, 4);
         if (cum) { double sum = 0; for (int i = 0; i <= k; i++) sum += Pmf(i); return FR(sum); }
         return FR(Pmf(k));

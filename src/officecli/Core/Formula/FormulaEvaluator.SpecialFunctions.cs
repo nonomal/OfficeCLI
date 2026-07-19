@@ -208,7 +208,25 @@ internal partial class FormulaEvaluator
     internal static double Binom(double n, double k)
     {
         if (k < 0 || k > n) return 0;
-        return Math.Round(Math.Exp(GammaLn(n + 1) - GammaLn(k + 1) - GammaLn(n - k + 1)));
+        return Math.Round(Math.Exp(BinomLn(n, k)));
+    }
+
+    // ln C(n,k) — kept in log space so pmf terms can cancel a huge coefficient
+    // against underflowed p-powers before exponentiating (C(10000,5000) alone
+    // overflows double, yet BINOM.DIST(5000,10000,0.5,FALSE) ≈ 0.008).
+    internal static double BinomLn(double n, double k) =>
+        k < 0 || k > n ? double.NegativeInfinity
+                       : GammaLn(n + 1) - GammaLn(k + 1) - GammaLn(n - k + 1);
+
+    // C(n,k)·p^k·(1−p)^(n−k). Small n keeps the direct product (digit-exact);
+    // large n assembles the term in log space.
+    internal static double BinomPmf(double n, double k, double p)
+    {
+        if (k < 0 || k > n) return 0;
+        if (p <= 0) return k == 0 ? 1 : 0;
+        if (p >= 1) return k == n ? 1 : 0;
+        if (n <= 170) return Binom(n, k) * Math.Pow(p, k) * Math.Pow(1 - p, n - k);
+        return Math.Exp(BinomLn(n, k) + k * Math.Log(p) + (n - k) * Math.Log(1 - p));
     }
 
     private static double BetaCF(double x, double a, double b)

@@ -241,10 +241,10 @@ internal partial class FormulaEvaluator
             "MID" => EvalMid(args),
             "LEN" => FR(str(0).Length),
             "TRIM" => FR_S(Regex.Replace(str(0).Trim(' '), " +", " ")),   // spaces (char 32) only; tabs/newlines are CLEAN's job
-            "CLEAN" => FR_S(Regex.Replace(str(0), @"[\x00-\x1F]", "")),
+            "CLEAN" => FR_S(Regex.Replace(str(0), @"[\x00-\x1F\x7F]", "")),   // DEL included, matching Excel
             "UPPER" => FR_S(str(0).ToUpperInvariant()),
             "LOWER" => FR_S(str(0).ToLowerInvariant()),
-            "PROPER" => FR_S(CultureInfo.InvariantCulture.TextInfo.ToTitleCase(str(0).ToLowerInvariant())),
+            "PROPER" => FR_S(ProperCase(str(0))),
             "REPT" => (int)num(1) < 0 || (long)str(0).Length * (int)num(1) > 32767 ? FormulaResult.Error("#VALUE!") : FR_S(string.Concat(Enumerable.Repeat(str(0), (int)num(1)))),
             // CHAR is defined only for codes 1..255; out-of-range is #VALUE!.
             "CHAR" => (int)num(0) is >= 1 and <= 255 ? FR_S(((char)(int)num(0)).ToString()) : FormulaResult.Error("#VALUE!"),
@@ -840,6 +840,10 @@ internal partial class FormulaEvaluator
         string dec = args.Count > 1 && args[1] is FormulaResult d && d.AsString() != "" ? d.AsString() : ".";
         string grp = args.Count > 2 && args[2] is FormulaResult g && g.AsString() != "" ? g.AsString() : ",";
         s = s.Trim().Replace(" ", "");
+        // currency symbols parse in Excel ($5, -$5, 5€); InvariantCulture's
+        // symbol is ¤, so strip the common ones around the number ourselves
+        s = Regex.Replace(s, @"^([+-]?)[\$€¥£]+", "$1");
+        s = Regex.Replace(s, @"[\$€¥£]+$", "");
         s = s.Replace(grp[0].ToString(), "");        // drop group separators
         s = s.Replace(dec[0].ToString(), ".");       // decimal separator -> '.'
         int pct = 0;

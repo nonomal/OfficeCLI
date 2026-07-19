@@ -127,10 +127,30 @@ internal partial class FormulaEvaluator
     // ==================== Math utilities ====================
 
     // Excel wildcard pattern -> unanchored .NET regex: * -> .*, ? -> ., with
-    // ~*/~? as the literal characters. Shared by SEARCH.
+    // ~*/~? as the literal characters. Shared by SEARCH. The ~ sentinels are
+    // swapped out before Regex.Escape — Escape leaves ~ alone, so a
+    // post-escape \~\* pattern never matches anything.
     private static string WildcardToRegex(string p) =>
-        Regex.Escape(p).Replace(@"\~\*", "\x01").Replace(@"\~\?", "\x02")
+        Regex.Escape(p.Replace("~*", "\x01").Replace("~?", "\x02"))
             .Replace(@"\*", ".*").Replace(@"\?", ".").Replace("\x01", @"\*").Replace("\x02", @"\?");
+
+    // Excel PROPER capitalizes a letter after ANY non-letter (apostrophes and
+    // digits included: o'brien -> O'Brien), unlike ToTitleCase's word breaks.
+    private static string ProperCase(string s)
+    {
+        var chars = s.ToLowerInvariant().ToCharArray();
+        bool boundary = true;
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (char.IsLetter(chars[i]))
+            {
+                if (boundary) chars[i] = char.ToUpperInvariant(chars[i]);
+                boundary = false;
+            }
+            else boundary = true;
+        }
+        return new string(chars);
+    }
 
     private static double RoundUp(double v, int d) { var f = Math.Pow(10, d); return Math.Ceiling(Math.Abs(v) * f) / f * Math.Sign(v); }
     private static double RoundDown(double v, int d) { var f = Math.Pow(10, d); return Math.Floor(Math.Abs(v) * f) / f * Math.Sign(v); }

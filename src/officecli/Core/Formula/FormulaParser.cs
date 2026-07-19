@@ -2013,15 +2013,19 @@ internal static class FormulaParser
                 OpenXmlElement? subArg = null;
                 OpenXmlElement? supArg = null;
 
-                if (pos < tokens.Count && tokens[pos].Type == TokenType.Sub)
+                // Either order: \sum_{i=1}^{n} and \sum^{n}_{i=1} are both valid
+                for (int lim = 0; lim < 2; lim++)
                 {
-                    pos++;
-                    subArg = ParseSingleArg(tokens, ref pos);
-                }
-                if (pos < tokens.Count && tokens[pos].Type == TokenType.Sup)
-                {
-                    pos++;
-                    supArg = ParseSingleArg(tokens, ref pos);
+                    if (pos < tokens.Count && tokens[pos].Type == TokenType.Sub && subArg == null)
+                    {
+                        pos++;
+                        subArg = ParseSingleArg(tokens, ref pos);
+                    }
+                    else if (pos < tokens.Count && tokens[pos].Type == TokenType.Sup && supArg == null)
+                    {
+                        pos++;
+                        supArg = ParseSingleArg(tokens, ref pos);
+                    }
                 }
 
                 // Hide sub/sup limits when not provided to avoid empty boxes

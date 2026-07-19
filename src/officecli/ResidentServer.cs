@@ -399,6 +399,24 @@ public class ResidentServer : IDisposable
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(idleCts.Token, token);
                 await Task.Delay(currentTimeout, linked.Token);
 
+                // The clock says idle — but "time since the last command
+                // boundary" is not the same as "nothing is running now". A single
+                // command that runs longer than the idle window (e.g. a large
+                // batch) produces no boundary event for its whole duration, so the
+                // countdown armed when it started expires while it is still in
+                // flight. Level-check the in-flight count before committing to
+                // shutdown: a command waiting on or holding the command lock keeps
+                // _pendingClients > 0 for its entire duration, so re-arm and wait
+                // again instead of tearing the resident down mid-command. Shutting
+                // down here would cancel the command's in-progress reply (the
+                // client then reports "not delivered") while the exit-time flush
+                // still writes the applied result to disk — a false failure over a
+                // silently persisted change. When the command finishes it resets
+                // the timer, so the next expiry counts a full window from
+                // completion and shuts down cleanly only when truly idle.
+                if (Volatile.Read(ref _pendingClients) > 0)
+                    continue;
+
                 // Reached here = idle timeout elapsed without reset.
                 // Kick off the ordered shutdown path instead of raw-
                 // cancelling _mainCts / _pingCts, so the "ping liveness ⇔

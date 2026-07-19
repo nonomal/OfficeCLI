@@ -240,7 +240,7 @@ internal partial class FormulaEvaluator
             "RIGHT" => EvalLeftRight(str(0), args.Count >= 2 ? (int)num(1) : 1, false),
             "MID" => EvalMid(args),
             "LEN" => FR(str(0).Length),
-            "TRIM" => FR_S(Regex.Replace(str(0).Trim(), @"\s+", " ")),
+            "TRIM" => FR_S(Regex.Replace(str(0).Trim(' '), " +", " ")),   // spaces (char 32) only; tabs/newlines are CLEAN's job
             "CLEAN" => FR_S(Regex.Replace(str(0), @"[\x00-\x1F]", "")),
             "UPPER" => FR_S(str(0).ToUpperInvariant()),
             "LOWER" => FR_S(str(0).ToLowerInvariant()),

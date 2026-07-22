@@ -192,8 +192,19 @@ public partial class PowerPointHandler
     private string AddDiagramAsImage(string parentPath, int? index, Dictionary<string, string> properties,
                                      string mermaidText, bool allowNativeFallback)
     {
+        // Bake theme/layout/look into the source as frontmatter so they render and
+        // round-trip via alt-text (the composed source is what gets stamped). The
+        // image backend renders elk/handDrawn/themes at full fidelity. The native
+        // fallback keeps the ORIGINAL source — its parser has no frontmatter/elk
+        // support and would emit garbage nodes from the `---` lines.
+        var composedText = MermaidImageRenderer.ComposeSource(mermaidText,
+            properties.GetValueOrDefault("theme"),
+            properties.GetValueOrDefault("layout"),
+            properties.GetValueOrDefault("look"));
+        var background = properties.GetValueOrDefault("background");
+
         string imgPath;
-        try { imgPath = MermaidImageRenderer.RenderToPngFile(mermaidText); }
+        try { imgPath = MermaidImageRenderer.RenderToPngFile(composedText, background); }
         // A syntax error is bad input — surface it (with mermaid's line-numbered
         // message) so the caller can fix the source. Never fall back to native: the
         // synthesizer would reject the same broken text or, worse, draw garbage.
@@ -202,11 +213,14 @@ public partial class PowerPointHandler
         try
         {
             var pic = new Dictionary<string, string>(properties);
-            foreach (var k in new[] { "mermaid", "text", "dsl", "src", "path", "render", "poster" })
+            foreach (var k in new[] { "mermaid", "text", "dsl", "src", "path", "render", "poster",
+                                      "theme", "layout", "look", "background" })
                 pic.Remove(k);
             pic["src"] = imgPath;
+            // Stamp the COMPOSED source (frontmatter included) so theme/layout/look
+            // travel in the document and a regenerate reproduces the same styling.
             if (!(pic.TryGetValue("alt", out var a) && !string.IsNullOrEmpty(a)))
-                pic["alt"] = MermaidImageRenderer.SourceTag + mermaidText;
+                pic["alt"] = MermaidImageRenderer.SourceTag + composedText;
 
             // Sizing parity with the native path: the diagram is ALWAYS scaled to FIT
             // its box with aspect preserved (a mermaid diagram is never stretched).

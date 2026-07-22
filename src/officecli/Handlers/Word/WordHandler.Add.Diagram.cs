@@ -182,8 +182,17 @@ public partial class WordHandler
     private string AddDiagramAsImage(OpenXmlElement parent, string parentPath, int? index,
                                      Dictionary<string, string> properties, string mermaidText, bool allowNativeFallback)
     {
+        // Bake theme/layout/look into the source as frontmatter so they render and
+        // round-trip via alt-text; native fallback keeps the ORIGINAL source (its
+        // parser has no frontmatter/elk support). Mirrors the pptx image path.
+        var composedText = MermaidImageRenderer.ComposeSource(mermaidText,
+            properties.GetValueOrDefault("theme"),
+            properties.GetValueOrDefault("layout"),
+            properties.GetValueOrDefault("look"));
+        var background = properties.GetValueOrDefault("background");
+
         string imgPath;
-        try { imgPath = MermaidImageRenderer.RenderToPngFile(mermaidText); }
+        try { imgPath = MermaidImageRenderer.RenderToPngFile(composedText, background); }
         // A syntax error is bad input — surface it (with mermaid's line-numbered
         // message) so the caller can fix the source. Never fall back to native: the
         // synthesizer would reject the same broken text or, worse, draw garbage.
@@ -192,11 +201,12 @@ public partial class WordHandler
         try
         {
             var pic = new Dictionary<string, string>(properties);
-            foreach (var k in new[] { "mermaid", "text", "dsl", "src", "path", "render", "poster" })
+            foreach (var k in new[] { "mermaid", "text", "dsl", "src", "path", "render", "poster",
+                                      "theme", "layout", "look", "background" })
                 pic.Remove(k);
             pic["src"] = imgPath;
             if (!(pic.TryGetValue("alt", out var a) && !string.IsNullOrEmpty(a)))
-                pic["alt"] = MermaidImageRenderer.SourceTag + mermaidText;
+                pic["alt"] = MermaidImageRenderer.SourceTag + composedText;
             // Sizing parity with the native path AND the pptx image path: the diagram
             // is ALWAYS scaled to FIT its box with aspect preserved (never stretched).
             // The box is the caller's width/height when given, else the section's

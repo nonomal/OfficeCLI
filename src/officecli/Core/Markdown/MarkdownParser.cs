@@ -40,7 +40,10 @@ public static class MarkdownParser
     //     content). The separator+remainder group is OPTIONAL as a whole, so
     //     '#5bolt' (non-whitespace glued to the run) still fails and stays a
     //     literal paragraph.
-    private static readonly Regex HeadingRe = new(@"^(#{1,6})(?:\s+(?:#+\s*|(.*?)(?:\s+#+\s*)?))?$");
+    // Up to 3 leading spaces are allowed (CommonMark §4.3) — a strict 0-3, NOT
+    // an unbounded \s* (4+ spaces is indented content, not a heading). Group 1
+    // = level, group 2 = content (unchanged; the leading spaces are non-capturing).
+    private static readonly Regex HeadingRe = new(@"^ {0,3}(#{1,6})(?:\s+(?:#+\s*|(.*?)(?:\s+#+\s*)?))?$");
     // Content is optional so a BARE marker line (`-`, `1.`) is still a list item
     // (an empty one) rather than degrading to a literal paragraph — the common
     // "marker on its own line, code fence on the next" shape. `**bold**` etc.
@@ -272,9 +275,16 @@ public static class MarkdownParser
                 // list into two and restart numbering. Must be indented PAST the
                 // marker column (so a top-flush fence still terminates the list,
                 // per the ordered-start split) and not itself a block start.
+                // NOTE: no !HeadingRe guard here. Now that HeadingRe tolerates
+                // 0-3 leading spaces, an indented '#' line inside a list item
+                // (contIndent > baseIndent = item content column) must stay the
+                // item's continuation text, NOT break out into a top-level
+                // heading — CommonMark keeps a list item's indented content with
+                // the item. A 0-3-space '#' only becomes a heading at the top
+                // level (contIndent 0, handled by the dispatch), never here.
                 int contIndent = lines[i].Length - lines[i].TrimStart().Length;
                 if (current != null && contIndent > baseIndent
-                    && !RuleRe.IsMatch(lines[i]) && !QuoteRe.IsMatch(lines[i]) && !HeadingRe.IsMatch(lines[i]))
+                    && !RuleRe.IsMatch(lines[i]) && !QuoteRe.IsMatch(lines[i]))
                 {
                     var contText = lines[i].Trim();
                     if (current.Inlines.Count > 0) current.Inlines.Add(new MdSpan { Text = " " });

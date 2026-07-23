@@ -218,7 +218,44 @@ public static class MarkdownParser
 
     // ─────────────────────────── inline ───────────────────────────
 
-    private static readonly Regex LinkRe = new(@"\[([^\]]*)\]\(([^)]*)\)");
+    /// <summary>
+    /// Matches a <c>[label](dest)</c> construct anchored at <paramref name="start"/>
+    /// (which must point at the <c>[</c>). Unlike a flat regex this counts bracket
+    /// and paren depth so a nested image/link inside the label survives:
+    /// <c>[![alt](img)](target)</c> yields label <c>![alt](img)</c> + dest
+    /// <c>target</c>, instead of the old <c>LinkRe</c> stopping at the first
+    /// inner <c>]</c> and leaking the trailing <c>](target)</c> as literal text.
+    /// </summary>
+    private static bool TryMatchLinkSyntax(string text, int start, out string label, out string dest, out int length)
+    {
+        label = dest = "";
+        length = 0;
+        if (start >= text.Length || text[start] != '[') return false;
+
+        int depth = 0, labelEnd = -1;
+        for (int i = start; i < text.Length; i++)
+        {
+            if (text[i] == '[') depth++;
+            else if (text[i] == ']') { if (--depth == 0) { labelEnd = i; break; } }
+        }
+        if (labelEnd < 0) return false;
+
+        int p = labelEnd + 1;
+        if (p >= text.Length || text[p] != '(') return false;
+
+        int pdepth = 0, destEnd = -1;
+        for (int i = p; i < text.Length; i++)
+        {
+            if (text[i] == '(') pdepth++;
+            else if (text[i] == ')') { if (--pdepth == 0) { destEnd = i; break; } }
+        }
+        if (destEnd < 0) return false;
+
+        label = text[(start + 1)..labelEnd];
+        dest = text[(p + 1)..destEnd];
+        length = destEnd + 1 - start;
+        return true;
+    }
 
     /// <summary>
     /// Inline scanner for **bold**, *italic*/_italic_, `code`, [text](url).
@@ -242,12 +279,12 @@ public static class MarkdownParser
 
         int pos = 0;
         var buf = new StringBuilder();
-        bool bold = false, italic = false;
+        bool bold = false, italic = false, strike = false;
 
         void Flush()
         {
             if (buf.Length == 0) return;
-            spans.Add(new MdSpan { Text = buf.ToString(), Bold = bold, Italic = italic });
+            spans.Add(new MdSpan { Text = buf.ToString(), Bold = bold, Italic = italic, Strike = strike });
             buf.Clear();
         }
 
@@ -274,26 +311,67 @@ public static class MarkdownParser
                 }
             }
 
-            // link [text](url) — re-parse the text so inline markers inside
-            // the brackets format instead of leaking literally.
-            if (c == '[')
+            // image ![alt](url) — no picture is embedded (inline markdown is
+            // text-only), so it degrades to "!" + alt text, mirroring the flat
+            // image path. Recognised BEFORE the link branch so the common
+            // "badge links to CI" idiom [![alt](img)](target) doesn't leak raw
+            // syntax: here the alt/img are consumed as one token, and the outer
+            // link branch (bracket-depth aware) wraps the result.
+            if (c == '!' && pos + 1 < text.Length && text[pos + 1] == '['
+                && TryMatchLinkSyntax(text, pos + 1, out var alt, out var imgUrl, out var imgLen))
             {
-                var lm = LinkRe.Match(text, pos);
-                if (lm.Success && lm.Index == pos)
+                Flush();
+                spans.Add(new MdSpan { Text = "!", Bold = bold, Italic = italic });
+                foreach (var inner in ParseInlines(alt))
+                    spans.Add(new MdSpan
+                    {
+                        Text = inner.Text,
+                        Bold = inner.Bold || bold,
+                        Italic = inner.Italic || italic,
+                        Code = inner.Code,
+                        Strike = inner.Strike || strike,
+                        Href = imgUrl,
+                    });
+                pos += 1 + imgLen;
+                continue;
+            }
+
+            // link [text](url) — re-parse the text so inline markers inside
+            // the brackets format instead of leaking literally. Bracket-depth
+            // aware so a nested image/link in the label survives intact.
+            if (c == '[' && TryMatchLinkSyntax(text, pos, out var label, out var url, out var linkLen))
+            {
+                Flush();
+                foreach (var inner in ParseInlines(label))
+                    spans.Add(new MdSpan
+                    {
+                        Text = inner.Text,
+                        Bold = inner.Bold || bold,
+                        Italic = inner.Italic || italic,
+                        Code = inner.Code,
+                        Strike = inner.Strike || strike,
+                        Href = url,
+                    });
+                pos += linkLen;
+                continue;
+            }
+
+            // GFM strikethrough ~~...~~ (single ~ never toggles; unclosed
+            // opener stays literal — same text-loss-averse guard as **).
+            if (c == '~' && pos + 1 < text.Length && text[pos + 1] == '~')
+            {
+                if (strike)
                 {
-                    Flush();
-                    foreach (var inner in ParseInlines(lm.Groups[1].Value))
-                        spans.Add(new MdSpan
-                        {
-                            Text = inner.Text,
-                            Bold = inner.Bold || bold,
-                            Italic = inner.Italic || italic,
-                            Code = inner.Code,
-                            Href = lm.Groups[2].Value,
-                        });
-                    pos += lm.Length;
-                    continue;
+                    Flush(); strike = false; pos += 2; continue;
                 }
+                bool canOpen = pos + 2 < text.Length
+                               && !char.IsWhiteSpace(text[pos + 2])
+                               && text.IndexOf("~~", pos + 2, StringComparison.Ordinal) >= 0;
+                if (canOpen)
+                {
+                    Flush(); strike = true; pos += 2; continue;
+                }
+                buf.Append("~~"); pos += 2; continue;
             }
 
             // strong **...** or __...__

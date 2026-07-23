@@ -264,20 +264,55 @@ public partial class WordHandler
         // blank docx and would render as plain paragraphs with no marker.
         // Nesting maps to the numbering ilvl via `level` (0-based, capped 0-8).
         var listStyle = list.Ordered ? "ordered" : "unordered";
+        var level = Math.Clamp(depth, 0, 8).ToString();
         foreach (var item in list.Items)
         {
-            var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["liststyle"] = listStyle,
-                ["level"] = Math.Clamp(depth, 0, 8).ToString(),
-                ["text"] = string.Concat(item.Inlines.Select(s => s.Text)),
-            };
+            // markerPlaced tracks whether the list number/bullet has been
+            // attached to a paragraph for this item yet. A normal item places it
+            // on its text paragraph; a pure-fence item (no inline text, only a
+            // code block) places it on the FIRST code line instead — so the item
+            // stays numbered without emitting an empty marker paragraph.
+            bool markerPlaced = false;
 
-            var path = Add(parentPath, "paragraph", posFor(), props);
-            harvestDiagnostics(); // this item's Add() reset diagnostics — capture before the next
-            record(path);
-            if (item.Inlines.Any(s => s.Bold || s.Italic || s.Code || s.Strike))
-                pendingInline.Add((path, item.Inlines)); // formatted in phase 2 (perf)
+            if (item.Inlines.Count > 0 || item.CodeBlocks.Count == 0)
+            {
+                var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["liststyle"] = listStyle,
+                    ["level"] = level,
+                    ["text"] = string.Concat(item.Inlines.Select(s => s.Text)),
+                };
+                var path = Add(parentPath, "paragraph", posFor(), props);
+                harvestDiagnostics(); // this Add() reset diagnostics — capture before the next
+                record(path);
+                if (item.Inlines.Any(s => s.Bold || s.Italic || s.Code || s.Strike))
+                    pendingInline.Add((path, item.Inlines)); // formatted in phase 2 (perf)
+                markerPlaced = true;
+            }
+
+            // Fenced code content of the item — each line its own Consolas
+            // paragraph (monospace, indent already stripped by the parser). The
+            // first line carries the list number when the item had no text.
+            foreach (var cb in item.CodeBlocks)
+            {
+                foreach (var codeLine in cb.Code.Split('\n'))
+                {
+                    var props = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["font"] = "Consolas",
+                        ["text"] = codeLine,
+                    };
+                    if (!markerPlaced)
+                    {
+                        props["liststyle"] = listStyle;
+                        props["level"] = level;
+                        markerPlaced = true;
+                    }
+                    var path = Add(parentPath, "paragraph", posFor(), props);
+                    harvestDiagnostics();
+                    record(path);
+                }
+            }
 
             // All nested segments, in order — one item can own several
             // (marker switch / partial dedent), see MdListItem.Children.

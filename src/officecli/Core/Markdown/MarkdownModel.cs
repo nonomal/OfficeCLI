@@ -56,6 +56,14 @@ public sealed class MdListItem
     /// A single `Child` slot silently overwrote the earlier segment.
     /// </summary>
     public List<MdList> Children { get; } = new();
+
+    /// <summary>
+    /// Fenced code block(s) whose opener shared the item's marker line
+    /// (<c>1. ```py</c>). Kept as nested item content so the list stays intact
+    /// (consistent numbering) instead of the fence being hoisted to a top-level
+    /// block that orphaned sibling items.
+    /// </summary>
+    public List<MdCodeBlock> CodeBlocks { get; } = new();
 }
 
 /// <summary>Fenced code block (```lang). Content is verbatim, no inline parsing.</summary>

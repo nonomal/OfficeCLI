@@ -34,12 +34,10 @@ public static class MarkdownParser
     private static readonly Regex OrderedRe = new(@"^(\s*)\d+[.)]\s+(.*)$");
     private static readonly Regex FenceRe = new(@"^\s*```+\s*([\w+-]*)\s*$");
     // A fence opener sharing its line with a leading list marker (`1. ``` `,
-    // `- ```python`). Without this the marker line fell through to the list
-    // branch, whose inline parser mangled the bare ``` into an empty code span
-    // plus a stray backtick, dropped the marker, and left the closing fence to
-    // become a spurious empty code block. Treat the whole construct as a fenced
-    // code block (graceful fallback: no text lost, no stray empty block).
-    private static readonly Regex ListFenceRe = new(@"^\s*(?:\d+[.)]|[-*+])\s+(?:`{3,})\s*([\w+-]*)\s*$");
+    // `- ```python`). Handled inside ParseList so the fence becomes nested code
+    // content of the list item — the list (and its numbering) stays intact and
+    // sibling items survive. Groups: 1=indent, 2=marker, 3=info-string/lang.
+    private static readonly Regex ListFenceRe = new(@"^(\s*)(\d+[.)]|[-*+])\s+`{3,}\s*([\w+-]*)\s*$");
     private static readonly Regex RuleRe = new(@"^\s*([-*_])(\s*\1){2,}\s*$");
     private static readonly Regex QuoteRe = new(@"^\s*>\s?(.*)$");
     // The lookahead requires at least one pipe so a single-column delimiter
@@ -62,13 +60,14 @@ public static class MarkdownParser
             // blank line — skip
             if (line.Trim().Length == 0) { i++; continue; }
 
-            // fenced code block (standalone ``` opener, or one sharing its line
-            // with a leading list marker — see ListFenceRe).
+            // fenced code block (standalone ``` opener). A fence opener that
+            // shares its line with a list marker (`1. ```) is NOT handled here —
+            // it flows to the list branch below so ParseList can keep it as
+            // nested code content of the list item (see ListFenceRe / ParseList).
             var fence = FenceRe.Match(line);
-            var listFence = fence.Success ? Match.Empty : ListFenceRe.Match(line);
-            if (fence.Success || listFence.Success)
+            if (fence.Success)
             {
-                var lang = fence.Success ? fence.Groups[1].Value : listFence.Groups[1].Value;
+                var lang = fence.Groups[1].Value;
                 var sb = new StringBuilder();
                 i++;
                 while (i < lines.Length && !FenceRe.IsMatch(lines[i]))
@@ -170,6 +169,7 @@ public static class MarkdownParser
 
         while (i < lines.Length)
         {
+            var lf = ListFenceRe.Match(lines[i]);
             var m = UnorderedRe.Match(lines[i]);
             var o = OrderedRe.Match(lines[i]);
             if (!m.Success && !o.Success) break;
@@ -197,12 +197,69 @@ public static class MarkdownParser
                 continue;
             }
 
+            // A fence opener sharing the marker line (`1. ``` `, `- ```py`):
+            // the item's content is a fenced code block. Keep it as nested item
+            // content (list stays intact, numbering consistent, sibling items
+            // survive) rather than hoisting it to a top-level block.
+            if (lf.Success)
+            {
+                current = new MdListItem();
+                current.CodeBlocks.Add(ConsumeListFence(lines, ref i, lf));
+                list.Items.Add(current);
+                continue;
+            }
+
             current = new MdListItem { Inlines = ParseInlines(match.Groups[2].Value) };
             list.Items.Add(current);
             i++;
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// Consume a fenced code block whose opener shared a list marker line
+    /// (<paramref name="lf"/> = <see cref="ListFenceRe"/> match). Advances
+    /// <paramref name="i"/> past the body and closing fence. Body lines are
+    /// de-indented by the minimum leading-space count across non-blank lines,
+    /// capped at the column where the opener's backticks began — so content
+    /// aligned under the marker (`   code`) is stripped, while under-indented
+    /// content is preserved verbatim (never over-strips meaningful indentation).
+    /// </summary>
+    private static MdCodeBlock ConsumeListFence(string[] lines, ref int i, System.Text.RegularExpressions.Match lf)
+    {
+        var lang = lf.Groups[3].Value;
+        int fenceCol = lines[i].IndexOf('`');
+        i++; // past the opener line
+        var body = new List<string>();
+        while (i < lines.Length && !FenceRe.IsMatch(lines[i])) body.Add(lines[i++]);
+        if (i < lines.Length) i++; // consume closing fence
+
+        int strip = fenceCol < 0 ? 0 : fenceCol;
+        foreach (var bl in body)
+            if (bl.Trim().Length > 0) strip = Math.Min(strip, LeadingSpaces(bl));
+
+        var stripped = new List<string>(body.Count);
+        foreach (var bl in body) stripped.Add(StripLeading(bl, strip));
+        return new MdCodeBlock
+        {
+            Language = string.IsNullOrEmpty(lang) ? null : lang,
+            Code = string.Join("\n", stripped).TrimEnd('\n'),
+        };
+    }
+
+    private static int LeadingSpaces(string s)
+    {
+        int n = 0;
+        while (n < s.Length && s[n] == ' ') n++;
+        return n;
+    }
+
+    private static string StripLeading(string s, int n)
+    {
+        int k = 0;
+        while (k < n && k < s.Length && s[k] == ' ') k++;
+        return s[k..];
     }
 
     // ─────────────────────────── tables ───────────────────────────

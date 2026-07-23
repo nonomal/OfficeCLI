@@ -198,6 +198,7 @@ public partial class WordHandler
             "flowchart" => AddDiagram(parent, parentPath, index, properties),
             "diagram" when !properties.ContainsKey("runXml")
                 => AddDiagram(parent, parentPath, index, properties),
+            "markdown" or "md" => AddMarkdown(parent, parentPath, index, properties),
             "run" or "r" => AddRun(parent, parentPath, index, properties),
             "table" or "tbl" => AddTable(parent, parentPath, index, properties),
             "row" or "tr" => AddRow(parent, parentPath, index, properties),

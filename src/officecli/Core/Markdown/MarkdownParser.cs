@@ -361,7 +361,7 @@ public static class MarkdownParser
                 if (end > pos)
                 {
                     Flush();
-                    spans.Add(new MdSpan { Text = text[(pos + 1)..end], Code = true, Bold = bold, Italic = italic });
+                    spans.Add(new MdSpan { Text = text[(pos + 1)..end], Code = true, Bold = bold, Italic = italic, Strike = strike });
                     pos = end + 1;
                     continue;
                 }

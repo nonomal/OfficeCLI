@@ -67,8 +67,16 @@ public partial class WordHandler
 
         InsertPosition? PosFor()
         {
-            if (lastPath != null) return InsertPosition.AfterElement(lastPath);
-            if (index.HasValue) return InsertPosition.AtIndex(index.Value);
+            // No explicit index: every block appends at the document end, in
+            // document order — so a plain append (null) keeps each block on the
+            // O(1) append hot path. Chaining InsertPosition.AfterElement(lastPath)
+            // instead routed every block through the anchor path, which navigates
+            // to (and rebuilds the body child-index cache from) the pre-mutation
+            // tree on each call: O(n) per block, O(n²) overall (an 8000-line list
+            // took ~37s). Only when an explicit start index was given must blocks
+            // chain after one another to stay contiguous and ordered at that index.
+            if (index.HasValue)
+                return lastPath != null ? InsertPosition.AfterElement(lastPath) : InsertPosition.AtIndex(index.Value);
             return null;
         }
 
@@ -78,6 +86,18 @@ public partial class WordHandler
             lastPath = path;
         }
 
+        // Defer per-operation saves across BOTH phases. Every block below goes
+        // through the public Add()/Set() entry points, each of which ends in
+        // SaveDoc() — a full main-part re-serialization. Left eager, an N-block
+        // document serializes the whole (growing) part N times: O(N²) — the
+        // dominant cost (an 8000-line list spent ~27s almost entirely here).
+        // The outer Add() that dispatched to us performs the single real save
+        // after we return (its SaveDoc() runs with the flag restored). Restore
+        // the caller's flag so batch-replay / resident semantics are untouched.
+        var _savedDeferSave = DeferSave;
+        DeferSave = true;
+        try
+        {
         foreach (var block in doc.Blocks)
         {
             switch (block)
@@ -119,17 +139,20 @@ public partial class WordHandler
 
         // Phase 2: all structural adds done — apply inline formatting in one
         // sweep so path navigation builds the body caches once and reuses them.
-        // DeferSave for the sweep: each public Set's range branch ends in
-        // SaveDoc(), i.e. a full main-part serialization — per formatted line
-        // that's the same O(N²) re-serialize batch replay hit (see
-        // RunNonResidentBatch). One flush at the end instead; restore the
-        // caller's flag so resident semantics are untouched.
+        // ApplyInlineSpans mutates the DOM directly (no SaveDoc), so this sweep
+        // never re-serialized per line; it stays inside the DeferSave scope only
+        // so the empty-markdown fallback Add() below also defers.
         foreach (var (path, inlines) in pendingInline)
             ApplyInlineSpans(path, inlines);
 
         // Empty markdown still yields at least an anchor so `add` returns a path.
         return firstPath ?? Add(parentPath, "paragraph", PosFor(),
             new(StringComparer.OrdinalIgnoreCase) { ["text"] = "" });
+        }
+        finally
+        {
+            DeferSave = _savedDeferSave;
+        }
     }
 
     // Heading font sizes (pt) per level — a compact hierarchy that reads as

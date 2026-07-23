@@ -1529,12 +1529,22 @@ public partial class WordHandler
         // sectPr (Add path, target still detached before the sectPr) or other
         // non-paragraph siblings are skipped, matching the previous
         // OfType<Paragraph> predecessor selection.
-        IEnumerable<Paragraph> preceding = targetPara?.Parent != null
-            ? targetPara.ElementsBefore().OfType<Paragraph>()
-            : container.Elements<Paragraph>().Where(p => !ReferenceEquals(p, targetPara));
+        // Walk predecessors backward via sibling links (NOT LINQ .Reverse(),
+        // which buffers every preceding element first — O(n) per call, so an
+        // n-item list minting one numId per item was O(n²): ~35s for 8000
+        // bullets. Backward sibling walk exits on the first same/shallower-level
+        // paragraph, i.e. O(1) for a flat list and O(depth) for a nested one).
+        // Set path (attached): start at the previous sibling; Add path
+        // (detached, appended later): start at the container's last child.
+        OpenXmlElement? cur = targetPara?.Parent != null
+            ? targetPara.PreviousSibling()
+            : container.LastChild;
 
-        foreach (var prevPara in preceding.Reverse())
+        for (; cur != null; cur = cur.PreviousSibling())
         {
+            if (cur is not Paragraph prevPara || ReferenceEquals(prevPara, targetPara))
+                continue; // skip tables / sectPr / the target itself
+
             var numProps = prevPara.ParagraphProperties?.NumberingProperties;
             var prevNumId = numProps?.NumberingId?.Val?.Value;
             if (prevNumId == null || prevNumId == 0)

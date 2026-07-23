@@ -258,15 +258,37 @@ public partial class WordHandler
 
         var grid = new List<List<List<MdSpan>>> { t.Header };
         grid.AddRange(t.Rows);
-        for (int r = 0; r < grid.Count; r++)
+
+        // Populate cells by mutating the freshly-added table element DIRECTLY
+        // rather than issuing a per-cell `Set("/body/tbl[N]/row/cell")`. Each of
+        // those Set calls re-navigates from /body, and the first cell of every
+        // table rebuilds the body child-index (O(body)) — cleared by the
+        // heading/paragraph/list body-Adds between tables — so an M-table
+        // interleave was O(M²). Navigating to the table once and writing cell
+        // text in-place keeps table fill at O(cells-in-this-table), no body
+        // navigation. Cell text here is plain (markdown table cells carry no
+        // inline formatting in this expander), so a single run per cell matches
+        // what the Set text path produced.
+        // Use the element AddTable just created (captured in _lastAddedTable)
+        // instead of re-navigating "/body/tbl[N]", which would rebuild the body
+        // child-index (O(body)) once per table — the residual O(M²) in an
+        // M-table interleave. This keeps table fill fully off the /body index.
+        if (_lastAddedTable is Table tableEl)
         {
-            var row = grid[r];
-            for (int c = 0; c < cols && c < row.Count; c++)
+            var rowEls = tableEl.Elements<TableRow>().ToList();
+            for (int r = 0; r < grid.Count && r < rowEls.Count; r++)
             {
-                var text = string.Concat(row[c].Select(s => s.Text));
-                if (text.Length == 0) continue;
-                Set($"{tablePath}/row[{r + 1}]/cell[{c + 1}]",
-                    new(StringComparer.OrdinalIgnoreCase) { ["text"] = text });
+                var row = grid[r];
+                var cellEls = rowEls[r].Elements<TableCell>().ToList();
+                for (int c = 0; c < cols && c < row.Count && c < cellEls.Count; c++)
+                {
+                    var text = string.Concat(row[c].Select(s => s.Text));
+                    if (text.Length == 0) continue;
+                    var cellPara = cellEls[c].GetFirstChild<Paragraph>()
+                                   ?? cellEls[c].AppendChild(new Paragraph());
+                    foreach (var run in cellPara.Elements<Run>().ToList()) run.Remove();
+                    cellPara.AppendChild(new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve }));
+                }
             }
         }
         return tablePath;

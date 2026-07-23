@@ -66,6 +66,8 @@ public static class MarkdownParser
     // rule check runs first, but a pipe-less line must never read as a table
     // delimiter regardless of check order.
     private static readonly Regex TableDelimRe = new(@"^(?=.*\|)\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$");
+    // ASCII punctuation escapable by a leading backslash (CommonMark §2.4).
+    private const string EscapablePunct = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
 
     public static MarkdownDocument Parse(string text)
     {
@@ -550,6 +552,19 @@ public static class MarkdownParser
         while (pos < text.Length)
         {
             char c = text[pos];
+
+            // CommonMark backslash escape: '\' before ASCII punctuation emits
+            // that punctuation LITERALLY (into buf, so it can't act as a
+            // delimiter) and consumes the backslash. '\' before anything else
+            // (or at end of line) stays a literal backslash. Runs first so an
+            // escaped '*'/'`'/'[' etc. never reaches the delimiter branches —
+            // and never loses a character.
+            if (c == '\\' && pos + 1 < text.Length && EscapablePunct.IndexOf(text[pos + 1]) >= 0)
+            {
+                buf.Append(text[pos + 1]);
+                pos += 2;
+                continue;
+            }
 
             // inline code `...` (only with a closing backtick; else literal)
             if (c == '`')

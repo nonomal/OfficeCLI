@@ -30,14 +30,25 @@ namespace OfficeCli.Core.Markdown;
 public static class MarkdownParser
 {
     private static readonly Regex HeadingRe = new(@"^(#{1,6})\s+(.*?)\s*#*\s*$");
-    private static readonly Regex UnorderedRe = new(@"^(\s*)[-*+]\s+(.*)$");
-    private static readonly Regex OrderedRe = new(@"^(\s*)\d+[.)]\s+(.*)$");
+    // Content is optional so a BARE marker line (`-`, `1.`) is still a list item
+    // (an empty one) rather than degrading to a literal paragraph — the common
+    // "marker on its own line, code fence on the next" shape. `**bold**` etc.
+    // stay safe: after the single marker char the remainder must be whitespace+
+    // content or end-of-line, so `**x` (no space) never matches.
+    private static readonly Regex UnorderedRe = new(@"^(\s*)[-*+](?:\s+(.*))?$");
+    private static readonly Regex OrderedRe = new(@"^(\s*)\d+[.)](?:\s+(.*))?$");
     private static readonly Regex FenceRe = new(@"^\s*```+\s*([\w+-]*)\s*$");
     // A fence opener sharing its line with a leading list marker (`1. ``` `,
     // `- ```python`). Handled inside ParseList so the fence becomes nested code
     // content of the list item — the list (and its numbering) stays intact and
     // sibling items survive. Groups: 1=indent, 2=marker, 3=info-string/lang.
     private static readonly Regex ListFenceRe = new(@"^(\s*)(\d+[.)]|[-*+])\s+`{3,}\s*([\w+-]*)\s*$");
+    // An indented fence opener on its OWN line (no marker) — the code block of a
+    // list item written on the line(s) AFTER the item text (the ubiquitous
+    // README "1. Step\n   ```bash\n   …\n   ```" install-step shape). Group 1 =
+    // indent, group 2 = info-string. Handled as continuation content of the
+    // current item so its body is de-indented exactly like the same-line fence.
+    private static readonly Regex ContinuationFenceRe = new(@"^(\s+)`{3,}\s*([\w+-]*)\s*$");
     private static readonly Regex RuleRe = new(@"^\s*([-*_])(\s*\1){2,}\s*$");
     private static readonly Regex QuoteRe = new(@"^\s*>\s?(.*)$");
     // The lookahead requires at least one pipe so a single-column delimiter
@@ -172,7 +183,22 @@ public static class MarkdownParser
             var lf = ListFenceRe.Match(lines[i]);
             var m = UnorderedRe.Match(lines[i]);
             var o = OrderedRe.Match(lines[i]);
-            if (!m.Success && !o.Success) break;
+            if (!m.Success && !o.Success)
+            {
+                // A next-line indented fence is the current item's code content
+                // (the README "1. Step\n   ```bash\n   …\n   ```" step shape).
+                // Consume it de-indented — structurally identical to a same-line
+                // fence — so ParseList does NOT break here (which used to hand
+                // the fence to the top-level scanner as a standalone block and
+                // orphan the following sibling markers).
+                var cf = ContinuationFenceRe.Match(lines[i]);
+                if (cf.Success && current != null && cf.Groups[1].Value.Length > baseIndent)
+                {
+                    current.CodeBlocks.Add(ConsumeFence(lines, ref i, cf.Groups[2].Value));
+                    continue;
+                }
+                break;
+            }
 
             var match = m.Success ? m : o;
             int indent = match.Groups[1].Value.Length;
@@ -184,18 +210,21 @@ public static class MarkdownParser
             // the caller opens a fresh list of the other kind.
             if (indent == baseIndent && o.Success != ordered) break;
 
-            if (indent > baseIndent)                     // nested list under current item
+            // Nested list under the current item.
+            if (indent > baseIndent && current != null)
             {
-                if (current != null)
-                    // Append — never assign. One item can own several nested
-                    // segments (marker switch mid-nest, partial dedent); a
-                    // single-slot assignment overwrote the earlier segment and
-                    // its items vanished from the document.
-                    current.Children.Add(ParseList(lines, ref i, indent));
-                else
-                    i++;                                 // orphan indent — skip defensively
+                // Append — never assign. One item can own several nested
+                // segments (marker switch mid-nest, partial dedent); a
+                // single-slot assignment overwrote the earlier segment and
+                // its items vanished from the document.
+                current.Children.Add(ParseList(lines, ref i, indent));
                 continue;
             }
+            // indent > baseIndent with NO parent item is a genuinely orphaned
+            // indented marker (reached straight from the top-level scanner).
+            // It must NEVER be silently dropped (the parser's degrade-don't-
+            // lose-text contract) — fall through and add it as an item of THIS
+            // list at the current level.
 
             // A fence opener sharing the marker line (`1. ``` `, `- ```py`):
             // the item's content is a fenced code block. Keep it as nested item
@@ -204,7 +233,7 @@ public static class MarkdownParser
             if (lf.Success)
             {
                 current = new MdListItem();
-                current.CodeBlocks.Add(ConsumeListFence(lines, ref i, lf));
+                current.CodeBlocks.Add(ConsumeFence(lines, ref i, lf.Groups[3].Value));
                 list.Items.Add(current);
                 continue;
             }
@@ -218,17 +247,18 @@ public static class MarkdownParser
     }
 
     /// <summary>
-    /// Consume a fenced code block whose opener shared a list marker line
-    /// (<paramref name="lf"/> = <see cref="ListFenceRe"/> match). Advances
-    /// <paramref name="i"/> past the body and closing fence. Body lines are
-    /// de-indented by the minimum leading-space count across non-blank lines,
-    /// capped at the column where the opener's backticks began — so content
-    /// aligned under the marker (`   code`) is stripped, while under-indented
-    /// content is preserved verbatim (never over-strips meaningful indentation).
+    /// Consume a fenced code block (opener at the current line, <paramref
+    /// name="lang"/> already extracted) that belongs to a list item — either
+    /// sharing the marker line or opened on a following continuation line.
+    /// Advances <paramref name="i"/> past the body and closing fence. Body lines
+    /// are de-indented by the minimum leading-space count across non-blank
+    /// lines, capped at the column where the opener's backticks began — so
+    /// content aligned under the marker (`   code`) is stripped, while
+    /// under-indented content is preserved verbatim (never over-strips
+    /// meaningful indentation).
     /// </summary>
-    private static MdCodeBlock ConsumeListFence(string[] lines, ref int i, System.Text.RegularExpressions.Match lf)
+    private static MdCodeBlock ConsumeFence(string[] lines, ref int i, string lang)
     {
-        var lang = lf.Groups[3].Value;
         int fenceCol = lines[i].IndexOf('`');
         i++; // past the opener line
         var body = new List<string>();

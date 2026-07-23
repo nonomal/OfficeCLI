@@ -603,10 +603,21 @@ public static class MarkdownParser
         }
 
         // `_` must not toggle inside a word (CommonMark: no intraword _ emphasis).
+        // This applies to a delimiter RUN of ANY length — the flanking test uses
+        // the whole contiguous underscore run's boundaries, not just the 1–2
+        // chars a branch consumes, so a multi-char run like the `___` between
+        // words in `__cat___red___fox__` is correctly literal (not a close+open).
+        // '*' is exempt by design (CommonMark allows intraword '*' emphasis).
         bool IntrawordUnderscore(char delim, int delimStart, int delimLen)
-            => delim == '_'
-               && delimStart > 0 && char.IsLetterOrDigit(text[delimStart - 1])
-               && delimStart + delimLen < text.Length && char.IsLetterOrDigit(text[delimStart + delimLen]);
+        {
+            if (delim != '_') return false;
+            int runStart = delimStart;
+            while (runStart > 0 && text[runStart - 1] == '_') runStart--;
+            int runEnd = delimStart + delimLen;
+            while (runEnd < text.Length && text[runEnd] == '_') runEnd++;
+            return runStart > 0 && char.IsLetterOrDigit(text[runStart - 1])
+                && runEnd < text.Length && char.IsLetterOrDigit(text[runEnd]);
+        }
 
         while (pos < text.Length)
         {
@@ -731,9 +742,12 @@ public static class MarkdownParser
                 var d = new string(c, 2);
                 if (bold)
                 {
-                    // Only the SAME delimiter closes: a '**' must not close a
-                    // '__'-opened bold run. A mismatched double marker is literal.
-                    if (c == boldDelim) { Flush(); bold = false; pos += 2; continue; }
+                    // Only the SAME delimiter closes (a '**' must not close a
+                    // '__'-opened run), and an intraword '_' run never toggles —
+                    // so the '___' between words in '__cat___red___fox__' stays
+                    // literal instead of closing the outer bold. Mismatched or
+                    // intraword double markers are literal.
+                    if (c == boldDelim && !IntrawordUnderscore(c, pos, 2)) { Flush(); bold = false; pos += 2; continue; }
                     buf.Append(d); pos += 2; continue;
                 }
                 bool canOpen = pos + 2 < text.Length

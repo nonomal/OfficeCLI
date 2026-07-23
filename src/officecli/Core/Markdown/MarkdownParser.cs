@@ -29,7 +29,10 @@ namespace OfficeCli.Core.Markdown;
 /// </summary>
 public static class MarkdownParser
 {
-    private static readonly Regex HeadingRe = new(@"^(#{1,6})\s+(.*?)\s*#*\s*$");
+    // ATX heading. The optional closing '#' sequence must be preceded by
+    // whitespace (CommonMark §4.3) — otherwise a '#' glued to the last word
+    // ('# C# and D#') was wrongly stripped as a closing run, dropping the char.
+    private static readonly Regex HeadingRe = new(@"^(#{1,6})\s+(.*?)(?:\s+#+\s*)?$");
     // Content is optional so a BARE marker line (`-`, `1.`) is still a list item
     // (an empty one) rather than degrading to a literal paragraph — the common
     // "marker on its own line, code fence on the next" shape. `**bold**` etc.

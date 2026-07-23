@@ -740,6 +740,26 @@ public static class MarkdownParser
                 buf.Append('~'); pos++; continue;
             }
 
+            // A '*'/'_' delimiter RUN of length >= 4 is emitted literally. Our
+            // flat-span IR only models one bold + one italic level, so it can't
+            // represent the nested strong/emphasis that a 4+ run would form
+            // (`____word____`), and — worse — the greedy pair-matcher used to
+            // self-pair the run's own delimiters into an empty span and DROP the
+            // characters (`____word` -> "word", `****` -> ""). Keeping a 4+ run
+            // literal preserves every character (degrade, don't lose text); runs
+            // of 1/2/3 (all real emphasis/strong/bold-italic) are unaffected.
+            if (c == '*' || c == '_')
+            {
+                int runLen = 1;
+                while (pos + runLen < text.Length && text[pos + runLen] == c) runLen++;
+                if (runLen >= 4)
+                {
+                    buf.Append(c, runLen);
+                    pos += runLen;
+                    continue;
+                }
+            }
+
             // strong **...** or __...__
             if ((c == '*' || c == '_') && pos + 1 < text.Length && text[pos + 1] == c)
             {

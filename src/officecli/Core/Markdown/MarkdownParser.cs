@@ -271,11 +271,31 @@ public static class MarkdownParser
            && (i == 0 || s[i - 1] != '~')
            && (i + 2 >= s.Length || s[i + 2] != '~');
 
-    /// <summary>Is there a clean length-2 tilde run at or after <paramref name="from"/>?</summary>
-    private static bool HasLaterTwoTildeRun(string s, int from)
+    /// <summary>
+    /// Is a clean length-2 tilde run reachable from <paramref name="from"/> to
+    /// serve as a strikethrough closer, WITHOUT first crossing a 3+ tilde run?
+    ///
+    /// A blind "does a clean ~~ exist anywhere later" scan cross-matched
+    /// independent regions: in <c>a~~b~~~c and ~~**bold**~~ done</c> it let the
+    /// first (invalid) <c>~~</c> opener claim the SECOND region's OPENING <c>~~</c>
+    /// as its closer, corrupting both regions. A 3+ tilde run (which is itself
+    /// not a valid delimiter) acts as a barrier: an opener may not pair across
+    /// it. So here the first opener sees the <c>~~~</c> barrier before any clean
+    /// closer and stays literal, while the second region pairs on its own.
+    /// </summary>
+    private static bool HasReachableTwoTildeCloser(string s, int from)
     {
-        for (int j = from; j + 1 < s.Length; j++)
-            if (IsTwoTildeRun(s, j)) return true;
+        int i = from;
+        while (i < s.Length)
+        {
+            if (s[i] != '~') { i++; continue; }
+            int j = i;
+            while (j < s.Length && s[j] == '~') j++;
+            int runLen = j - i;
+            if (runLen == 2) return true;  // clean 2-run — a usable closer
+            if (runLen >= 3) return false; // 3+ run barrier — no pairing across it
+            i = j;                         // length-1 run: not a delimiter, skip
+        }
         return false;
     }
 
@@ -402,7 +422,7 @@ public static class MarkdownParser
                     }
                     bool canOpen = pos + 2 < text.Length
                                    && !char.IsWhiteSpace(text[pos + 2])
-                                   && HasLaterTwoTildeRun(text, pos + 2);
+                                   && HasReachableTwoTildeCloser(text, pos + 2);
                     if (canOpen)
                     {
                         Flush(); strike = true; pos += 2; continue;

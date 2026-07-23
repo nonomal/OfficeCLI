@@ -55,7 +55,12 @@ public static class MarkdownParser
     // current item so its body is de-indented exactly like the same-line fence.
     private static readonly Regex ContinuationFenceRe = new(@"^(\s+)`{3,}\s*([\w+-]*)\s*$");
     private static readonly Regex RuleRe = new(@"^\s*([-*_])(\s*\1){2,}\s*$");
-    private static readonly Regex QuoteRe = new(@"^\s*>\s?(.*)$");
+    // Consume EVERY leading '>' marker (each optionally followed by one space),
+    // so a nested quote line ">> inner" strips both markers instead of leaking
+    // the inner '>' into the rendered text. Nesting still flattens to one level
+    // (accepted scope) but no marker character leaks. Single-level ("> x") and
+    // lazy-continuation behavior is unchanged.
+    private static readonly Regex QuoteRe = new(@"^\s*(?:>\s?)+(.*)$");
     // The lookahead requires at least one pipe so a single-column delimiter
     // (`|---|`) is accepted while a bare thematic break (`---`) is not — the
     // rule check runs first, but a pipe-less line must never read as a table

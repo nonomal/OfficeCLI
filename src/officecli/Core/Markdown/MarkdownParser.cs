@@ -733,6 +733,16 @@ public static class MarkdownParser
                 {
                     Flush(); bold = true; pos += 2; continue;
                 }
+                // Can't open bold here. If a single-char emphasis is open, the
+                // FIRST of these two markers closes it (CommonMark closes the
+                // inner run); the second is reprocessed next iteration. Without
+                // this, `\**bold**` — escaped star + a trailing `**` that has no
+                // bold closer — swallowed the whole `**` into the italic run
+                // instead of closing on one star and leaving a literal `*`.
+                if (italic && pos > 0 && !char.IsWhiteSpace(text[pos - 1]) && !IntrawordUnderscore(c, pos, 1))
+                {
+                    Flush(); italic = false; pos++; continue;
+                }
                 buf.Append(d); pos += 2; continue;
             }
 

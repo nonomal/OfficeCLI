@@ -116,8 +116,7 @@ public static class MarkdownParser
             // with the marker leaking as literal cell text. A real table row
             // never starts with a `-`/`*`/`+`/`N.`/`>` marker, so this only
             // reclaims the misfire.
-            if (LooksLikeTableRow(line)
-                && !UnorderedRe.IsMatch(line) && !OrderedRe.IsMatch(line) && !QuoteRe.IsMatch(line)
+            if (LooksLikeTableRow(line) && !IsListOrQuoteMarker(line)
                 && i + 1 < lines.Length && TableDelimRe.IsMatch(lines[i + 1]))
             {
                 var table = ParseTable(lines, ref i);
@@ -151,7 +150,7 @@ public static class MarkdownParser
             // paragraph (GFM) — LLM output routinely omits the blank line
             // before a table; without this check the whole table was swallowed
             // into the paragraph text.
-            bool IsTableStart(int at) => LooksLikeTableRow(lines[at])
+            bool IsTableStart(int at) => LooksLikeTableRow(lines[at]) && !IsListOrQuoteMarker(lines[at])
                 && at + 1 < lines.Length && TableDelimRe.IsMatch(lines[at + 1]);
             var para = new StringBuilder();
             while (i < lines.Length && lines[i].Trim().Length > 0
@@ -302,13 +301,27 @@ public static class MarkdownParser
     // contains a '|' from being misread as a table.
     private static bool LooksLikeTableRow(string line) => line.Contains('|');
 
+    // A line that opens a list item or blockquote. Table detection (both the
+    // block dispatch AND the row-collection loop) must yield to these: after
+    // table-row detection was widened to "any interior pipe", a list item or
+    // quote whose text merely contains a '|' would otherwise be swallowed as a
+    // table row with its marker leaking as cell text. A genuine table row never
+    // starts with a -/*/+/N./> marker.
+    private static bool IsListOrQuoteMarker(string line) =>
+        UnorderedRe.IsMatch(line) || OrderedRe.IsMatch(line) || QuoteRe.IsMatch(line);
+
     private static MdTable ParseTable(string[] lines, ref int i)
     {
         var table = new MdTable();
         foreach (var cell in SplitRow(lines[i])) table.Header.Add(ParseInlines(cell));
         i += 2; // header + delimiter row
 
-        while (i < lines.Length && lines[i].Contains('|'))
+        // Collect body rows, but YIELD as soon as a line is itself a list/quote
+        // marker: an open table otherwise kept swallowing every later "contains
+        // a |" line (e.g. `1. item | pipe`) as a table row, ballooning one table
+        // over content that was really a mix of list items and prose. Mirrors
+        // the block-dispatch yield rule so both entry points agree.
+        while (i < lines.Length && lines[i].Contains('|') && !IsListOrQuoteMarker(lines[i]))
         {
             var row = new List<List<MdSpan>>();
             foreach (var cell in SplitRow(lines[i])) row.Add(ParseInlines(cell));

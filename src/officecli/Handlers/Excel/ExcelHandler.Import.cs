@@ -39,6 +39,15 @@ public partial class ExcelHandler
         var (startCol, startRow) = ParseCellReference(startCell.ToUpperInvariant());
         var startColIdx = ColumnNameToIndex(startCol);
 
+        // Excel's `sep=X` first line is a declaration, not a row. Strip it
+        // whatever the caller chose as the delimiter: left in place it becomes a
+        // junk first row that shifts every real row down one, so hasHeader
+        // freezes and auto-filters the wrong line. Which separator to USE is the
+        // caller's call (an explicit --delimiter still wins) — see
+        // Core.CsvSepDeclaration.
+        if (Core.CsvSepDeclaration.TryRead(csvContent, out _, out var withoutSepLine))
+            csvContent = withoutSepLine;
+
         // Parse CSV
         var rows = ParseCsv(csvContent, delimiter);
         if (rows.Count == 0)

@@ -1123,6 +1123,10 @@ static partial class CommandBuilder
                 {
                     importDelim = ParseImportDelimiter(importDelimRaw);
                 }
+                else if (OfficeCli.Core.CsvSepDeclaration.TryRead(item.Text, out var declaredSep, out _))
+                {
+                    importDelim = declaredSep;
+                }
                 else if (props.TryGetValue("format", out var importFmt) && !string.IsNullOrEmpty(importFmt))
                 {
                     importDelim = importFmt.ToLowerInvariant() switch
@@ -1141,7 +1145,10 @@ static partial class CommandBuilder
                         ? importSc2 : "A1";
                 var importDecimal = ParseImportDecimal(
                     props.TryGetValue("decimal", out var importDec) ? importDec : null, importDelim);
-                if (LikelyWrongDelimiterWarning(item.Text, importDelim) is { } importWarn)
+                // Judge the first DATA line, not a `sep=X` declaration.
+                var importWarnText = OfficeCli.Core.CsvSepDeclaration.TryRead(item.Text, out _, out var afterDeclB)
+                    ? afterDeclB : item.Text;
+                if (LikelyWrongDelimiterWarning(importWarnText, importDelim) is { } importWarn)
                     Console.Error.WriteLine(importWarn);
                 return importXl.Import(importParent, item.Text, importDelim, importHeader, importStart, importDecimal);
             }

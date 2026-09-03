@@ -93,12 +93,20 @@ static partial class CommandBuilder
                 };
             }
 
-            // Determine delimiter: --delimiter > --format flag > file extension > default csv
+            // Determine delimiter: --delimiter > the file's own `sep=X` line >
+            // --format flag > file extension > default csv. The declaration
+            // outranks --format because it is a statement about THIS file, but
+            // an explicit --delimiter still wins over both.
             char delimiter = ',';
             if (!string.IsNullOrEmpty(delimiterOpt))
             {
                 delimiter = ParseImportDelimiter(delimiterOpt);
             }
+            else if (Core.CsvSepDeclaration.TryRead(csvContent, out var declaredSep, out _))
+            {
+                delimiter = declaredSep;
+            }
+            // (the declaration is stripped from the data by ExcelHandler.Import)
             else if (!string.IsNullOrEmpty(format))
             {
                 delimiter = format.ToLowerInvariant() switch
@@ -120,7 +128,12 @@ static partial class CommandBuilder
             }
 
             var decimalSeparator = ParseImportDecimal(decimalOpt, delimiter);
-            if (LikelyWrongDelimiterWarning(csvContent, delimiter) is { } delimWarn)
+            // Judge the first DATA line: a `sep=X` declaration always contains
+            // its own separator, so leaving it in made the warning describe the
+            // declaration and then advise a delimiter the user had just chosen.
+            var contentForWarning = Core.CsvSepDeclaration.TryRead(csvContent, out _, out var afterDecl)
+                ? afterDecl : csvContent;
+            if (LikelyWrongDelimiterWarning(contentForWarning, delimiter) is { } delimWarn)
                 Console.Error.WriteLine(delimWarn);
 
             // Release any running resident's file lock before direct-open (import bypasses resident)

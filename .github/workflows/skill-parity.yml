@@ -2,15 +2,22 @@ name: Skill parity
 
 # Root SKILL.md is the file the public URL serves
 # (https://d.officecli.ai/SKILL.md, raw GitHub URL) and is what
-# `curl ... | bash` consumers fetch. skills/officecli/SKILL.md is a
-# symlink to it — the spec-conforming location that `gh skill install`
-# and `npx skills add` discover, and what the binary embeds.
+# `curl ... | bash` consumers fetch. skills/officecli/SKILL.md is a real
+# copy of it — the spec-conforming location that `gh skill install` and
+# `npx skills add` discover, and what the binary embeds.
 #
-# On macOS / Linux the symlink resolves transparently and this diff
-# always passes. The check exists for the Windows case: git on Windows
-# without core.symlinks=true checks out symlinks as plain text files
-# containing the link target path (e.g. literal "../../SKILL.md"), so
-# diff catches that corruption before it ships in a release build.
+# Two real files can drift, and this diff is what stops them. Keeping them
+# in sync with a symlink instead (80458d5e) looked stronger and was not:
+# raw.githubusercontent.com serves a symlink's BLOB, i.e. the 14-byte
+# target path, so every HTTP consumer of skills/officecli/SKILL.md got
+# "../../SKILL.md" instead of the skill — on every platform. Git also
+# checks symlinks out as that same plain text file wherever
+# core.symlinks=false, which is the Git for Windows default (issue #358).
+#
+# This job runs on Linux, where a symlink would have resolved, so it could
+# never have caught either case: it was comparing the root file with
+# itself and passing unconditionally. Against two real files it does the
+# one job it claims to.
 
 on:
   push:
